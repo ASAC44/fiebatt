@@ -22,7 +22,7 @@ router = APIRouter(tags=["remix"])
 
 
 MIN_SEG_LEN = 2.0
-MAX_SEG_LEN = 5.0
+MAX_SEG_LEN = 15.0
 MAX_BATCH_EDITS = 10
 
 

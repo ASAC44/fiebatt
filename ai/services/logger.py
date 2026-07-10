@@ -32,6 +32,7 @@ COST_ESTIMATES = {
     "gemini:score_variant": 0.005,
     "gemini:narration_script": 0.002,
     "veo:generate_variant": 0.05,
+    "happyhorse:generate_variant": 0.03,
     "elevenlabs:narrate": 0.01,
     "gpu:sam_segment": 0.0,
     "gpu:clip_embed": 0.0,

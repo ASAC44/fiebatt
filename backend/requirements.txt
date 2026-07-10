@@ -12,6 +12,7 @@ httpx>=0.28.1
 boto3==1.35.60
 botocore==1.35.60
 google-genai==1.73.1
+openai>=1.68.0
 python-dotenv==1.2.2
 opencv-python-headless==4.10.0.84
 PyJWT[crypto]==2.9.0

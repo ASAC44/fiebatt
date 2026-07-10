@@ -78,6 +78,7 @@ async def get_timeline(
                 source=it.source,
                 url=storage.normalize_url_like(it.url, fallback=it.url),
                 audio=it.audio,
+                segment_id=it.id,
             )
             for it in items
         ],

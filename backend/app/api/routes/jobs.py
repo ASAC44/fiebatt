@@ -88,13 +88,12 @@ async def stream_job_events(
             if await request.is_disconnected():
                 return
             yield f"data: {json.dumps(event)}\n\n"
-            last_send = asyncio.get_event_loop().time()
             if event.get("terminal"):
                 return
             now = asyncio.get_event_loop().time()
             if now - last_send > 15:
                 yield ": keepalive\n\n"
-                last_send = now
+            last_send = now
 
     return StreamingResponse(
         _iter_sse(),

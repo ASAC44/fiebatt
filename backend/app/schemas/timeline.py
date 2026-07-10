@@ -16,6 +16,7 @@ class TimelineSegment(BaseModel):
     source: SegmentSource
     url: str
     audio: bool
+    segment_id: str | None = None
 
 
 # ─── persisted EDL (edit decision list) ─────────────────────────────────

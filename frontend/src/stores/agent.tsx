@@ -55,11 +55,9 @@ export interface VariantPreview {
 
 // ── prompt-rewrite layer payload ─────────────────────────────────────
 //
-// Before Veo runs, Gemini takes the user's raw one-liner and turns it
-// into a structured, Veo-ready brief: intent, tone, conditioning
-// strategy, and a 40–80 word prompt. The VibeStudio chat surfaces this
-// so users can actually SEE the expansion instead of just trusting
-// that "make him jump" became 60 words of cinematography.
+// The model takes the user's raw one-liner and turns it into a structured
+// brief: intent, tone, conditioning strategy, and a video generation prompt.
+// The VibeStudio chat surfaces this so users can actually SEE the expansion.
 export interface PromptPlan {
   description: string | null;
   intent: string | null;
@@ -67,7 +65,8 @@ export interface PromptPlan {
   tone: string | null;
   color_grading: string | null;
   region_emphasis: string | null;
-  prompt_for_veo: string | null;
+  prompt: string | null;
+  prompt_for_veo: string | null;  // backward compat
 }
 
 export type AgentMessage =
@@ -92,7 +91,7 @@ export type AgentMessage =
   | {
       // prompt-rewrite layer card. Starts out "rewriting…" when the
       // backend emits ``prompt_plan_started`` and fills in once
-      // ``prompt_plan`` lands with Gemini's Veo-ready prompt.
+      // ``prompt_plan`` lands with the structured generation brief.
       type: "prompt_plan";
       jobId: string;
       userPrompt: string;
@@ -140,14 +139,14 @@ export type AgentAction =
       userPrompt: string;
     }
   | {
-      // Fill in the card with the final rewritten Veo-ready prompt.
+      // Fill in the card with the final rewritten prompt.
       type: "prompt_plan_ready";
       jobId: string;
       plan: PromptPlan;
     }
   | {
-      // Vendor dispatch marker — "sending this to Veo now". Attaches
-      // the strategy/conditioning note onto an existing plan card.
+      // Vendor dispatch marker — attaches the strategy/conditioning
+      // note onto an existing plan card.
       type: "prompt_plan_dispatched";
       jobId: string;
       vendor: string;

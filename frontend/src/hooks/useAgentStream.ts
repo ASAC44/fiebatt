@@ -80,14 +80,14 @@ export function useAgentStream(projectId?: string | null) {
           // Drop transient UI-only rows (errors from older sessions, stale
           // tool_call cards whose jobs no longer exist, and suggestion
           // cards tied to dead jobs). These used to leak through and
-          // show a red "veo is rate-limited" card the instant the user
+          // show a red "generation failed" card the instant the user
           // reopened the reel, even though the current backend is healthy.
           const persistable = hydrated.filter((m) => {
             if (m.type === "error") return false;
             if (m.type === "tool_call" && m.status === "error") return false;
             if (m.type === "suggestion") return false;
             // prompt_plan cards are tied to a live job_id; there's no
-            // point re-showing the "veo-ready rewrite" for a job the
+            // point re-showing the "prompt rewrite" for a job the
             // user already accepted/dismissed sessions ago.
             if (m.type === "prompt_plan") return false;
             return true;
@@ -490,13 +490,10 @@ function handleSSEEvent(
       break;
     }
 
-    case "veo_dispatch": {
+    case "gen_dispatch": {
       const jobId = (data.job_id as string | undefined) ?? "";
       if (!jobId) break;
-      // For now we label this as "veo" — the only image-video vendor
-      // iris ships against. When/if we add runway etc. this can grow
-      // into an actual backend-provided tag.
-      dispatch({ type: "prompt_plan_dispatched", jobId, vendor: "veo 3.1" });
+      dispatch({ type: "prompt_plan_dispatched", jobId, vendor: "happyhorse" });
       break;
     }
 
@@ -505,7 +502,7 @@ function handleSSEEvent(
       // eslint-disable-next-line no-console
       console.warn(`[agent sse] generation_failed job=${data.job_id}: ${rawErr}`);
       const niceErr = /rate.?limit|quota|429|RESOURCE_EXHAUSTED/i.test(rawErr)
-        ? "veo is rate-limited right now (gemini quota exhausted). try again in a minute or swap to the stub ai provider."
+        ? "generation is rate-limited right now. try again in a minute or swap to the stub ai provider."
         : `generation failed: ${rawErr}`;
       dispatch({ type: "add_error", message: niceErr });
       break;

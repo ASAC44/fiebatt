@@ -12,22 +12,21 @@ imports. The backend expects:
 
 Two modes:
   - USE_AI_STUBS=true  (default) -> route to _stubs.py, no API keys needed
-  - USE_AI_STUBS=false          -> adapt Stephen's real modules (Veo + Gemini
-                                   + ElevenLabs) to the surface above. note that
-                                   `runway.generate` remains the stable adapter
-                                   name even though the live video provider is Veo
-                                   via `GEMINI_API_KEY`.
+  - USE_AI_STUBS=false          -> adapt the real modules (Qwen/DashScope for VLM,
+                                   HappyHorse/DashScope for video generation,
+                                   ElevenLabs for TTS) to the surface above.
 
 Name mapping from real modules:
-  gemini.create_edit_plan             -> gemini.plan_variants
-  gemini.score_variant                -> gemini.score_variant   (arg order adapted)
-  gemini.identify_entity              -> gemini.identify_entity (attr rename)
-  gemini.search_keyframes_for_entity  -> gemini.find_entity_in_keyframes
-  veo.generate_variant                -> runway.generate
-  elevenlabs.generate_narration       -> elevenlabs.narrate    (path -> bytes)
+  qwen.create_edit_plan              -> gemini.plan_variants
+  qwen.score_variant                -> gemini.score_variant   (arg order adapted)
+  qwen.identify_entity              -> gemini.identify_entity (attr rename)
+  qwen.search_keyframes_for_entity -> gemini.find_entity_in_keyframes
+  happyhorse.generate_variant       -> runway.generate
+  elevenlabs.generate_narration     -> elevenlabs.narrate    (path -> bytes)
 """
 from __future__ import annotations
 
+import json
 import types as _types
 from pathlib import Path
 
@@ -60,30 +59,40 @@ if _USE_AI_STUBS:
     entity_tracker = _stubs.entity_tracker
 
 else:
-    # real impls live in sibling modules; importing them requires GEMINI_API_KEY
     _real_settings = _get_ai_settings()
     if not _real_settings.real_ai_ready:
         raise RuntimeError(
-            "USE_AI_STUBS=false requires GEMINI_API_KEY for the live gemini/veo "
+            "USE_AI_STUBS=false requires DASHSCOPE_API_KEY for the live gemini/happyhorse "
             "provider path. leave USE_AI_STUBS=true for local stub mode."
         )
 
     from app.services import storage
-    from ai.services import gemini as _gemini_real
-    from ai.services import veo as _veo_real
+    from ai.services import qwen as _gemini_real
+    from ai.services import happyhorse as _happyhorse
     from ai.services import elevenlabs as _el_real
     from ai.services import entity_tracker as _et_real
 
     # ------------------------ gemini adapter ------------------------
 
+    # simple in-memory plan cache: keyed on (prompt, bbox_string), max 32 entries
+    _plan_cache: dict[str, list[dict]] = {}
+    _plan_cache_order: list[str] = []
+    _PLAN_CACHE_MAX = 32
+
     async def _plan_variants(prompt: str, bbox: dict, frame_path: str) -> list[dict]:
+        # only cache text-only plans (frame_path makes every call unique anyway)
+        cache_key = f"{prompt}|{json.dumps(bbox, sort_keys=True)}"
+        cached = _plan_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         plan = await _gemini_real.create_edit_plan(
             prompt, bbox, frame_path=frame_path
         )
         variants = plan.get("variants") if isinstance(plan, dict) else None
         if not variants:
             return []
-        # Stephen's schema uses prompt_for_veo; my stubs/workers use prompt_for_runway.
+        # The prompt schema uses prompt_for_veo; workers use prompt_for_runway.
         # Normalize so downstream code always finds prompt_for_runway, and
         # give every variant a conditioning_strategy default so the worker
         # never has to second-guess a missing field.
@@ -95,6 +104,14 @@ else:
                 # always use first_frame — text_only produces garbage output
                 # because veo has no visual context for the scene
                 v["conditioning_strategy"] = "first_frame"
+
+        # cache the result for repeated prompts (propagation reuses same prompt)
+        _plan_cache[cache_key] = variants
+        _plan_cache_order.append(cache_key)
+        if len(_plan_cache_order) > _PLAN_CACHE_MAX:
+            oldest = _plan_cache_order.pop(0)
+            _plan_cache.pop(oldest, None)
+
         return variants
 
     async def _score_variant(
@@ -145,7 +162,7 @@ else:
         find_entity_in_keyframes=_find_entity_in_keyframes,
     )
 
-    # ------------------------ runway (veo) adapter ------------------------
+    # ------------------------ runway (happyhorse) adapter ------------------------
 
     async def _runway_generate(
         clip_path: str,
@@ -153,36 +170,38 @@ else:
         style_ref: str | None = None,
         frame_path: str | None = None,
         on_tick=None,
+        duration: int = 5,
+        resolution: str = "720P",
     ) -> dict:
-        """Drive one Veo generation.
+        """Drive one HappyHorse generation.
 
-        ``clip_path`` is the source MP4 slice — we do NOT pass it to Veo
-        (Veo's image conditioning slot expects a still frame, and handing
-        it an mp4 silently skips conditioning, which is why earlier
-        variants looked identical to the source).
+        ``clip_path`` is the source MP4 slice — not passed to HappyHorse
+        (its image conditioning slot expects a still frame).
 
-        ``frame_path`` is a still image (png/jpg) that Veo uses as the
-        opening frame. Callers should pass the FULL reference keyframe
-        (not a cropped bbox), otherwise Veo will generate a video of
-        just the cropped region instead of the whole scene. The bbox
-        region is expressed through the Gemini-authored prose prompt.
-        Pass ``None`` to skip image conditioning entirely (useful for
-        'remove/replace' intents where the opening frame would anchor
-        the subject Veo is supposed to regenerate).
+        ``frame_path`` is a still image (png/jpg) that HappyHorse uses as the
+        opening frame. Pass ``None`` for text-only generation.
+
+        ``duration`` is passed to HappyHorse (3-15s range, clamped internally).
+
+        ``resolution`` — "720P" or "480P". 480P is ~2x faster for previews.
         """
-        prompt_text = plan.get("prompt_for_runway") or plan.get("prompt_for_veo") or plan.get("description", "")
+        prompt_text = plan.get("prompt_for_runway") or plan.get("prompt_for_veo") or plan.get("prompt") or plan.get("description", "")
         conditioning = frame_path or style_ref
         if style_ref:
-            out_path = await _veo_real.generate_propagation_variant(
-                prompt_for_veo=prompt_text,
+            out_path = await _happyhorse.generate_propagation_variant(
+                prompt=prompt_text,
                 style_reference_path=style_ref,
                 reference_frame_path=frame_path,
+                duration=duration,
+                resolution=resolution,
             )
         else:
-            out_path = await _veo_real.generate_variant(
-                prompt_for_veo=prompt_text,
+            out_path = await _happyhorse.generate_variant(
+                prompt=prompt_text,
                 reference_frame_path=conditioning,
                 on_tick=on_tick,
+                duration=duration,
+                resolution=resolution,
             )
         published_url = await storage.publish(Path(out_path), content_type="video/mp4")
         return {

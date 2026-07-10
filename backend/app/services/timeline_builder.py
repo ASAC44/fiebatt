@@ -25,6 +25,7 @@ Source = Literal["original", "generated"]
 
 @dataclass(slots=True, frozen=True)
 class TimelineItem:
+    id: str | None
     start_ts: float
     end_ts: float
     source: Source
@@ -38,12 +39,11 @@ class TimelineItem:
 
 async def build_timeline(db: AsyncSession, proj: Project) -> list[TimelineItem]:
     """Walk the Segment table for a project and produce the ordered span list."""
-    generated = (
+    rows = (
         await db.execute(
             select(Segment)
             .where(
                 Segment.project_id == proj.id,
-                Segment.source == "generated",
                 Segment.active == True,  # noqa: E712
             )
             .order_by(Segment.start_ts)
@@ -52,24 +52,24 @@ async def build_timeline(db: AsyncSession, proj: Project) -> list[TimelineItem]:
 
     items: list[TimelineItem] = []
     cursor = 0.0
-    for seg in generated:
+    for seg in rows:
         if seg.start_ts > cursor + 1e-3:
             items.append(
-                TimelineItem(cursor, seg.start_ts, "original", proj.video_url, True)
+                TimelineItem(None, cursor, seg.start_ts, "original", proj.video_url, True)
             )
         items.append(
-            TimelineItem(seg.start_ts, seg.end_ts, "generated", seg.url, False)
+            TimelineItem(seg.id, seg.start_ts, seg.end_ts, seg.source, seg.url, seg.source == "original")
         )
         cursor = seg.end_ts
 
     if cursor < proj.duration - 1e-3:
         items.append(
-            TimelineItem(cursor, proj.duration, "original", proj.video_url, True)
+            TimelineItem(None, cursor, proj.duration, "original", proj.video_url, True)
         )
 
     if not items:
         items.append(
-            TimelineItem(0.0, proj.duration, "original", proj.video_url, True)
+            TimelineItem(None, 0.0, proj.duration, "original", proj.video_url, True)
         )
 
     return items

@@ -5,6 +5,7 @@ from app.config.settings import get_settings
 from app.db.session import get_db
 from app.deps import get_session
 from app.models.project import Project
+from app.models.segment import Segment
 from app.models.session import Session as SessionModel
 from app.schemas.upload import UploadResponse
 from app.services import ffmpeg, storage
@@ -44,6 +45,18 @@ async def upload(
         height=info["height"],
     )
     db.add(project)
+    await db.flush()
+
+    segment = Segment(
+        project_id=project.id,
+        start_ts=0.0,
+        end_ts=info["duration"],
+        source="original",
+        url=url,
+        order_index=0,
+        active=True,
+    )
+    db.add(segment)
     await db.commit()
     await db.refresh(project)
 

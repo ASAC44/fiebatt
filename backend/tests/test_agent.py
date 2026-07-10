@@ -21,7 +21,7 @@ os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./test_agent.db"
 from app.main import app  # noqa: E402
 from app.db.init import create_all  # noqa: E402
 from app.workers.runner import JobRunner  # noqa: E402
-from app.api.routes.agent import sse_event, _build_contents  # noqa: E402
+from app.api.routes.agent import sse_event, _build_messages  # noqa: E402
 from app.services.agent_tools import execute_tool  # noqa: E402
 from app.db.session import get_db  # noqa: E402
 
@@ -150,50 +150,46 @@ class TestSseEvent:
 # ---- _build_contents tests ----
 
 
-class TestBuildContents:
-    """Test the _build_contents() helper."""
+class TestBuildMessages:
+    """Test the _build_messages() helper."""
 
     def test_empty_history_with_message(self):
-        contents = _build_contents(None, "Hello agent")
-        assert len(contents) == 1
-        assert contents[0].role == "user"
-        assert contents[0].parts[0].text == "Hello agent"
+        messages = _build_messages(None, "Hello agent")
+        assert len(messages) == 1
+        assert messages[0]["role"] == "user"
+        assert messages[0]["content"] == "Hello agent"
 
     def test_empty_list_history(self):
-        contents = _build_contents([], "Hello agent")
-        assert len(contents) == 1
-        assert contents[0].role == "user"
+        messages = _build_messages([], "Hello agent")
+        assert len(messages) == 1
+        assert messages[0]["role"] == "user"
 
     def test_history_with_user_and_model(self):
         history = [
             {"role": "user", "text": "Hi"},
             {"role": "model", "text": "Hello! How can I help?"},
         ]
-        contents = _build_contents(history, "Edit the car")
-        assert len(contents) == 3
-        assert contents[0].role == "user"
-        assert contents[0].parts[0].text == "Hi"
-        assert contents[1].role == "model"
-        assert contents[1].parts[0].text == "Hello! How can I help?"
-        assert contents[2].role == "user"
-        assert contents[2].parts[0].text == "Edit the car"
+        messages = _build_messages(history, "Edit the car")
+        assert len(messages) == 3
+        assert messages[0]["role"] == "user"
+        assert messages[0]["content"] == "Hi"
+        assert messages[1]["role"] == "assistant"
+        assert messages[1]["content"] == "Hello! How can I help?"
+        assert messages[2]["role"] == "user"
+        assert messages[2]["content"] == "Edit the car"
 
-    def test_invalid_role_defaults_to_user(self):
+    def test_model_role_maps_to_assistant(self):
         history = [
-            {"role": "system", "text": "This is invalid"},
-            {"role": "assistant", "text": "Also invalid"},
+            {"role": "model", "text": "I am a model"},
         ]
-        contents = _build_contents(history, "message")
-        assert len(contents) == 3
-        # invalid roles should default to "user"
-        assert contents[0].role == "user"
-        assert contents[1].role == "user"
+        messages = _build_messages(history, "ok")
+        assert messages[0]["role"] == "assistant"
 
-    def test_missing_text_defaults_to_empty(self):
+    def test_missing_content_defaults_to_empty(self):
         history = [{"role": "user"}]
-        contents = _build_contents(history, "hello")
-        assert len(contents) == 2
-        assert contents[0].parts[0].text == ""
+        messages = _build_messages(history, "hello")
+        assert len(messages) == 2
+        assert messages[0]["content"] == ""
 
 
 # ---- agent chat endpoint tests ----
@@ -433,7 +429,7 @@ async def test_tool_generate_edit_segment_too_short(client: AsyncClient, db_sess
     upload = await upload_fixture_video(client)
     project_id = upload["project_id"]
 
-    with pytest.raises(ValueError, match="segment length must be 2-5s"):
+    with pytest.raises(ValueError, match="segment length must be 2-15s"):
         await execute_tool(
             "generate_edit",
             {
@@ -454,13 +450,13 @@ async def test_tool_generate_edit_segment_too_long(client: AsyncClient, db_sessi
     upload = await upload_fixture_video(client)
     project_id = upload["project_id"]
 
-    with pytest.raises(ValueError, match="segment length must be 2-5s"):
+    with pytest.raises(ValueError, match="segment length must be 2-15s"):
         await execute_tool(
             "generate_edit",
             {
                 "project_id": project_id,
                 "start_ts": 0.0,
-                "end_ts": 6.0,
+                "end_ts": 16.0,
                 "bbox": {"x": 0.2, "y": 0.2, "w": 0.3, "h": 0.3},
                 "prompt": "make it blue",
             },

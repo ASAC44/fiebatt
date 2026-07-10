@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     storage_path: Path = Path("./storage")
 
     gemini_api_key: str = ""
+    dashscope_api_key: str = ""
     # kept for older env shapes; the current real video provider path uses
     # Gemini/Veo under the `runway.generate(...)` adapter surface.
     runway_api_key: str = ""

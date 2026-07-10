@@ -13,8 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai.services import gemini
-from ai.services.ffmpeg import extract_frame, crop_bbox_from_frame
 from ai.services.sam import bbox_to_mask, is_available as sam_available
+from app.services import ffmpeg as async_ffmpeg
 from app.config.settings import get_settings
 from app.db.session import get_db
 from app.deps import get_session
@@ -86,7 +86,7 @@ async def identify(
 
     frame_path = str(frames_dir / f"{proj.id}_{body.frame_ts:.3f}.png")
     try:
-        extract_frame(proj.video_path, body.frame_ts, frame_path)
+        await async_ffmpeg.extract_frame(proj.video_path, body.frame_ts, frame_path)
     except Exception as exc:
         log.exception("ffmpeg frame extraction failed for project %s at ts=%.3f", proj.id, body.frame_ts)
         raise HTTPException(status_code=500, detail=f"frame extraction failed: {exc}") from exc
@@ -94,7 +94,7 @@ async def identify(
     # ---- crop bbox region ----
     bbox_dict = body.bbox.model_dump()
     try:
-        crop_path = crop_bbox_from_frame(frame_path, bbox_dict)
+        crop_path = await async_ffmpeg.crop_bbox_from_frame(frame_path, bbox_dict)
     except Exception as exc:
         log.exception("bbox crop failed for project %s", proj.id)
         raise HTTPException(status_code=500, detail=f"bbox crop failed: {exc}") from exc

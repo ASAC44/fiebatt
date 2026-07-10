@@ -111,14 +111,21 @@ async def run(job_id: str) -> None:
             j.payload = payload2
         await db.commit()
 
-    # sample keyframes
+    # sample keyframes (cached by project — avoids re-extraction on re-edit)
     try:
-        pattern, _ = storage.new_path("keyframes", "jpg")
-        # ffmpeg wants a %04d pattern; rewrite the name
-        pattern = pattern.with_name(f"{pattern.stem}_%04d.jpg")
-        keyframes = await ffmpeg.extract_keyframes(
-            proj.video_path, KEYFRAMES_PER_SECOND, pattern
-        )
+        from app.config.settings import get_settings as _get_bs
+
+        cache_dir = Path(_get_bs().storage_path) / "keyframes" / proj.id
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cached_pattern = cache_dir / "frame_%04d.jpg"
+        existing = sorted(cache_dir.glob("frame_*.jpg"))
+        if existing:
+            keyframes = existing
+            log.info("reusing %d cached keyframes for project %s", len(existing), proj.id)
+        else:
+            keyframes = await ffmpeg.extract_keyframes(
+                proj.video_path, KEYFRAMES_PER_SECOND, cached_pattern
+            )
         keyframe_urls = []
         for p in keyframes:
             keyframe_urls.append(await storage.publish(p, content_type="image/jpeg"))

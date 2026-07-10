@@ -73,7 +73,7 @@ async def _run_one(
 
     try:
         variant = await ai.runway.generate(
-            str(clip_path), plan, style_ref=source_variant_url
+            str(clip_path), plan, style_ref=source_variant_url, resolution="480P"
         )
     except Exception as e:
         log.exception("propagate runway failed")
@@ -123,7 +123,6 @@ async def _run_one(
                     out=stitched_path,
                 )
                 stitched_url = await storage.publish(stitched_path, content_type="video/mp4")
-                live_proj.video_path = str(stitched_path)
                 live_proj.video_url = stitched_url
 
                 seg = Segment(

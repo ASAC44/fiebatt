@@ -90,7 +90,7 @@ async def extract_clip(
     vf: str | None = None,
     with_audio: bool = True,
 ) -> Path:
-    """Cut [start, end] from src. Re-encodes for frame-accurate cuts on 2-5s segments."""
+    """Cut [start, end] from src. Re-encodes for frame-accurate cuts on short segments."""
     out = Path(out)
     cmd = [
         "ffmpeg", "-y",
@@ -247,12 +247,39 @@ async def concat_mp4s(paths: Iterable[str | Path], out: str | Path) -> Path:
     return out
 
 
+async def _probe_duration(src: str | Path) -> float:
+    """Return the duration (in seconds) of a media file via ffprobe."""
+    import json
+    cmd = [
+        "ffprobe", "-v", "quiet",
+        "-print_format", "json",
+        "-show_format",
+        str(src),
+    ]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    data = json.loads(stdout)
+    return float(data["format"]["duration"])
+
+
+_SAFE_END_EPSILON = 0.05  # keep at least 50ms away from the end
+
+
 async def extract_frame(src: str | Path, ts: float, out: str | Path) -> Path:
-    """Grab a single frame at timestamp `ts` as a JPEG."""
+    """Grab a single frame at timestamp `ts` as a JPEG.
+
+    Clamps *ts* to a safe distance from the end of the video to avoid
+    ffmpeg encoder failures on the final partial GOP.
+    """
     out = Path(out)
+    duration = await _probe_duration(src)
+    safe_ts = min(max(ts, 0.0), duration - _SAFE_END_EPSILON)
+
     cmd = [
         "ffmpeg", "-y",
-        "-ss", f"{ts:.3f}",
+        "-ss", f"{safe_ts:.3f}",
         "-i", str(src),
         "-frames:v", "1",
         "-q:v", "2",

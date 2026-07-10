@@ -13,6 +13,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     use_ai_stubs: bool = Field(True, alias="USE_AI_STUBS")
     gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
+    dashscope_api_key: str = Field("", alias="DASHSCOPE_API_KEY")
     elevenlabs_api_key: str = Field("", alias="ELEVENLABS_API_KEY")
     storage_path: str = Field("./storage", alias="STORAGE_PATH")
     gpu_worker_url: str = Field("http://localhost:8001", alias="GPU_WORKER_URL")
@@ -25,7 +26,7 @@ class Settings(BaseSettings):
 
     @property
     def real_ai_ready(self) -> bool:
-        return bool(self.gemini_api_key.strip())
+        return bool(self.dashscope_api_key.strip() or self.gemini_api_key.strip())
 
     def require_real_ai(self, *, provider: str) -> None:
         if self.use_ai_stubs:
@@ -35,7 +36,7 @@ class Settings(BaseSettings):
             )
         if not self.real_ai_ready:
             raise RuntimeError(
-                f"{provider} requires GEMINI_API_KEY when USE_AI_STUBS=false."
+                f"{provider} requires DASHSCOPE_API_KEY or GEMINI_API_KEY when USE_AI_STUBS=false."
             )
 
 

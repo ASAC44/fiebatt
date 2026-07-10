@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import tempfile
 from pathlib import Path
 from typing import Literal
@@ -103,10 +102,11 @@ class BoundaryAnalysis(BaseModel):
 
 
 def _get_client() -> genai.Client:
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
+    from app.config.settings import get_settings
+    settings = get_settings()
+    if not settings.gemini_api_key:
         raise HTTPException(status_code=503, detail="GEMINI_API_KEY is not configured")
-    return genai.Client(api_key=api_key)
+    return genai.Client(api_key=settings.gemini_api_key)
 
 
 def _image_part(path: Path) -> types.Part:

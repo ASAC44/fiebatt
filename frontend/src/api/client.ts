@@ -342,7 +342,7 @@ export function getMask(
   });
 }
 
-/** identify the object inside a bbox region — gemini vision + optional SAM mask */
+/** identify the object inside a bbox region — Qwen vision + optional SAM mask */
 export function identifyRegion(
   projectId: string,
   frameTs: number,
@@ -407,7 +407,7 @@ export type JobStreamEvent = {
 };
 
 /**
- * Subscribe to a job's event stream (structured LLM/Veo/ffmpeg logs).
+ * Subscribe to a job's event stream (structured LLM/gen/ffmpeg logs).
  * Uses fetch + ReadableStream so we can attach auth headers EventSource
  * can't. Returns an `AbortController` — call `.abort()` to disconnect.
  */

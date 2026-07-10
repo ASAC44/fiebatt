@@ -29,6 +29,13 @@ export const supabase: SupabaseClient = createClient(
   },
 );
 
+export function isSupabaseConfigured(): boolean {
+  if (!url || !anonKey) return false;
+  if (url.includes("YOUR_") || anonKey.includes("YOUR_")) return false;
+  if (url === "https://missing.supabase.co" || anonKey === "missing") return false;
+  return true;
+}
+
 // where google bounces users back to. defaults to the current origin so it
 // just works on localhost AND on prod without code changes.
 export function getOAuthRedirect(): string {

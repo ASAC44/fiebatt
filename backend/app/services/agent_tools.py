@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config.settings import get_settings as _get_backend_settings
 from app.models.job import Job, Variant
 from app.models.project import Project
 from app.models.segment import Segment
@@ -30,7 +31,7 @@ from google.genai import types
 log = logging.getLogger("iris.agent_tools")
 
 MIN_SEG_LEN = 2.0
-MAX_SEG_LEN = 5.0
+MAX_SEG_LEN = 15.0
 MAX_BATCH_EDITS = 10
 GEMINI_MODEL = "gemini-2.5-flash"
 FRAME_COUNT = 5
@@ -83,9 +84,17 @@ async def _get_project_or_error(
     project_id: str,
     session_id: str,
 ) -> Project:
-    """Fetch a project and verify session ownership."""
+    """Fetch a project and verify session ownership.
+
+    In local dev mode (no supabase configured) the session check is
+    relaxed so projects created by any session remain accessible.
+    """
+    bs = _get_backend_settings()
+    dev_mode = not bool(bs.supabase_url.strip() or bs.supabase_jwt_secret.strip())
     proj = await db.get(Project, project_id)
-    if proj is None or proj.session_id != session_id:
+    if proj is None:
+        raise ValueError(f"project not found or access denied: {project_id}")
+    if not dev_mode and proj.session_id != session_id:
         raise ValueError(f"project not found or access denied: {project_id}")
     return proj
 
@@ -264,10 +273,11 @@ async def _deactivate_overlapping_generated_segments(
 
 
 def _get_gemini_client() -> genai.Client:
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
+    from app.config.settings import get_settings
+    settings = get_settings()
+    if not settings.gemini_api_key:
         raise ValueError("GEMINI_API_KEY is not configured")
-    return genai.Client(api_key=api_key)
+    return genai.Client(api_key=settings.gemini_api_key)
 
 
 def _image_part(path: Path) -> types.Part:
@@ -442,7 +452,6 @@ async def _identify_region(
     Mirrors the logic of POST /api/identify.
     """
     from ai.services import gemini
-    from ai.services.ffmpeg import extract_frame, crop_bbox_from_frame
     from app.config.settings import get_settings
 
     project_id: str = args["project_id"]
@@ -463,12 +472,12 @@ async def _identify_region(
 
     frame_path = str(frames_dir / f"{proj.id}_{frame_ts:.3f}.png")
     try:
-        extract_frame(proj.video_path, frame_ts, frame_path)
+        await ffmpeg.extract_frame(proj.video_path, frame_ts, frame_path)
     except Exception as exc:
         raise ValueError(f"frame extraction failed: {exc}") from exc
 
     try:
-        crop_path = crop_bbox_from_frame(frame_path, bbox)
+        crop_path = await ffmpeg.crop_bbox_from_frame(frame_path, bbox)
     except Exception as exc:
         raise ValueError(f"bbox crop failed: {exc}") from exc
 
@@ -512,8 +521,8 @@ async def _generate_edit(
     proj = await _get_project_or_error(db, project_id, session_id)
 
     length = end_ts - start_ts
-    if length < 2.0 or length > 5.0:
-        raise ValueError(f"segment length must be 2-5s (got {length:.2f}s)")
+    if length < MIN_SEG_LEN or length > MAX_SEG_LEN:
+        raise ValueError(f"segment length must be {MIN_SEG_LEN}-{MAX_SEG_LEN}s (got {length:.2f}s)")
     if end_ts > proj.duration + 1e-3:
         raise ValueError("end_ts past project duration")
     if bbox.get("x", 0) + bbox.get("w", 0) > 1.0001 or bbox.get("y", 0) + bbox.get("h", 0) > 1.0001:
@@ -680,7 +689,7 @@ async def _wait_for_job(
                 ]
                 # Summarize the useful variant count so callers (and the
                 # agent loop) can distinguish a successful render from
-                # one that left nothing usable behind (e.g. Veo 429'd).
+                # one that left nothing usable behind (e.g. generation quota exhausted).
                 ready_urls = [v for v in variants if v.get("url")]
                 variant_errors = [
                     v.get("error") for v in variants if v.get("status") == "error" and v.get("error")
@@ -838,6 +847,7 @@ async def _get_timeline(
                 "source": it.source,
                 "url": storage.normalize_url_like(it.url, fallback=it.url),
                 "audio": it.audio,
+                "segment_id": it.id,
             }
             for it in items
         ],
@@ -1481,4 +1491,267 @@ async def _revert_timeline(
     return {
         "reverted": True,
         "segment_count": len(restored_segments),
+    }
+
+
+@_register("list_entities")
+async def _list_entities(
+    *,
+    args: dict[str, Any],
+    db: AsyncSession,
+    session_id: str,
+    runner: Any | None = None,
+) -> dict[str, Any]:
+    """List entities identified in a project, with their appearances.
+
+    Use this after the user accepts a variant to find the entity ID for
+    propagation.
+    """
+    from app.models.entity import Entity, EntityAppearance
+    from sqlalchemy.orm import selectinload
+
+    project_id: str = args["project_id"]
+
+    proj = await _get_project_or_error(db, project_id, session_id)
+
+    entities = (
+        await db.execute(
+            select(Entity)
+            .where(Entity.project_id == proj.id)
+            .options(selectinload(Entity.appearances))
+            .order_by(Entity.created_at.desc())
+        )
+    ).scalars().all()
+
+    return {
+        "project_id": proj.id,
+        "entities": [
+            {
+                "id": e.id,
+                "description": e.description,
+                "category": e.category,
+                "reference_variant_url": e.reference_variant_url,
+                "appearance_count": len(e.appearances),
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+                "appearances": [
+                    {
+                        "id": a.id,
+                        "start_ts": a.start_ts,
+                        "end_ts": a.end_ts,
+                        "confidence": a.confidence,
+                    }
+                    for a in e.appearances
+                ],
+            }
+            for e in entities
+        ],
+    }
+
+
+@_register("propagate_edit")
+async def _propagate_edit(
+    *,
+    args: dict[str, Any],
+    db: AsyncSession,
+    session_id: str,
+    runner: Any | None = None,
+) -> dict[str, Any]:
+    """Propagate an accepted edit to all appearances of an entity.
+
+    Mirrors POST /api/propagate.
+    """
+    from app.models.entity import Entity
+    from app.models.propagation import PropagationJob, PropagationResult
+    from app.workers import propagate_job as propagate_worker
+    from sqlalchemy.orm import selectinload
+
+    entity_id: str = args["entity_id"]
+    source_variant_url: str = args["source_variant_url"]
+    prompt: str = args["prompt"]
+    auto_apply: bool = bool(args.get("auto_apply", True))
+
+    entity = (
+        await db.execute(
+            select(Entity)
+            .where(Entity.id == entity_id)
+            .options(selectinload(Entity.appearances))
+        )
+    ).scalar_one_or_none()
+    if entity is None:
+        raise ValueError(f"entity not found: {entity_id}")
+
+    proj = await db.get(Project, entity.project_id)
+    if proj is None or proj.session_id != session_id:
+        raise ValueError(f"entity not found: {entity_id}")
+
+    if not entity.appearances:
+        raise ValueError("entity has no other appearances to propagate")
+
+    pjob = PropagationJob(
+        project_id=proj.id,
+        entity_id=entity.id,
+        source_variant_url=source_variant_url,
+        prompt=prompt,
+        auto_apply=auto_apply,
+        status="pending",
+    )
+    db.add(pjob)
+    await db.flush()
+
+    for app in entity.appearances:
+        res = PropagationResult(
+            propagation_job_id=pjob.id,
+            appearance_id=app.id,
+            status="pending",
+        )
+        db.add(res)
+
+    await db.commit()
+    await db.refresh(pjob)
+
+    if runner is not None:
+        runner.submit(pjob.id, lambda: propagate_worker.run(pjob.id))
+
+    return {
+        "propagation_job_id": pjob.id,
+        "entity_id": entity_id,
+        "appearance_count": len(entity.appearances),
+        "auto_apply": auto_apply,
+        "message": f"Propagation job created for {len(entity.appearances)} appearances",
+    }
+
+
+@_register("get_propagation_status")
+async def _get_propagation_status(
+    *,
+    args: dict[str, Any],
+    db: AsyncSession,
+    session_id: str,
+    runner: Any | None = None,
+) -> dict[str, Any]:
+    """Check the status of a propagation job.
+
+    Mirrors GET /api/propagate/{id}.
+    """
+    from app.models.propagation import PropagationJob, PropagationResult
+
+    propagation_job_id: str = args["propagation_job_id"]
+
+    pjob = await db.get(PropagationJob, propagation_job_id)
+    if pjob is None:
+        raise ValueError(f"propagation job not found: {propagation_job_id}")
+
+    proj = await db.get(Project, pjob.project_id)
+    if proj is None or proj.session_id != session_id:
+        raise ValueError(f"propagation job not found: {propagation_job_id}")
+
+    rows = (
+        await db.execute(
+            select(PropagationResult).where(
+                PropagationResult.propagation_job_id == propagation_job_id
+            )
+        )
+    ).scalars().all()
+
+    return {
+        "propagation_job_id": pjob.id,
+        "status": pjob.status,
+        "error": pjob.error,
+        "results": [
+            {
+                "id": r.id,
+                "appearance_id": r.appearance_id,
+                "segment_id": r.segment_id,
+                "variant_url": r.variant_url,
+                "status": r.status,
+                "applied": r.applied,
+                "error": r.error,
+            }
+            for r in rows
+        ],
+    }
+
+
+@_register("apply_propagation_result")
+async def _apply_propagation_result(
+    *,
+    args: dict[str, Any],
+    db: AsyncSession,
+    session_id: str,
+    runner: Any | None = None,
+) -> dict[str, Any]:
+    """Apply a specific propagation result to the timeline.
+
+    Mirrors POST /api/propagate/{id}/apply/{result_id}.
+    """
+    from app.models.entity import EntityAppearance
+    from app.models.propagation import PropagationJob, PropagationResult
+    from app.models.segment import Segment
+
+    propagation_job_id: str = args["propagation_job_id"]
+    result_id: str = args["result_id"]
+
+    pjob = await db.get(PropagationJob, propagation_job_id)
+    if pjob is None:
+        raise ValueError(f"propagation job not found: {propagation_job_id}")
+
+    proj = await db.get(Project, pjob.project_id)
+    if proj is None or proj.session_id != session_id:
+        raise ValueError(f"propagation job not found: {propagation_job_id}")
+
+    res = await db.get(PropagationResult, result_id)
+    if res is None or res.propagation_job_id != propagation_job_id:
+        raise ValueError(f"result not found: {result_id}")
+    if res.status != "done" or not res.variant_url:
+        raise ValueError(f"result not ready (status={res.status})")
+    if res.applied:
+        return {
+            "result_id": res.id,
+            "already_applied": True,
+            "segment_id": res.segment_id,
+            "variant_url": res.variant_url,
+        }
+
+    appearance = await db.get(EntityAppearance, res.appearance_id)
+    if appearance is None:
+        raise ValueError("appearance missing")
+
+    # deactivate overlapping generated segments
+    overlapping = (
+        await db.execute(
+            select(Segment).where(
+                Segment.project_id == proj.id,
+                Segment.active == True,  # noqa: E712
+                Segment.source == "generated",
+                Segment.start_ts < appearance.end_ts,
+                Segment.end_ts > appearance.start_ts,
+            )
+        )
+    ).scalars().all()
+    for seg in overlapping:
+        seg.active = False
+
+    seg = Segment(
+        project_id=proj.id,
+        start_ts=appearance.start_ts,
+        end_ts=appearance.end_ts,
+        source="generated",
+        url=res.variant_url,
+        order_index=int(appearance.start_ts * 1000),
+        active=True,
+    )
+    db.add(seg)
+    await db.flush()
+
+    res.segment_id = seg.id
+    res.applied = True
+    await db.commit()
+
+    return {
+        "result_id": res.id,
+        "segment_id": seg.id,
+        "variant_url": res.variant_url,
+        "applied": True,
+        "start_ts": appearance.start_ts,
+        "end_ts": appearance.end_ts,
     }

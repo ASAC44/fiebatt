@@ -206,7 +206,7 @@ iris generate \
 Parameters:
 - `--project` / `-p`: Project ID.
 - `--start` / `-s`: Start timestamp in seconds.
-- `--end` / `-e`: End timestamp in seconds. Segment must be 2-5 seconds.
+- `--end` / `-e`: End timestamp in seconds. Segment must be 2-15 seconds.
 - `--bbox` / `-b`: Normalized bounding box `"x,y,w,h"`.
 - `--prompt`: Natural language description of the edit.
 - `--ref-frame`: Reference frame timestamp (defaults to start).
@@ -224,7 +224,7 @@ Expected output (after polling):
 }
 ```
 Errors:
-- Segment too short or too long: Backend rejects segments outside 2-5 seconds. Adjust `--start` and `--end`.
+- Segment too short or too long: Backend rejects segments outside 2-15 seconds. Adjust `--start` and `--end`.
 - Generation failed: Retry once. If it fails again, try a different prompt or bbox.
 
 ### 3.8 Job Status
@@ -551,9 +551,9 @@ Then ask: "Ready to export the final video?"
 - If no hint exists, use `iris identify` with an approximate bbox to verify you have the right region before generating.
 
 ### Choosing segment boundaries
-- Segments MUST be 2-5 seconds. The backend rejects anything outside this range.
+- Segments MUST be 2-15 seconds. The backend rejects anything outside this range.
 - Prefer natural scene boundaries from the analysis output (`scenes[].start_ts`, `scenes[].end_ts`).
-- If a scene is longer than 5 seconds, split it into overlapping 4-second segments.
+- If a scene is longer than 15 seconds, split it into overlapping segments.
 - Avoid cutting mid-action. Look for pauses or transitions.
 
 ### Writing good prompts
@@ -575,7 +575,7 @@ Then ask: "Ready to export the final video?"
 |---------|-------|-----|
 | `backend_reachable: false` | Backend not running or wrong URL | Start the backend. Run `iris auth login --base-url <url>`. |
 | `GEMINI_API_KEY required` | Env var not set | `export GEMINI_API_KEY="..."` |
-| Segment length error | `end - start` outside 2-5s range | Adjust `--start` and `--end` to a 2-5s window. |
+| Segment length error | `end - start` outside 2-15s range | Adjust `--start` and `--end` to a 2-15s window. |
 | Generation job `failed` | Model error or bad prompt | Check `iris job JOB_ID --json` for error details. Retry with a simpler prompt. |
 | Upload fails | File too large or unsupported format | Videos must be under 120 seconds. Use mp4, mov, or webm. |
 | Polling timeout | Job taking too long | Use `--no-wait`, then check manually with `iris job JOB_ID`. |

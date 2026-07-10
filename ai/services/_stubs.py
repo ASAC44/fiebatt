@@ -103,6 +103,8 @@ async def _runway_generate(
     style_ref: str | None = None,
     frame_path: str | None = None,  # noqa: ARG001 — mirrors real adapter signature
     on_tick=None,  # noqa: ARG001 — mirrors real adapter signature
+    duration: int = 5,  # noqa: ARG001 — mirrors real adapter signature
+    resolution: str = "720P",  # noqa: ARG001 — mirrors real adapter signature
 ) -> VariantResult:
     # staggered sleeps so progressive reveal is visible in the polling loop
     import random

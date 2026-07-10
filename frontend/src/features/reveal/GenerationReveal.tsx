@@ -245,10 +245,10 @@ export function GenerationReveal({
             <LoadingStep active={!hasLogStage(logs, "plan_done")}>
               sampling candidate looks
             </LoadingStep>
-            <LoadingStep active={hasLogStage(logs, "plan_done") && !hasLogStage(logs, "veo_done")}>
-              rendering through the generation pipeline
+            <LoadingStep active={hasLogStage(logs, "plan_done") && !hasLogStage(logs, "gen_done")}>
+                rendering through the generation pipeline
             </LoadingStep>
-            <LoadingStep active={hasLogStage(logs, "veo_done") && !hasLogStage(logs, "score_done")}>
+            <LoadingStep active={hasLogStage(logs, "gen_done") && !hasLogStage(logs, "score_done")}>
               scoring variants for coherence and adherence
             </LoadingStep>
           </div>
@@ -610,17 +610,17 @@ const STAGE_BADGES: Record<string, { label: string; tone: string }> = {
   crop_bbox: { label: "ffmpeg", tone: "neutral" },
   crop_bbox_error: { label: "ffmpeg", tone: "warn" },
   extract_frame_error: { label: "ffmpeg", tone: "warn" },
-  plan_start: { label: "gemini", tone: "planner" },
-  plan_done: { label: "gemini", tone: "planner" },
-  veo_start: { label: "veo 3.1", tone: "engine" },
-  veo_submit: { label: "veo 3.1", tone: "engine" },
-  veo_poll: { label: "veo 3.1", tone: "engine" },
-  veo_done: { label: "veo 3.1", tone: "engine" },
-  veo_echo: { label: "veo 3.1", tone: "warn" },
-  veo_error: { label: "veo 3.1", tone: "error" },
-  score_start: { label: "gemini", tone: "planner" },
-  score_done: { label: "gemini", tone: "planner" },
-  score_skipped: { label: "gemini", tone: "neutral" },
+  plan_start: { label: "planner", tone: "planner" },
+  plan_done: { label: "planner", tone: "planner" },
+  gen_start: { label: "happyhorse", tone: "engine" },
+  gen_submit: { label: "happyhorse", tone: "engine" },
+  gen_poll: { label: "happyhorse", tone: "engine" },
+  gen_done: { label: "happyhorse", tone: "engine" },
+  gen_echo: { label: "happyhorse", tone: "warn" },
+  gen_error: { label: "happyhorse", tone: "error" },
+  score_start: { label: "planner", tone: "planner" },
+  score_done: { label: "planner", tone: "planner" },
+  score_skipped: { label: "planner", tone: "neutral" },
   stream_error: { label: "stream", tone: "warn" },
   done: { label: "done", tone: "done" },
   error: { label: "error", tone: "error" },

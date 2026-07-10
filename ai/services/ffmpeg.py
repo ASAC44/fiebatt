@@ -43,12 +43,34 @@ def extract_clip(
     return output_path
 
 
+def _probe_duration_sync(video_path: str) -> float:
+    import json
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "quiet",
+            "-print_format", "json",
+            "-show_format",
+            video_path,
+        ],
+        capture_output=True,
+        check=True,
+    )
+    data = json.loads(result.stdout)
+    return float(data["format"]["duration"])
+
+
+_SAFE_END_EPSILON = 0.05
+
+
 def extract_frame(
     video_path: str,
     timestamp: float,
     output_path: str,
 ) -> str:
     """Extract a single frame at a given timestamp.
+
+    Clamps *timestamp* to a safe distance from the end of the video to
+    avoid ffmpeg encoder failures on the final partial GOP.
 
     Args:
         video_path: Path to source video
@@ -60,10 +82,13 @@ def extract_frame(
     """
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
+    duration = _probe_duration_sync(video_path)
+    safe_ts = min(max(timestamp, 0.0), duration - _SAFE_END_EPSILON)
+
     subprocess.run(
         [
             "ffmpeg", "-y",
-            "-ss", str(timestamp),
+            "-ss", f"{safe_ts:.3f}",
             "-i", video_path,
             "-frames:v", "1",
             output_path,

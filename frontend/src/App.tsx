@@ -488,8 +488,7 @@ const HERO_LOGOS: LogoLoopItem[] = [
   { src: 'https://cdn.simpleicons.org/supabase/3ECF8E', alt: 'Supabase', title: 'Supabase' },
   { src: 'https://cdn.simpleicons.org/fastapi/009688', alt: 'FastAPI', title: 'FastAPI' },
   { src: 'https://cdn.simpleicons.org/python/3776AB', alt: 'Python', title: 'Python' },
-  { src: 'https://cdn.simpleicons.org/google/4285F4', alt: 'Gemini', title: 'Gemini' },
-  { src: 'https://cdn.simpleicons.org/googlecloud/4285F4', alt: 'Veo', title: 'Veo' },
+  { src: 'https://cdn.simpleicons.org/alibabacloud/FF6A00', alt: 'Qwen', title: 'Qwen' },
   { src: 'https://cdn.simpleicons.org/postgresql/4169E1', alt: 'Postgres', title: 'Postgres' },
   { src: 'https://cdn.simpleicons.org/vultr/007BFC', alt: 'Vultr', title: 'Vultr' },
 ]

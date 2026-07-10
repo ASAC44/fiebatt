@@ -55,7 +55,7 @@ export function ToolCallCard({ id, tool, args, status, result }: ToolCallCardPro
     "variants" in (result as Record<string, unknown>);
 
   // Count only variants that actually finished with a URL — otherwise
-  // "1 variant(s) ready" is a lie when veo rate-limits or the worker
+  // "1 variant(s) ready" is a lie when the provider rate-limits or the worker
   // errored, and the user stares at nothing wondering where the
   // preview is.
   const resultSummary = hasVariants

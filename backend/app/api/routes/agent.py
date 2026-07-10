@@ -1,26 +1,29 @@
 """Agent chat route — POST /api/agent/chat.
 
-Streams SSE events from a Gemini-powered agent that can call iris editing
-tools (analyze, identify, generate, accept, export, etc.) via function calling.
-The agent loops: text tokens stream to the client, function calls are executed
-in-process, and their results are fed back to Gemini until the model finishes.
+Streams SSE events from a Qwen-powered agent (DashScope OpenAI-compatible API)
+that can call iris editing tools (analyze, identify, generate, accept, export,
+etc.) via function calling.  The agent loops: text tokens stream to the client,
+function calls are executed in-process, and their results are fed back to the
+model until it finishes.
 """
 
 import asyncio
 import json
 import logging
-import os
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
-from google import genai
-from google.genai import types
+from openai import AsyncOpenAI
 from pydantic import BaseModel
 from sqlalchemy import select
 
+# kept for the TOOL_DECLARATIONS block below; converted to OpenAI format at runtime
+from google.genai import types as _genai_types
+
+from app.config.settings import get_settings
 from app.db.session import AsyncSessionLocal
 from app.deps import get_runner, get_session
 from app.models.conversation import Conversation, ChatMessage
@@ -73,7 +76,7 @@ Preferred workflow:
    with the returned job_id so the variants are in hand before you reply.
    Only use get_job_status when you need a non-blocking peek.
    When wait_for_job returns, inspect result.variants_ready: if it's 0,
-   the render failed (often veo rate-limiting / quota). TELL THE USER
+    the render failed (often rate-limiting / quota). TELL THE USER
    EXACTLY what went wrong using result.variant_errors or result.error,
    suggest they retry in a minute, and DO NOT call accept_variant.
 5. Before destructive timeline moves, use snapshot_timeline so reverts stay cheap.
@@ -86,11 +89,30 @@ Preferred workflow:
 8. For exports, use export_video and then get_export_status until the file is ready.
 
 Important constraints and habits:
-- Video segments for generation must be 2-5 seconds long
+- Video segments for generation must be 2-15 seconds long (HappyHorse supports up to 15s)
 - Bounding boxes use normalized coordinates (0-1)
 - Be explicit about when a tool is a placeholder or best-effort path
 - Prefer previewing, scoring, and remixing over blind re-generation when the user is refining an edit
 - Keep the user in the loop while a render is in flight (one short "generating…" line is fine; don't spam status updates)
+
+Propagation workflow (for edits that should apply across the full video):
+1. Generate the edit on a reference segment using generate_edit
+2. Wait for the job with wait_for_job, show the user the rendered variants
+3. Tell the user: "Here are the variants. Accept the one you like in the
+   editor (click 'Apply to Timeline'). After that, tell me and I'll propagate
+   the edit across the rest of the video."
+4. When the user says they accepted it, call list_entities(project_id) to
+   find the entity that was identified. Pick the most recently created one
+   (first in the list).
+5. Get the accepted variant's URL — it's the url field of the variant the
+   user accepted. You can find it by calling get_timeline() and looking for
+   the most recent "generated" segment that matches the edit range.
+6. Call propagate_edit(entity_id=..., source_variant_url=...,
+   prompt="<original edit prompt>"). This regenerates every appearance of
+   the entity using the accepted style as reference.
+7. Check progress with get_propagation_status. When status is "done", the
+   propagated edits are applied to the timeline. Tell the user they can
+   export the final video.
 
 CRITICAL — editor context:
 The "Current editor context" block at the end of these instructions is ground
@@ -99,9 +121,11 @@ active project_id, the user's playhead timestamp, the full reel duration,
 and any bounding box the user has drawn on the preview. You MUST use those
 values directly. Do NOT ask the user for a project_id, a bounding box, or
 timestamps that you can derive from the playhead, duration, or their
-natural-language request (e.g. "the first 3 seconds" = start_ts 0.0,
-end_ts 3.0). Only ask for clarification if the request is genuinely
-ambiguous in a way the context can't resolve.
+natural-language request. Default start_ts to 0.0 and end_ts to
+timeline_duration (the full project length). Only use a shorter window
+when the user explicitly specifies a time range. Only ask for
+clarification if the request is genuinely ambiguous in a way the
+context can't resolve.
 
 CRITICAL — accept_variant is user-driven:
 If the user's message is an explicit acceptance instruction (e.g. contains
@@ -152,6 +176,8 @@ def _build_context_block(body: "AgentChatRequest") -> str:
 
 # ---- Gemini tool declarations ----
 
+types = _genai_types
+
 TOOL_DECLARATIONS = [
     types.FunctionDeclaration(
         name="analyze_video",
@@ -201,7 +227,7 @@ TOOL_DECLARATIONS = [
         name="generate_edit",
         description=(
             "Generate an AI-edited variant of a video segment. The segment must "
-            "be 2-5 seconds long. Provide a bounding box for the region to edit "
+            "be 2-15 seconds long. Provide a bounding box for the region to edit "
             "and a text prompt describing the desired change."
         ),
         parameters=types.Schema(
@@ -528,9 +554,111 @@ TOOL_DECLARATIONS = [
             required=["project_id", "snapshot_id"],
         ),
     ),
+    types.FunctionDeclaration(
+        name="list_entities",
+        description=(
+            "List all entities identified in a project with their appearances "
+            "and timestamps. Use this after a variant is accepted to discover "
+            "the entity_id needed for propagate_edit."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "project_id": types.Schema(type=types.Type.STRING, description="The project ID"),
+            },
+            required=["project_id"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="propagate_edit",
+        description=(
+            "Propagate an accepted edit across all appearances of an entity. "
+            "Call this AFTER the user accepts a variant and the entity search "
+            "job completes. Uses the accepted variant as a style reference."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "entity_id": types.Schema(type=types.Type.STRING, description="The entity ID from the accepted variant"),
+                "source_variant_url": types.Schema(type=types.Type.STRING, description="URL of the accepted variant to use as style reference"),
+                "prompt": types.Schema(type=types.Type.STRING, description="The edit prompt to use for generation"),
+                "auto_apply": types.Schema(type=types.Type.BOOLEAN, description="Automatically apply results to timeline (default true)"),
+            },
+            required=["entity_id", "source_variant_url", "prompt"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="get_propagation_status",
+        description="Check the status of a propagation job and see per-appearance results.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "propagation_job_id": types.Schema(type=types.Type.STRING, description="The propagation job ID"),
+            },
+            required=["propagation_job_id"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="apply_propagation_result",
+        description="Apply a specific propagation result to the timeline. Only needed when auto_apply was false.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "propagation_job_id": types.Schema(type=types.Type.STRING, description="The propagation job ID"),
+                "result_id": types.Schema(type=types.Type.STRING, description="The result ID to apply"),
+            },
+            required=["propagation_job_id", "result_id"],
+        ),
+    ),
 ]
 
-TOOLS = [types.Tool(function_declarations=TOOL_DECLARATIONS)]
+QWEN_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+
+# ---- tool format converter (Gemini → OpenAI) ----
+
+
+def _convert_schema(schema: types.Schema) -> dict:
+    """Recursively convert a Gemini Schema to a JSON Schema dict for OpenAI tools."""
+    type_map = {
+        types.Type.OBJECT: "object",
+        types.Type.STRING: "string",
+        types.Type.NUMBER: "number",
+        types.Type.INTEGER: "integer",
+        types.Type.BOOLEAN: "boolean",
+        types.Type.ARRAY: "array",
+    }
+    result: dict[str, Any] = {
+        "type": type_map.get(schema.type, "string"),
+    }
+    if schema.description:
+        result["description"] = schema.description
+    if schema.properties:
+        result["properties"] = {
+            key: _convert_schema(sub) for key, sub in schema.properties.items()
+        }
+    if schema.required:
+        result["required"] = list(schema.required)
+    if schema.type == types.Type.ARRAY and schema.items:
+        result["items"] = _convert_schema(schema.items)
+    return result
+
+
+def _convert_tools() -> list[dict]:
+    """Convert Gemini-style FunctionDeclarations to OpenAI tool format."""
+    openai_tools = []
+    for fd in TOOL_DECLARATIONS:
+        openai_tools.append({
+            "type": "function",
+            "function": {
+                "name": fd.name,
+                "description": fd.description,
+                "parameters": _convert_schema(fd.parameters),
+            },
+        })
+    return openai_tools
+
+
+OPENAI_TOOLS = _convert_tools()
 
 # ---- SSE helpers ----
 
@@ -572,18 +700,18 @@ async def _bridge_plan_events(
     """Forward the prompt-rewrite layer's events onto the chat stream.
 
     The ``generate_job`` worker publishes a rich trail of stage events on
-    the per-job event bus (plan_start, plan_done, veo_start, variant_done…).
+    the per-job event bus (plan_start, plan_done, gen_start, variant_done…).
     The Pro-mode reveal panel consumes these directly via
     ``/api/jobs/{id}/stream``, but the Vibe-mode agent chat only hears the
-    agent SSE stream — so by default the user never sees that Gemini is
-    quietly rewriting their one-line prompt into a 60-word Veo brief.
+    agent SSE stream — so by default the user never sees that the model is
+    quietly rewriting their one-line prompt into a video generation brief.
 
     This helper bridges the gap for exactly the events that are interesting
     in chat form:
       • ``plan_start``  → a "rewriting prompt…" marker
-      • ``plan_done``   → a card with the full rewritten Veo prompt,
+      • ``plan_done``   → a card with the full rewritten prompt,
                           intent, conditioning strategy, and tone
-      • ``veo_start``   → a "dispatching to veo" follow-up
+      • ``gen_start``   → a "dispatching to video model" follow-up
 
     We stop early once we've seen plan_done (the most interesting event)
     OR a terminal event, and we always stop after ``timeout_s`` regardless,
@@ -616,17 +744,17 @@ async def _bridge_plan_events(
                             "tone": plan.get("tone"),
                             "color_grading": plan.get("color_grading"),
                             "region_emphasis": plan.get("region_emphasis"),
-                            "prompt_for_veo": plan.get("prompt_for_veo"),
+                            "prompt": plan.get("prompt") or plan.get("prompt_for_veo"),
                         },
                     })
                     seen_plan_done = True
-                elif stage == "veo_start":
-                    yield sse_event("veo_dispatch", {
+                elif stage == "gen_start":
+                    yield sse_event("gen_dispatch", {
                         "job_id": job_id,
                         "strategy": data.get("strategy"),
                         "conditioned_on": data.get("conditioned_on"),
                     })
-                    # plan is in the bag and Veo is spinning up; that's
+                    # plan is in the bag and video generation is starting; that's
                     # the most informative "we're now rendering" signal
                     # we can give the user while wait_for_job blocks.
                     return
@@ -672,30 +800,26 @@ async def _timed_iter(
         await agen.aclose()
 
 
-def _build_contents(
+def _build_messages(
     history: list[dict[str, Any]] | None,
     message: str,
-) -> list[types.Content]:
-    """Convert the incoming history + new message into Gemini Content objects.
+) -> list[dict]:
+    """Build OpenAI-format messages from history + new message.
 
-    History items are expected as:
-        {"role": "user"|"model", "text": "..."}
+    History items: {"role": "user"|"assistant", "text": "..."}
     """
-    contents: list[types.Content] = []
+    messages: list[dict] = []
 
     if history:
         for entry in history:
             role = entry.get("role", "user")
+            if role == "model":
+                role = "assistant"
             text = entry.get("text", "")
-            if role == "assistant":
-                role = "model"
-            elif role not in ("user", "model"):
-                role = "user"
-            contents.append(types.Content(role=role, parts=[types.Part.from_text(text=text)]))
+            messages.append({"role": role, "content": text})
 
-    # append the new user message
-    contents.append(types.Content(role="user", parts=[types.Part.from_text(text=message)]))
-    return contents
+    messages.append({"role": "user", "content": message})
+    return messages
 
 
 # ---- streaming agent loop ----
@@ -722,10 +846,16 @@ async def _agent_stream(
         _format_bbox(body.bbox),
     )
 
-    api_key = os.environ.get("GEMINI_API_KEY", "")
+    settings = get_settings()
+    if settings.use_ai_stubs:
+        yield sse_event("token", {"text": "Agent is running in stub mode. Set USE_AI_STUBS=false and configure DASHSCOPE_API_KEY for the real AI agent."})
+        yield sse_event("done", {})
+        return
+
+    api_key = settings.dashscope_api_key
     if not api_key:
-        log.error("[agent.chat] req=%s GEMINI_API_KEY not configured", req_id)
-        yield sse_event("error", {"message": "GEMINI_API_KEY is not configured"})
+        log.error("[agent.chat] req=%s no DASHSCOPE_API_KEY configured", req_id)
+        yield sse_event("error", {"message": "No AI API key configured. Set DASHSCOPE_API_KEY in .env"})
         yield sse_event("done", {})
         return
 
@@ -768,85 +898,75 @@ async def _agent_stream(
     _agent_text_parts: list[str] = []
     _tool_calls_log: list[dict[str, Any]] = []
 
-    client = genai.Client(api_key=api_key)
+    client = AsyncOpenAI(api_key=api_key, base_url=QWEN_BASE_URL)
+    model_name = "qwen3.7-plus"
 
-    contents = _build_contents(body.history, body.message)
+    system_prompt = SYSTEM_PROMPT + _build_context_block(body)
+    messages = _build_messages(body.history, body.message)
 
-    config = types.GenerateContentConfig(
-        system_instruction=SYSTEM_PROMPT + _build_context_block(body),
-        tools=TOOLS,
-    )
-
-    # Agentic loop: keep calling Gemini until it stops issuing function calls
-    max_turns = 10  # safety cap to prevent infinite loops
+    # Agentic loop: keep calling the model until it stops issuing function calls
+    max_turns = 10
     turn = 0
 
     while turn < max_turns:
         turn += 1
-        log.info("[agent.chat] req=%s turn=%d calling gemini (contents=%d)", req_id, turn, len(contents))
+        log.info("[agent.chat] req=%s turn=%d calling qwen (messages=%d)", req_id, turn, len(messages))
 
         try:
-            response = await client.aio.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=contents,
-                config=config,
+            response = await client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "system", "content": system_prompt}] + messages,
+                tools=OPENAI_TOOLS,
+                temperature=0.3,
             )
+            choice = response.choices[0]
+            msg = choice.message
+            text = msg.content or ""
+            tool_calls = msg.tool_calls or []
         except Exception as exc:
-            log.exception("[agent.chat] req=%s Gemini API call failed on turn %d", req_id, turn)
-            yield sse_event("error", {"message": f"Gemini API error: {exc}"})
+            log.exception("[agent.chat] req=%s Qwen API call failed on turn %d", req_id, turn)
+            yield sse_event("error", {"message": f"Qwen API error: {exc}"})
             yield sse_event("done", {})
             return
 
-        # Check if the client disconnected
         if await request.is_disconnected():
             log.info("Client disconnected during agent loop")
             return
 
-        if not response.candidates:
-            yield sse_event("error", {"message": "No response from Gemini"})
-            yield sse_event("done", {})
-            return
-
-        candidate = response.candidates[0]
-        parts = candidate.content.parts if candidate.content else []
-
-        # Collect text parts and function call parts
-        text_parts: list[str] = []
-        function_calls: list[types.FunctionCall] = []
-
-        for part in parts:
-            if part.text:
-                text_parts.append(part.text)
-            if part.function_call:
-                function_calls.append(part.function_call)
-
-        # Stream accumulated text as a token event
-        if text_parts:
-            full_text = "".join(text_parts)
-            _agent_text_parts.append(full_text)
-            yield sse_event("token", {"text": full_text})
+        if text:
+            _agent_text_parts.append(text)
+            yield sse_event("token", {"text": text})
 
         log.info(
-            "[agent.chat] req=%s turn=%d parts=%d text_chars=%d fcalls=%d → %s",
+            "[agent.chat] req=%s turn=%d text_chars=%d fcalls=%d → %s",
             req_id,
             turn,
-            len(parts),
-            sum(len(t) for t in text_parts),
-            len(function_calls),
-            [fc.name for fc in function_calls] or "<no calls, turn ends>",
+            len(text),
+            len(tool_calls),
+            [tc.function.name for tc in tool_calls] if tool_calls else "<no calls, turn ends>",
         )
 
-        # If no function calls, the model is done
-        if not function_calls:
+        if not tool_calls:
             break
 
-        # Execute each function call and collect results
-        function_responses: list[types.Part] = []
+        # Assistant message with all tool calls (added once before the per-call loop)
+        assistant_msg: dict[str, Any] = {
+            "role": "assistant",
+            "content": text or None,
+            "tool_calls": [],
+        }
+        for tc in tool_calls:
+            assistant_msg["tool_calls"].append({
+                "id": tc.id,
+                "type": "function",
+                "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+            })
+        messages.append(assistant_msg)
 
-        for fc in function_calls:
-            tool_call_id = f"tc_{uuid.uuid4().hex[:8]}"
-            tool_name = fc.name
-            tool_args = dict(fc.args) if fc.args else {}
+        for tc in tool_calls:
+            tool_call_id = tc.id
+            tool_name = tc.function.name
+            tool_args = json.loads(tc.function.arguments) if tc.function.arguments else {}
 
             _tool_calls_log.append({"id": tool_call_id, "tool": tool_name, "args": tool_args})
 
@@ -867,12 +987,6 @@ async def _agent_stream(
             try:
                 import time as _time
                 t0 = _time.monotonic()
-                # Each tool call gets its own short-lived DB session — the
-                # tools can take a long time (wait_for_job polls for minutes)
-                # and reusing a shared session would pin a pool connection
-                # for the whole stream. Tools that need to span multiple
-                # sessions (e.g. wait_for_job's poll loop) already open
-                # their own inside via AsyncSessionLocal.
                 async with AsyncSessionLocal() as tool_db:
                     result = await execute_tool(
                         tool_name=tool_name,
@@ -902,7 +1016,6 @@ async def _agent_stream(
                     "status": "done",
                 })
 
-                # Emit special events for specific tool results
                 if tool_name == "generate_edit" and "job_id" in result:
                     yield sse_event("suggestion", {
                         "edit": {
@@ -913,12 +1026,6 @@ async def _agent_stream(
                             "suggestion": tool_args.get("prompt", ""),
                         },
                     })
-                    # Bridge the prompt-rewrite layer into chat. The worker
-                    # fires ``plan_start`` → ``plan_done`` → ``veo_start``
-                    # on the job event bus; we forward them so the user
-                    # sees Gemini's Veo-ready rewrite of their one-line
-                    # request as a card in the chat. Bounded at ~25s so
-                    # a stuck plan can't hang the stream.
                     async for evt in _bridge_plan_events(result["job_id"], timeout_s=25.0):
                         yield evt
 
@@ -933,13 +1040,6 @@ async def _agent_stream(
                         len(variants),
                         len(ready),
                     )
-
-                    # Terminal without usable output = surface it as a
-                    # first-class failure card so the user stops
-                    # staring at a "generating…" suggestion that never
-                    # produces a preview. We pull the best error blurb
-                    # we can find (job-level, then per-variant) so
-                    # Veo 429s and plan failures are both readable.
                     is_terminal = job_status in ("done", "error", "failed", "cancelled")
                     if is_terminal and not ready:
                         raw_errors: list[str] = []
@@ -953,23 +1053,17 @@ async def _agent_stream(
                             "job_id": result.get("job_id", ""),
                             "error": err_msg,
                         })
-
-                    # Variant preview card — shown whenever at least one
-                    # variant actually uploaded successfully. We don't gate
-                    # on job.status since the worker occasionally stamps
-                    # the status row after the variant file is already live.
                     if ready:
                         yield sse_event("variant_ready", {
                             "job_id": result.get("job_id", ""),
                             "variants": ready,
                         })
 
-                function_responses.append(
-                    types.Part.from_function_response(
-                        name=tool_name,
-                        response=result,
-                    )
-                )
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": json.dumps(result),
+                })
 
             except Exception as exc:
                 log.exception("Tool execution failed: %s", tool_name)
@@ -980,16 +1074,11 @@ async def _agent_stream(
                     "result": error_result,
                     "status": "error",
                 })
-                function_responses.append(
-                    types.Part.from_function_response(
-                        name=tool_name,
-                        response=error_result,
-                    )
-                )
-
-        # Feed the model's response + function results back into the conversation
-        contents.append(candidate.content)
-        contents.append(types.Content(role="user", parts=function_responses))
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": json.dumps(error_result),
+                })
 
     # ── persist agent response ──
     try:
@@ -1027,7 +1116,7 @@ async def agent_chat(
     """Stream an agent conversation with tool-calling over SSE.
 
     Note: we deliberately do NOT depend on ``get_db`` here. The SSE stream
-    can take 3+ minutes while Veo renders, and a request-scoped session
+    can take 3+ minutes while HappyHorse renders, and a request-scoped session
     would pin a pool connection that entire time, exhausting the pool
     after ~15 chats. ``_agent_stream`` opens short-lived sessions as it
     needs them instead.

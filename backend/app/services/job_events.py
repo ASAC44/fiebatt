@@ -1,7 +1,7 @@
 """In-process pub/sub for per-job SSE log streams.
 
 The generate worker publishes structured "thought process" events as it
-moves through its stages (plan, veo generate, score, ...). The SSE route
+moves through its stages (plan, generate, score, ...). The SSE route
 in app.api.routes.jobs subscribes to these events and relays them to the
 browser as text/event-stream.
 

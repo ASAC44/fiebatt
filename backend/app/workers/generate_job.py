@@ -5,19 +5,20 @@ Single-edit mode: one generation per prompt.
 Flow per submitted job:
   1. flip job to 'processing'
   2. extract source clip via ffmpeg
-  3. grab the reference frame + crop the bbox (Veo's image-conditioning slot)
+  3. grab the reference frame + crop the bbox (image-conditioning slot)
   4. ask Gemini for a structured edit plan (we use plan[0])
-  5. run one Veo generation, write the resulting Variant row
+  5. run one HappyHorse generation, write the resulting Variant row
   6. score the result with Gemini (best-effort)
   7. flip job to 'done' (or 'error' if generation failed)
 
 Every stage also publishes a structured "thought process" event through
 ``app.services.job_events``. The SSE route in ``app.api.routes.jobs``
 relays those events to the browser so the user can watch the model's
-reasoning (plan JSON, Veo op id, poll ticks, quality scores) in real time.
+reasoning (plan JSON, generation task id, poll ticks, quality scores) in real time.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from pathlib import Path
@@ -84,24 +85,26 @@ async def _run_variant(
     clip_url: str,
     plan: dict,
     frame_path: str | None,
+    duration: int = 5,
+    resolution: str = "720P",
 ) -> None:
     async with AsyncSessionLocal() as db:
         await _update_variant(db, variant_id, status="processing")
 
     async def tick(evt: dict[str, Any]) -> None:
-        kind = evt.get("kind", "veo.tick")
-        if kind == "veo.submit":
+        kind = evt.get("kind", "gen.tick")
+        if kind == "gen.submit":
             await _emit(
                 job_id,
-                "veo_submit",
-                f"Veo accepted the generation (op={evt.get('op')})",
+                "gen_submit",
+                f"HappyHorse accepted the generation (task={evt.get('task_id')})",
                 **{k: v for k, v in evt.items() if k != "kind"},
             )
-        elif kind == "veo.poll":
+        elif kind == "gen.poll":
             await _emit(
                 job_id,
-                "veo_poll",
-                f"Veo still rendering... ({evt.get('elapsed')}s elapsed)",
+                "gen_poll",
+                f"HappyHorse still rendering... ({evt.get('elapsed')}s elapsed)",
                 **{k: v for k, v in evt.items() if k != "kind"},
             )
 
@@ -121,9 +124,11 @@ async def _run_variant(
             plan,
             frame_path=frame_path,
             on_tick=tick,
+            duration=duration,
+            resolution=resolution,
         )
         log.info(
-            "[gen.variant] veo OK job=%s variant=%s took=%.1fs url=%s",
+            "[gen.variant] happyhorse OK job=%s variant=%s took=%.1fs url=%s",
             job_id,
             variant_id,
             _time.monotonic() - t0,
@@ -131,10 +136,10 @@ async def _run_variant(
         )
     except Exception as e:
         log.exception(
-            "[gen.variant] veo FAILED job=%s variant=%s err=%s",
+            "[gen.variant] happyhorse FAILED job=%s variant=%s err=%s",
             job_id, variant_id, str(e)[:200],
         )
-        await _emit(job_id, "veo_error", f"Veo generation failed: {e}", error=str(e)[:500])
+        await _emit(job_id, "gen_error", f"HappyHorse generation failed: {e}", error=str(e)[:500])
         async with AsyncSessionLocal() as db:
             await _update_variant(db, variant_id, status="error", error=str(e)[:500])
         return
@@ -147,19 +152,19 @@ async def _run_variant(
         variant_url = clip_url
         await _emit(
             job_id,
-            "veo_echo",
+            "gen_echo",
             "provider echoed the source clip back (stub mode or no-op generation)",
         )
     else:
         variant_url = storage.normalize_url_like(raw, fallback=clip_url)
 
-    await _emit(
-        job_id,
-        "veo_done",
-        "Veo returned a generated clip",
-        url=variant_url,
-        description=result.get("description") or plan.get("description"),
-    )
+        await _emit(
+            job_id,
+            "gen_done",
+            "HappyHorse returned a generated clip",
+            url=variant_url,
+            description=result.get("description") or plan.get("description"),
+        )
 
     async with AsyncSessionLocal() as db:
         await _update_variant(
@@ -228,46 +233,41 @@ async def run(job_id: str) -> None:
             job_id,
             "bbox_missing",
             "no region was drawn — treating this as a full-frame regeneration. "
-            "Veo regenerates the entire scene from the prompt, which gives it "
+            "HappyHorse regenerates the entire scene from the prompt, which gives it "
             "more freedom to honor 'remove' / 'replace' intents. For targeted "
             "tweaks (e.g. color changes on one subject) draw a tight box first.",
         )
 
-    # extract source clip once
-    await _emit(
-        job_id,
-        "extract_clip",
-        f"slicing source from {start_ts:.2f}s to {end_ts:.2f}s",
-    )
-    clip_path, clip_url = storage.new_path("clips", "mp4")
-    try:
-        await ffmpeg.extract_clip(proj.video_path, start_ts, end_ts, clip_path)
-    except Exception as e:
-        log.exception("extract_clip failed")
-        async with AsyncSessionLocal() as db:
-            await _update_job(db, job_id, status="error", error=f"clip extraction failed: {e}")
-        await _emit_terminal(job_id, "error", f"clip extraction failed: {e}")
-        return
-    clip_url = await storage.publish(clip_path, content_type="video/mp4")
-
-    # grab a reference frame — Gemini/Veo both want a still, not the mp4.
-    await _emit(job_id, "extract_frame", f"grabbing reference frame @ {reference_frame_ts:.2f}s")
+    # ---- parallel prep: extract clip + extract frame concurrently ----
+    clip_tmp_path, _ = storage.new_path("clips", "mp4")
     frame_path, _ = storage.new_path("keyframes", "jpg")
-    frame_ok = False
-    try:
-        await ffmpeg.extract_frame(proj.video_path, reference_frame_ts, frame_path)
-        await storage.publish(frame_path, content_type="image/jpeg")
-        frame_ok = True
-    except Exception as e:
-        log.exception("frame extract failed (continuing without frame)")
-        await _emit(job_id, "extract_frame_error", f"couldn't grab reference frame: {e}")
 
-    # crop the bbox only so we can give Gemini a close-up reference alongside
-    # the full frame — it never goes to Veo directly. Veo's image-conditioning
-    # slot wants the OPENING FRAME of the video it's about to generate; if we
-    # handed it a cropped rectangle it dutifully generated a video of that
-    # rectangle and nothing else (the "cookie-cutter output" bug). The bbox
-    # region is now expressed through prose in the Gemini plan instead.
+    await _emit(job_id, "extract_clip", f"slicing source {start_ts:.2f}s→{end_ts:.2f}s")
+    await _emit(job_id, "extract_frame", f"grabbing reference frame @ {reference_frame_ts:.2f}s")
+
+    async def _do_extract_clip() -> tuple[Path, str]:
+        await ffmpeg.extract_clip(proj.video_path, start_ts, end_ts, clip_tmp_path)
+        clip_url = await storage.publish(clip_tmp_path, content_type="video/mp4")
+        return clip_tmp_path, clip_url
+
+    async def _do_extract_frame() -> tuple[Path, bool]:
+        try:
+            await ffmpeg.extract_frame(proj.video_path, reference_frame_ts, frame_path)
+            await storage.publish(frame_path, content_type="image/jpeg")
+            return frame_path, True
+        except Exception as e:
+            log.exception("frame extract failed (continuing without frame)")
+            await _emit(job_id, "extract_frame_error", f"couldn't grab reference frame: {e}")
+            return frame_path, False
+
+    clip_task = asyncio.create_task(_do_extract_clip())
+    frame_task = asyncio.create_task(_do_extract_frame())
+
+    # frame is needed for plan_variants — wait for it first
+    frame_path, frame_ok = await frame_task
+    conditioning_frame = str(frame_path) if frame_ok else None
+
+    # crop the bbox for Gemini reference while plan runs
     crop_path: Path | None = None
     if frame_ok and bbox and not bbox_is_full_frame:
         try:
@@ -289,10 +289,9 @@ async def run(job_id: str) -> None:
             )
             crop_path = None
 
-    # Veo ALWAYS gets the full frame when conditioning is used. The bbox just
-    # informs Gemini's prose; Veo composes from the whole scene so the output
-    # preserves surrounding context.
-    conditioning_frame = str(frame_path) if frame_ok else None
+    # Compute duration for HappyHorse — clamp to HappyHorse's supported range (3-15s)
+    segment_duration = min(max(round(end_ts - start_ts), 3), 15)
+    generation_resolution = "720P"
 
     await _emit(
         job_id,
@@ -300,9 +299,14 @@ async def run(job_id: str) -> None:
         "asking Gemini to structure the edit plan",
         user_prompt=prompt,
         bbox=bbox,
+        duration=segment_duration,
     )
+
+    # start Gemini plan while clip finishes in background
+    plan_task = asyncio.create_task(ai.gemini.plan_variants(prompt, bbox, str(frame_path)))
+    clip_path, clip_url = await clip_task  # should be done by now
     try:
-        plans = await ai.gemini.plan_variants(prompt, bbox, str(frame_path))
+        plans = await plan_task
     except Exception as e:
         log.exception("plan_variants failed")
         async with AsyncSessionLocal() as db:
@@ -318,22 +322,16 @@ async def run(job_id: str) -> None:
 
     plan = list(plans)[0]
 
-    # Veo 3.1 is first-frame-conditioned — it keeps whatever subject is in
-    # the opening frame. For "remove/replace/restyle" intents Gemini flags
-    # conditioning_strategy="text_only" so we deliberately strip the frame
-    # and let Veo regenerate the scene from prose. For gentler transforms
-    # we keep the frame so composition/subject stay anchored.
+    # HappyHorse i2v is first-frame-conditioned — it keeps whatever subject
+    # is in the opening frame.
     intent = str(plan.get("intent") or "").lower()
-    # ALWAYS send the reference frame to Veo. Without it, Veo regenerates
-    # the entire scene from text and produces output that doesn't match the
-    # original footage at all. The frame anchors composition, lighting, and
-    # subject placement regardless of whether the intent is remove, replace,
-    # restyle, or transform.
+    # ALWAYS send the reference frame to HappyHorse. Without it, the model
+    # regenerates the entire scene from text and produces output that doesn't
+    # match the original footage at all.
     strategy = "first_frame"
 
     conditioning_frame_effective: str | None = conditioning_frame
 
-    # redact huge fields before shipping over SSE.
     safe_plan = {
         "description": plan.get("description"),
         "intent": intent or None,
@@ -341,7 +339,7 @@ async def run(job_id: str) -> None:
         "tone": plan.get("tone"),
         "color_grading": plan.get("color_grading"),
         "region_emphasis": plan.get("region_emphasis"),
-        "prompt_for_veo": plan.get("prompt_for_veo") or plan.get("prompt_for_runway"),
+        "prompt": plan.get("prompt_for_veo") or plan.get("prompt_for_runway"),
     }
     await _emit(
         job_id,
@@ -366,15 +364,15 @@ async def run(job_id: str) -> None:
 
     await _emit(
         job_id,
-        "veo_start",
-        "dispatching prompt to Veo 3.1",
-        prompt=safe_plan["prompt_for_veo"],
+        "gen_start",
+        "dispatching prompt to HappyHorse",
+        prompt=safe_plan["prompt"],
         strategy=strategy,
         conditioned_on=conditioned_on,
     )
 
     await _run_variant(
-        job_id, variant_id, clip_path, clip_url, plan, conditioning_frame_effective
+        job_id, variant_id, clip_path, clip_url, plan, conditioning_frame_effective, segment_duration, generation_resolution
     )
 
     # collect outcome

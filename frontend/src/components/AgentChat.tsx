@@ -433,7 +433,7 @@ export function AgentChat({ projectId }: AgentChatProps) {
           line-height: 1.45;
           font-style: italic;
         }
-        .prompt-plan__veo {
+        .prompt-plan__content {
           color: rgba(255, 244, 220, 0.94);
           font-size: 12px;
           line-height: 1.55;
@@ -727,12 +727,11 @@ function VariantPreviewCard({
 
 // ─── prompt plan card ────────────────────────────────────────────────
 //
-// Surfaces the prompt-rewriting layer so users can SEE what Gemini
-// turned their one-liner into before it lands in Veo. Without this the
-// whole "intelligent prompt expansion" value prop is invisible to the
-// user and the edit feels like a black box. Shows the original request,
-// the rewritten 40-80 word Veo brief, and a few chips describing the
-// plan's intent, tone, and conditioning strategy.
+// Surfaces the prompt-rewriting layer so users can SEE what the AI
+// turned their one-liner into before it gets dispatched for generation.
+// Without this the whole "intelligent prompt expansion" value prop is
+// invisible to the user and the edit feels like a black box. Shows the
+// original request, the rewritten brief, and plan chips.
 
 function PromptPlanCard({
   userPrompt,
@@ -764,7 +763,7 @@ function PromptPlanCard({
     <div className="prompt-plan">
       <div className="prompt-plan__head">
         <span className="prompt-plan__badge">
-          {ready ? "gemini → veo brief" : "rewriting prompt"}
+          {ready ? "generation brief" : "rewriting prompt"}
         </span>
         {ready && vendor && (
           <span className="prompt-plan__vendor">→ {vendor}</span>
@@ -779,10 +778,10 @@ function PromptPlanCard({
       )}
 
       <div className="prompt-plan__lane">
-        <span className="prompt-plan__lane-k">gemini</span>
+        <span className="prompt-plan__lane-k">qwen</span>
         {ready ? (
-          <p className="prompt-plan__veo">
-            {plan.prompt_for_veo || plan.description || "(no prompt returned)"}
+          <p className="prompt-plan__content">
+            {plan.prompt || plan.prompt_for_veo || plan.description || "(no prompt returned)"}
           </p>
         ) : (
           <span className="prompt-plan__loading" aria-label="rewriting prompt">

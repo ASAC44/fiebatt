@@ -7,7 +7,7 @@ Uses Gemini vision for all entity analysis.
 import asyncio
 from pathlib import Path
 
-from ai.services.gemini import identify_entity, search_keyframes_for_entity
+from ai.services.qwen import identify_entity, search_keyframes_for_entity
 from ai.services.ffmpeg import extract_keyframes, crop_bbox_from_frame
 from ai.services.sam import bbox_to_mask, is_available as sam_available
 from ai.services.clip_search import search_keyframes_by_similarity

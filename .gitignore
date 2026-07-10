@@ -1,0 +1,35 @@
+node_modules/
+build/
+dist/
+coverage/
+.vite/
+.next/
+.DS_Store
+*.log
+.env*
+!.env.example
+.gstack/
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# databases / scratch storage
+*.db
+*.db-journal
+storage/
+apps/gpu-worker/checkpoints/
+
+# typescript
+*.tsbuildinfo
+
+# personal notes (not tracked)
+iris.md
+apps/frontend/node_modules/
+apps/frontend/dist/
+apps/frontend/.vite/
+.npm-cache/

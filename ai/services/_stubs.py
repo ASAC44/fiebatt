@@ -95,6 +95,31 @@ gemini = types.SimpleNamespace(
 )
 
 
+# ------------------------------ wan ------------------------------
+
+async def _wan_generate(
+    clip_path: str,
+    plan: EditPlan,
+    style_ref: str | None = None,
+    frame_path: str | None = None,
+    on_tick=None,
+    duration: int = 5,
+    resolution: str = "1080P",
+) -> VariantResult:
+    import random
+    delay = 1.5 + random.random() * 2.5
+    await asyncio.sleep(delay)
+    return VariantResult(
+        url=Path(clip_path).as_posix(),
+        description=plan["description"],
+    )
+
+
+wan = types.SimpleNamespace(
+    generate=_wan_generate,
+)
+
+
 # ------------------------------ runway ------------------------------
 
 async def _runway_generate(
@@ -102,6 +127,7 @@ async def _runway_generate(
     plan: EditPlan,
     style_ref: str | None = None,
     frame_path: str | None = None,  # noqa: ARG001 — mirrors real adapter signature
+    source_video_url: str | None = None,  # noqa: ARG001
     on_tick=None,  # noqa: ARG001 — mirrors real adapter signature
     duration: int = 5,  # noqa: ARG001 — mirrors real adapter signature
     resolution: str = "720P",  # noqa: ARG001 — mirrors real adapter signature

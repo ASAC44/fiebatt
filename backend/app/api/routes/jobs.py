@@ -42,6 +42,8 @@ async def get_job(
         kind=job.kind,
         status=job.status,  # type: ignore[arg-type]
         error=job.error,
+        start_ts=job.start_ts,
+        end_ts=job.end_ts,
         variants=[
             VariantOut(
                 id=v.id,

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, useCallback, type ReactNode } from "react";
 import { clipAtTime, duration, sourceTimeFor, totalDuration, useEDL } from "../stores/edl";
 import { identifyRegion } from "../api/client";
 import { Icon } from "./Icon";
@@ -10,10 +10,17 @@ import "./preview.css";
  * playhead crosses a clip boundary. Transport controls below. The stage
  * letterboxes the video within a 16:9 frame so the aspect feels stable
  * across clip swaps.
+ *
+ * Flicker suppression: A <canvas> sits on top of the video and captures
+ * the last decoded frame before each src swap. The canvas stays visible
+ * until the new source has seeked to the correct position, then fades out.
+ * This eliminates the black-flash that occurs while the browser decodes
+ * the first frame of the incoming clip.
  */
 export function Preview() {
   const { state, dispatch } = useEDL();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const currentClipIdRef = useRef<string | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -65,6 +72,31 @@ export function Preview() {
     };
   }, [bbox, projectId, activeClip?.id, frameTs, state.playing, dispatch]);
 
+  // Synchronously paint the current video frame to the canvas and make it
+  // visible BEFORE changing v.src — this must be synchronous (direct DOM)
+  // because React state updates are batched/async and the video goes black
+  // in the same microtask as the src swap.
+  const captureFreeze = useCallback(() => {
+    const v = videoRef.current;
+    const c = canvasRef.current;
+    if (!v || !c || v.readyState < 2) return;
+    c.width = v.videoWidth || 1920;
+    c.height = v.videoHeight || 1080;
+    const ctx = c.getContext("2d");
+    if (ctx) ctx.drawImage(v, 0, 0, c.width, c.height);
+    // show synchronously — no React state, no batching delay
+    c.style.transition = 'none';
+    c.style.opacity = '1';
+  }, []);
+
+  // Release the freeze canvas once the new clip's first frame is decoded.
+  const releaseFreeze = useCallback(() => {
+    const c = canvasRef.current;
+    if (!c) return;
+    c.style.transition = 'opacity 0.1s ease-out';
+    c.style.opacity = '0';
+  }, []);
+
   // mirror active clip into <video>
   useEffect(() => {
     const v = videoRef.current;
@@ -75,25 +107,41 @@ export function Preview() {
 
     if (clipChanged) {
       currentClipIdRef.current = activeClip.id;
+      // Capture last frame before src swap — shown as a freeze overlay to
+      // prevent the black-flash flicker during browser decode.
+      captureFreeze();
       // pause before source swap to prevent audio bleed
       const wasPlaying = !v.paused;
       v.pause();
       v.volume = activeClip.volume;
       v.src = activeClip.url;
+
+      // Wait for both metadata (to know duration) and seeked (first frame
+      // decoded at the target position) before releasing the freeze overlay.
       const onLoaded = () => {
         v.currentTime = want;
         v.volume = activeClip.volume;
+      };
+      const onSeeked = () => {
+        // First frame of new clip is decoded — drop the freeze canvas.
+        releaseFreeze();
         if (wasPlaying || state.playing) v.play().catch(() => {});
       };
       v.addEventListener("loadedmetadata", onLoaded, { once: true });
-      return () => v.removeEventListener("loadedmetadata", onLoaded);
+      v.addEventListener("seeked", onSeeked, { once: true });
+      return () => {
+        v.removeEventListener("loadedmetadata", onLoaded);
+        v.removeEventListener("seeked", onSeeked);
+        // safety: if effect re-runs before seeked fires, release the freeze
+        releaseFreeze();
+      };
     }
 
     v.volume = activeClip.volume;
     if (Math.abs(v.currentTime - want) > 0.15) {
       v.currentTime = want;
     }
-  }, [activeClip?.id, activeClip?.url, activeClip?.volume, hit?.offsetInClip, state.playing, activeClip]);
+  }, [activeClip?.id, activeClip?.url, activeClip?.volume, hit?.offsetInClip, state.playing, activeClip, captureFreeze, releaseFreeze]);
 
   useEffect(() => {
     if (!activeClip) {
@@ -128,7 +176,10 @@ export function Preview() {
       const clampedOffset = Math.max(0, Math.min(sourceOffset, clipDur));
 
       // check if we've reached the end of this clip
-      if (clampedOffset >= clipDur - 0.04) {
+      // Use a tighter 10ms early-exit threshold so we display as close to
+      // the clip's last frame as possible before switching — reducing the
+      // visual frame gap at cuts (was 40ms / ~1 frame at 25fps).
+      if (clampedOffset >= clipDur - 0.01) {
         const nextIdx = hit2.index + 1;
         if (nextIdx < state.clips.length) {
           // advance to the next clip — pause first, let the source-swap effect handle it
@@ -172,6 +223,21 @@ export function Preview() {
                   width: videoWidth || 1920,
                   height: videoHeight || 1080,
                 });
+              }}
+            />
+            {/* Freeze-frame canvas: synchronously painted before src swap to
+                suppress the black-flash. Starts hidden (opacity:0); captureFreeze
+                sets it to 1 directly via the ref, releaseFreeze fades it back. */}
+            <canvas
+              ref={canvasRef}
+              className="pv__video"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                pointerEvents: 'none',
+                opacity: 0,
               }}
             />
             <BoundingBox

@@ -55,6 +55,8 @@ export function useGenerationSession({
   const jobIdRef = useRef<string | null>(null);
   const generationTargetRef = useRef<GenerationTarget | null>(null);
   const streamCtlRef = useRef<AbortController | null>(null);
+  // authoritative edit end_ts returned by the job
+  const actualEndTsRef = useRef<number | null>(null);
 
   const canGenerate =
     !!clip &&
@@ -77,6 +79,7 @@ export function useGenerationSession({
     setLogs([]);
     jobIdRef.current = null;
     generationTargetRef.current = null;
+    actualEndTsRef.current = null;
     if (!keepPrompt) setPrompt("");
   }
 
@@ -146,6 +149,8 @@ export function useGenerationSession({
       if (final.status !== "done" || !final.variants.length) {
         throw new Error(final.error || "generation failed");
       }
+      // capture the authoritative edit window returned by the backend
+      actualEndTsRef.current = final.end_ts ?? null;
       setVariants(final.variants);
       return true;
     } catch (e) {
@@ -167,7 +172,10 @@ export function useGenerationSession({
       if (!variant?.url) throw new Error("variant has no url");
       const accepted = await accept(jobIdRef.current, idx);
       const trimmedPrompt = prompt.trim();
-      const duration = target.sourceEnd - target.sourceStart;
+      // Use the backend's authoritative end_ts. Fall back to the originally
+      // requested range if the server did not return it.
+      const actualEnd = actualEndTsRef.current ?? target.sourceEnd;
+      const duration = actualEnd - target.sourceStart;
       const replacement = newClip({
         url: variant.url,
         sourceStart: 0,
@@ -180,14 +188,13 @@ export function useGenerationSession({
         volume: target.volume,
       });
       // always use replace_range so the rest of the clip is preserved.
-      // "replace" would swap the entire clip (including parts outside the
-      // edit window) with just the generated segment, losing the rest of
-      // the video.
+      // Split at the backend's accepted edit end so the right clip resumes
+      // at the same source timestamp where the AI replacement ends.
       dispatch({
         type: "replace_range",
         id: target.id,
         start: target.sourceStart,
-        end: target.sourceEnd,
+        end: actualEnd,
         with: replacement,
       });
       setPrompt("");

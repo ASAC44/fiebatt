@@ -5,8 +5,8 @@ captured and included in FfmpegError messages to make 3am debugging humane.
 """
 from __future__ import annotations
 
-import asyncio
 import json
+import subprocess
 from pathlib import Path
 from typing import Iterable
 
@@ -22,15 +22,10 @@ class FfmpegError(RuntimeError):
 
 
 async def _run(cmd: list[str]) -> tuple[bytes, bytes]:
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
+    proc = subprocess.run(cmd, capture_output=True)
     if proc.returncode != 0:
-        raise FfmpegError(cmd, stderr.decode(errors="replace"), proc.returncode or -1)
-    return stdout, stderr
+        raise FfmpegError(cmd, proc.stderr.decode(errors="replace"), proc.returncode or -1)
+    return proc.stdout, proc.stderr
 
 
 async def probe(path: str | Path) -> dict:
@@ -131,6 +126,51 @@ async def normalize_fps(
         "-movflags", "+faststart",
         str(out),
     ]
+    await _run(cmd)
+    return out
+
+
+async def render_clip_span(
+    src: str | Path,
+    start: float,
+    end: float,
+    out: str | Path,
+    *,
+    width: int,
+    height: int,
+    fps: float,
+    volume: float = 1.0,
+) -> Path:
+    """Render a normalized clip span with guaranteed h264+aac streams."""
+    out = Path(out)
+    duration = max(0.0, end - start)
+    vf = (
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,"
+        f"fps={fps:.4f}"
+    )
+    cmd = [
+        "ffmpeg", "-y",
+        "-ss", f"{start:.3f}",
+        "-i", str(src),
+        "-f", "lavfi",
+        "-t", f"{duration:.3f}",
+        "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+        "-map", "0:v:0",
+        "-map", "1:a:0",
+        "-vf", vf,
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-ar", "48000",
+        "-ac", "2",
+        "-t", f"{duration:.3f}",
+        "-movflags", "+faststart",
+    ]
+    if volume < 0.999:
+        cmd.extend(["-af", f"volume={max(0.0, min(1.0, volume)):.3f}"])
+    cmd.append(str(out))
     await _run(cmd)
     return out
 
@@ -247,21 +287,155 @@ async def concat_mp4s(paths: Iterable[str | Path], out: str | Path) -> Path:
     return out
 
 
+async def concat_clips(\
+    paths: list[Path],
+    out: str | Path,
+    *,
+    transitions: list[float] | None = None,
+) -> Path:
+    """Concatenate MP4s with per-boundary transition control.
+
+    ``transitions`` is a list of (len(paths)-1) floats — the dissolve duration
+    in seconds at each seam.  0.0 means a hard cut; anything larger triggers an
+    xfade dissolve of that length.  When omitted, all seams are hard cuts.
+
+    This replaces the old ``concat_with_xfade`` which applied the same 0.5s
+    dissolve to *every* boundary — including AI→original seams where the frames
+    are visually disconnected, producing the "flicker smear" the user sees.
+    """
+    out_path = Path(out)
+    if len(paths) == 1:
+        paths[0].rename(out_path)
+        return out_path
+
+    n = len(paths)
+    # default: hard cut everywhere
+    xd = transitions if transitions is not None else [0.0] * (n - 1)
+    assert len(xd) == n - 1, "transitions must have len(paths)-1 entries"
+
+    durations = [await _probe_duration(p) for p in paths]
+
+    # clamp each dissolve to at most half the shorter adjacent clip
+    xd = [
+        max(0.0, min(x, min(durations[i], durations[i + 1]) / 2))
+        for i, x in enumerate(xd)
+    ]
+
+    # For hard cuts, use the concat filter rather than the concat demuxer.
+    # The demuxer can preserve packet-duration leftovers at joins, creating a
+    # small audio tail even when each rendered part is correctly bounded.
+    if all(x == 0.0 for x in xd):
+        input_filters = [
+            f"[{i}:v]setpts=PTS-STARTPTS[v_in_{i}];"
+            f"[{i}:a]asetpts=PTS-STARTPTS[a_in_{i}]"
+            for i in range(n)
+        ]
+        concat_inputs = "".join(
+            f"[v_in_{i}][a_in_{i}]" for i in range(n)
+        )
+        filter_complex = ";".join(input_filters) + (
+            f";{concat_inputs}concat=n={n}:v=1:a=1[v][a]"
+        )
+        cmd = [
+            "ffmpeg", "-y",
+            *[item for p in paths for item in ("-i", str(p))],
+            "-filter_complex", filter_complex,
+            "-map", "[v]",
+            "-map", "[a]",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-c:a", "aac",
+            "-movflags", "+faststart",
+            str(out_path),
+        ]
+        await _run(cmd)
+        return out_path
+
+    # Build a chained xfade filter that handles both hard-cut and dissolve
+    # boundaries.  At hard-cut boundaries we use duration=0.001 (minimum
+    # xfade accepts) so it's visually indistinguishable from a hard cut.
+    MIN_X = 0.001  # ffmpeg xfade minimum duration
+
+    # running offset tracks cumulative pts of the *output* stream, which
+    # shrinks by the dissolve duration at every dissolve boundary.
+    # Reset every input independently.  Providers often return a non-zero
+    # start PTS or a different time base; xfade interprets offsets in the
+    # first input's PTS domain, so leaving those timestamps intact causes
+    # frame jumps at the seam.
+    input_filters: list[str] = []
+    for i in range(n):
+        input_filters.append(
+            f"[{i}:v]setpts=PTS-STARTPTS[v_in_{i}];"
+            f"[{i}:a]asetpts=PTS-STARTPTS[a_in_{i}]"
+        )
+
+    video_labels: list[str] = []
+    audio_labels: list[str] = []
+    offset = 0.0
+
+    for i in range(n - 1):
+        x = xd[i] if xd[i] > 0.0 else MIN_X
+        # offset = pts in the output when this dissolve should start
+        offset += durations[i] - x
+        prev_v = f"[v_{i-1}]" if i > 0 else f"[v_in_{i}]"
+        prev_a = f"[a_{i-1}]" if i > 0 else f"[a_in_{i}]"
+        next_v = f"[v_in_{i + 1}]"
+        next_a = f"[a_in_{i + 1}]"
+        label_v = "[v]" if i == n - 2 else f"[v_{i}]"
+        label_a = "[a]" if i == n - 2 else f"[a_{i}]"
+        video_labels.append(
+            # Use a true alpha fade. `dissolve` is a patterned pixel effect
+            # and is responsible for the box-like animation at the seam.
+            f"{prev_v}{next_v}xfade=transition=fade:"
+            f"duration={x:.4f}:offset={max(0.0, offset):.4f}{label_v}"
+        )
+        audio_labels.append(
+            f"{prev_a}{next_a}acrossfade=d={x:.4f}{label_a}"
+        )
+
+    filter_complex = ";".join(input_filters + video_labels + audio_labels)
+    output_duration = max(0.001, sum(durations) - sum(x if x > 0.0 else MIN_X for x in xd))
+    cmd = [
+        "ffmpeg", "-y",
+        *[item for p in paths for item in ("-i", str(p))],
+        "-filter_complex", filter_complex,
+        "-map", "[v]",
+        "-map", "[a]",
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-t", f"{output_duration:.3f}",
+        "-shortest",
+        "-movflags", "+faststart",
+        str(out_path),
+    ]
+    await _run(cmd)
+    return out_path
+
+
+async def concat_with_xfade(
+    paths: list[Path],
+    out: str | Path,
+    xfade_duration: float = 0.5,
+) -> Path:
+    """Legacy: apply the same dissolve duration to every seam.
+
+    Prefer ``concat_clips`` with per-boundary ``transitions`` for new callers.
+    """
+    n = len(paths)
+    return await concat_clips(
+        paths,
+        out,
+        transitions=[xfade_duration] * max(0, n - 1),
+    )
+
+
+
 async def _probe_duration(src: str | Path) -> float:
     """Return the duration (in seconds) of a media file via ffprobe."""
-    import json
-    cmd = [
-        "ffprobe", "-v", "quiet",
-        "-print_format", "json",
-        "-show_format",
-        str(src),
-    ]
-    proc = await asyncio.create_subprocess_exec(
-        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, _ = await proc.communicate()
-    data = json.loads(stdout)
-    return float(data["format"]["duration"])
+    data = await probe(src)
+    return float(data["duration"])
 
 
 _SAFE_END_EPSILON = 0.05  # keep at least 50ms away from the end

@@ -36,6 +36,7 @@ GENERATION_TIMEOUT = 360  # 6 minutes max
 DEFAULT_T2V_MODEL = "happyhorse-1.1-t2v"
 DEFAULT_I2V_MODEL = "happyhorse-1.1-i2v"
 DEFAULT_R2V_MODEL = "happyhorse-1.1-r2v"
+DEFAULT_VIDEO_EDIT_MODEL = "happyhorse-1.0-video-edit"
 
 # Supported resolutions
 SUPPORTED_RESOLUTIONS = ["720P", "480P"]
@@ -186,6 +187,7 @@ async def _download_video(url: str, output_path: Path) -> Path:
 async def generate_variant(
     prompt: str,
     reference_frame_path: str | None = None,
+    source_video_url: str | None = None,
     duration: int = DEFAULT_DURATION,
     aspect_ratio: str = "16:9",
     resolution: str = "720P",
@@ -212,13 +214,21 @@ async def generate_variant(
     duration_sec = _resolve_duration(duration)
     res = _resolve_resolution(resolution)
 
-    params = {
-        "resolution": res,
-        "ratio": aspect_ratio,
-        "duration": duration_sec,
-    }
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    params = {"resolution": res, "watermark": False, "audio_setting": "origin"}
+    if source_video_url:
+        # Video-edit keeps the original motion/camera path and edits within
+        # the supplied window. This is substantially more temporally stable
+        # than regenerating the same window from one still first frame.
+        model = DEFAULT_VIDEO_EDIT_MODEL
+        media = [{"type": "video", "url": source_video_url}]
+        if reference_frame_path:
+            media.append({"type": "reference_image", "url": _image_to_base64(reference_frame_path)})
+        payload = {
+            "input": {"prompt": prompt, "media": media},
+            "parameters": params,
+        }
+    else:
+        params.update({"ratio": aspect_ratio, "duration": duration_sec})
         if reference_frame_path:
             model = DEFAULT_I2V_MODEL
             payload = {
@@ -232,11 +242,9 @@ async def generate_variant(
             }
         else:
             model = DEFAULT_T2V_MODEL
-            payload = {
-                "input": {"prompt": prompt},
-                "parameters": params,
-            }
+            payload = {"input": {"prompt": prompt}, "parameters": params}
 
+    async with httpx.AsyncClient(timeout=30.0) as client:
         task_id = await _submit_task(client, api_key, model, payload)
 
         if on_tick is not None:
@@ -300,6 +308,7 @@ async def generate_propagation_variant(
     duration: int = DEFAULT_DURATION,
     aspect_ratio: str = "16:9",
     resolution: str = "480P",
+    on_tick: TickCallback | None = None,
 ) -> str:
     """Generate a propagation variant with style reference for consistency.
 
@@ -339,19 +348,29 @@ async def generate_propagation_variant(
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         model = DEFAULT_R2V_MODEL
+        media = [{"type": "reference_image", "url": _image_to_base64(style_reference_path)}]
+        if reference_frame_path:
+            media.append({"type": "reference_image", "url": _image_to_base64(reference_frame_path)})
         payload = {
             "input": {
                 "prompt": prompt,
-                "media": [
-                    {"type": "first_frame", "url": _image_to_base64(reference_frame_path)},
-                    {"type": "reference", "url": _image_to_base64(style_reference_path)},
-                ],
+                "media": media,
             },
             "parameters": params,
         }
 
         task_id = await _submit_task(client, api_key, model, payload)
-        video_url = await _poll_task(client, api_key, task_id)
+        if on_tick is not None:
+            _maybe_await(on_tick({
+                "kind": "gen.submit",
+                "task_id": task_id,
+                "prompt": prompt,
+                "duration": duration_sec,
+                "aspect_ratio": aspect_ratio,
+                "conditioned": True,
+                "model": model,
+            }))
+        video_url = await _poll_task(client, api_key, task_id, on_tick=on_tick)
 
     output_path = _output_path(task_id)
     await _download_video(video_url, output_path)

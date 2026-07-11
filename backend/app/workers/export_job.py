@@ -18,8 +18,9 @@ from pathlib import Path
 from app.db.session import AsyncSessionLocal
 from app.models.job import Job
 from app.models.project import Project
-from app.services import ffmpeg, storage
+from app.services import color as color_svc, ffmpeg, storage
 from app.services.ffmpeg import _run  # type: ignore[attr-defined]
+from app.services.ffmpeg import concat_clips
 from app.services.timeline_builder import TimelineItem, build_timeline
 from app.schemas.timeline import PersistedEDL
 
@@ -53,33 +54,46 @@ async def _render_clip(
     vf = (
         f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,"
         f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:color=black,"
+        # Some uploads (including the reported file) have audio that runs
+        # past the final video frame.  Clone the last frame until the exact
+        # requested span end so concat never creates an audio-only tail.
+        f"tpad=stop_mode=clone:stop_duration={duration:.4f},"
         f"fps={target_fps:.4f}"
     )
-    # multi-filter on audio: volume scale + pad silence to the full span
-    # so the result always has the same stream layout for the concat step.
+    # Keep every rendered part's audio and video exactly the same duration.
+    # `apad` only pads an existing audio stream; it does not create one when
+    # an AI file has no audio.  Feed generated clips an explicit silent track
+    # so concat/xfade never has to reconcile different stream lengths.
     af_parts: list[str] = []
     if volume < 0.999:
         af_parts.append(f"volume={max(0.0, min(1.0, volume)):.3f}")
     af_parts.append("apad")
     af = ",".join(af_parts)
 
-    cmd = [
-        "ffmpeg", "-y",
-        "-ss", f"{source_start:.3f}",
-        "-to", f"{source_start + duration:.3f}",
-        "-i", str(src),
+    cmd = ["ffmpeg", "-y", "-ss", f"{source_start:.3f}", "-i", str(src)]
+    if volume < 0.999:
+        # The generated input may not contain audio at all, so an audio
+        # filter cannot manufacture the stream. Add a deterministic silent
+        # source and map it instead of relying on provider output.
+        cmd.extend([
+            "-f", "lavfi", "-t", f"{duration:.3f}",
+            "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+            "-map", "0:v:0", "-map", "1:a:0",
+        ])
+    else:
+        cmd.extend(["-map", "0:v:0", "-map", "0:a:0?", "-af", af])
+    cmd.extend([
         "-vf", vf,
-        "-af", af,
         "-c:v", "libx264",
         "-preset", "veryfast",
         "-pix_fmt", "yuv420p",
         "-c:a", "aac",
         "-ar", "48000",
         "-ac", "2",
+        "-t", f"{duration:.3f}",
         "-movflags", "+faststart",
-        "-shortest",
         str(out),
-    ]
+    ])
     await _run(cmd)
 
 
@@ -94,20 +108,26 @@ async def _render_span(
     out: Path,
     is_generated: bool,
 ) -> None:
-    """Legacy shim for the non-EDL path. Treats the full generated file as
-    playing from 0, and originals as seeking into the source for
-    [span_start, span_end]. Volume is always 1.0 in this path."""
+    """Render one timeline span to a normalized unit-codec MP4.
+
+    Generated clips are rendered from their own file (0→duration) with
+    silenced audio — AI-generated audio never sounds like the original
+    and would create audible artifacts during the dissolve transition.
+    Original spans seek into the source video with full audio.
+    """
     if is_generated:
         source_start = 0.0
         source_end = max(0.0, span_end - span_start)
+        volume = 0.0
     else:
         source_start = span_start
         source_end = span_end
+        volume = 1.0
     await _render_clip(
         src,
         source_start=source_start,
         source_end=source_end,
-        volume=1.0,
+        volume=volume,
         target_w=target_w,
         target_h=target_h,
         target_fps=target_fps,
@@ -141,11 +161,12 @@ async def _render_edl(
         if src is None or not src.exists():
             src = await storage.path_from_url(clip.url)
 
+        volume = 0.0 if clip.kind == "generated" else clip.volume
         await _render_clip(
             src,
             source_start=clip.source_start,
             source_end=clip.source_end,
-            volume=clip.volume,
+            volume=volume,
             target_w=proj.width or 1280,
             target_h=proj.height or 720,
             target_fps=proj.fps or 24.0,
@@ -159,7 +180,10 @@ async def _render_edl(
     if len(scratch_parts) == 1:
         scratch_parts[0].rename(out_path)
     else:
-        await ffmpeg.concat_mp4s(scratch_parts, out_path)
+        # Do not blend generated/source boundaries. If the generated frame
+        # differs from the original, even a very short fade reads as ghosting.
+        transitions = [0.0] * (len(scratch_parts) - 1)
+        await concat_clips(scratch_parts, out_path, transitions=transitions)
         for p in scratch_parts:
             try:
                 p.unlink()
@@ -199,15 +223,38 @@ async def _render_timeline(
             out=part_path,
             is_generated=is_generated,
         )
+
+        # color-match generated clips to the original footage at their
+        # trailing boundary so the transition seam is less visible
+        if is_generated and item.end_ts < proj.duration - 0.1:
+            ref_frame: Path | None = None
+            try:
+                ref_frame = storage.path_for("exports", f"_ref_{render_id}_{i:04d}.jpg")
+                ref_ts = min(item.end_ts + 0.1, proj.duration - 0.1)
+                await ffmpeg.extract_frame(proj.video_path, ref_ts, ref_frame)
+                matched = storage.path_for("exports", f"_matched_{render_id}_{i:04d}.mp4")
+                await color_svc.match_color_histogram(part_path, ref_frame, matched)
+                part_path = matched
+            except Exception:
+                log.exception("color matching failed for generated clip — using ungraded version")
+            finally:
+                if ref_frame is not None:
+                    try:
+                        ref_frame.unlink()
+                    except OSError:
+                        pass
+
         scratch_parts.append(part_path)
 
     out_path, _ = storage.new_path("exports", "mp4")
 
     if len(scratch_parts) == 1:
-        # single span — skip the concat step, just rename the part
         scratch_parts[0].rename(out_path)
     else:
-        await ffmpeg.concat_mp4s(scratch_parts, out_path)
+        # Do not blend generated/source boundaries. The provider output must
+        # match the neighboring frames; export should not add ghost frames.
+        transitions = [0.0] * (len(scratch_parts) - 1)
+        await concat_clips(scratch_parts, out_path, transitions=transitions)
         # clean up intermediates immediately; they're no longer needed
         for p in scratch_parts:
             try:

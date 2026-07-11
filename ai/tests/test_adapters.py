@@ -167,3 +167,69 @@ class TestRealAdapters:
             assert "category" in result
             # real module returns visual_attributes
             assert "visual_attributes" in result
+
+
+def test_wan_video_edit_payload_preserves_horse_and_source(tmp_path):
+    """Wan edits must receive the source video and explicit preservation rules."""
+    from ai.services.wan import _build_video_edit_payload
+
+    frame = tmp_path / "frame.png"
+    frame.write_bytes(b"not-a-real-png-but-valid-fixture-for-base64-shape")
+    payload = _build_video_edit_payload(
+        "Make only the man jump up and down while walking.",
+        "https://cdn.example.test/source.mp4",
+        reference_frame_path=str(frame),
+        resolution="720P",
+    )
+
+    assert payload["input"]["media"][0] == {
+        "type": "video",
+        "url": "https://cdn.example.test/source.mp4",
+    }
+    assert payload["input"]["media"][1]["type"] == "reference_image"
+    assert "horse" in payload["input"]["prompt"].lower()
+    assert "only to the named man" in payload["input"]["prompt"].lower()
+    assert "ghosting" in payload["input"]["negative_prompt"]
+    assert payload["parameters"]["resolution"] == "720P"
+
+
+def test_video_provider_aliases_normalize_to_runtime_provider():
+    from ai.services.config import Settings
+
+    assert Settings(VIDEO_GEN_PROVIDER="wan").normalized_video_gen_provider == "wan"
+    assert Settings(VIDEO_GEN_PROVIDER="veo").normalized_video_gen_provider == "veo"
+    assert Settings(VIDEO_GEN_PROVIDER="happyhorse").normalized_video_gen_provider == "happyhorse"
+    assert Settings(VIDEO_GEN_PROVIDER="veo").video_gen_provider_label == "Veo"
+    assert Settings(VIDEO_GEN_PROVIDER="happyhorse").video_gen_provider_label == "HappyHorse"
+
+
+def test_veo_reference_images_include_style_and_asset(tmp_path):
+    from ai.services.veo import _build_reference_images
+
+    style = tmp_path / "style.png"
+    frame = tmp_path / "frame.png"
+    style.write_bytes(b"style")
+    frame.write_bytes(b"frame")
+
+    refs = _build_reference_images(
+        style_reference_path=str(style),
+        reference_frame_path=str(frame),
+    )
+
+    assert len(refs) == 2
+    assert refs[0].reference_type.value == "STYLE"
+    assert refs[1].reference_type.value == "ASSET"
+
+
+def test_motion_prompt_rewrite_preserves_sequence_language():
+    from ai.services.__init__ import _rewrite_motion_prompt
+
+    motion, sequenced, rewritten = _rewrite_motion_prompt(
+        "The man jumps up and down a few times, then lands and smoothly continues into a normal walk, without stopping."
+    )
+
+    assert motion is True
+    assert sequenced is True
+    assert "Do not loop, extend, or repeat the action beyond the requested count." in rewritten
+    assert "blend smoothly back into the original gait and forward momentum" in rewritten
+    assert "perform the requested action clearly and repeatedly" not in rewritten

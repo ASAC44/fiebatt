@@ -20,3 +20,6 @@ class JobOut(BaseModel):
     status: JobStatus
     error: str | None = None
     variants: list[VariantOut] = []
+    # authoritative edit window used when accepting a generated replacement.
+    start_ts: float | None = None
+    end_ts: float | None = None

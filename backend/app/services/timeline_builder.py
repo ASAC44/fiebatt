@@ -45,20 +45,27 @@ async def build_timeline(db: AsyncSession, proj: Project) -> list[TimelineItem]:
             .where(
                 Segment.project_id == proj.id,
                 Segment.active == True,  # noqa: E712
+                Segment.source == "generated",
             )
-            .order_by(Segment.start_ts)
+            .order_by(Segment.start_ts, Segment.source)
         )
     ).scalars().all()
 
     items: list[TimelineItem] = []
     cursor = 0.0
     for seg in rows:
-        if seg.start_ts > cursor + 1e-3:
+        if seg.end_ts <= cursor + 1e-3:
+            continue
+
+        effective_start = max(seg.start_ts, cursor)
+
+        if effective_start > cursor + 1e-3:
             items.append(
-                TimelineItem(None, cursor, seg.start_ts, "original", proj.video_url, True)
+                TimelineItem(None, cursor, effective_start, "original", proj.video_url, True)
             )
+
         items.append(
-            TimelineItem(seg.id, seg.start_ts, seg.end_ts, seg.source, seg.url, seg.source == "original")
+            TimelineItem(seg.id, effective_start, seg.end_ts, seg.source, seg.url, seg.source == "original")
         )
         cursor = seg.end_ts
 

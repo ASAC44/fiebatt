@@ -115,7 +115,10 @@ async def _run_one(
                 for seg in overlapping:
                     seg.active = False
                 stitched_path, _ = storage.new_path("stitched", "mp4")
-                await ffmpeg.stitch_crossfade(
+                # Keep propagated edits frame-accurate as well. Blending the
+                # AI and source frames creates the same ghosted box artifact
+                # as the export path's old dissolve.
+                await ffmpeg.simple_replace(
                     base=live_proj.video_path,
                     replacement=normalized,
                     at_ts=start_ts,

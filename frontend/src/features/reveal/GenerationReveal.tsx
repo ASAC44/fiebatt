@@ -555,7 +555,9 @@ function SegmentVideo({
     let frameId: number | null = null;
 
     const syncPlayback = () => {
-      if (video.currentTime < start || video.currentTime >= safeEnd - 0.04) {
+      // 10ms threshold matches the main preview rAF loop — plays as close
+      // to the last frame as possible before looping back to start.
+      if (video.currentTime < start || video.currentTime >= safeEnd - 0.01) {
         video.currentTime = start;
       }
       if (shouldPlay) {
@@ -612,12 +614,12 @@ const STAGE_BADGES: Record<string, { label: string; tone: string }> = {
   extract_frame_error: { label: "ffmpeg", tone: "warn" },
   plan_start: { label: "planner", tone: "planner" },
   plan_done: { label: "planner", tone: "planner" },
-  gen_start: { label: "happyhorse", tone: "engine" },
-  gen_submit: { label: "happyhorse", tone: "engine" },
-  gen_poll: { label: "happyhorse", tone: "engine" },
-  gen_done: { label: "happyhorse", tone: "engine" },
-  gen_echo: { label: "happyhorse", tone: "warn" },
-  gen_error: { label: "happyhorse", tone: "error" },
+  gen_start: { label: "wan", tone: "engine" },
+  gen_submit: { label: "wan", tone: "engine" },
+  gen_poll: { label: "wan", tone: "engine" },
+  gen_done: { label: "wan", tone: "engine" },
+  gen_echo: { label: "wan", tone: "warn" },
+  gen_error: { label: "wan", tone: "error" },
   score_start: { label: "planner", tone: "planner" },
   score_done: { label: "planner", tone: "planner" },
   score_skipped: { label: "planner", tone: "neutral" },

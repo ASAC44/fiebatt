@@ -17,12 +17,33 @@ class Settings(BaseSettings):
     elevenlabs_api_key: str = Field("", alias="ELEVENLABS_API_KEY")
     storage_path: str = Field("./storage", alias="STORAGE_PATH")
     gpu_worker_url: str = Field("http://localhost:8001", alias="GPU_WORKER_URL")
+    video_gen_provider: str = Field("wan", alias="VIDEO_GEN_PROVIDER")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property
     def ai_mode(self) -> str:
         return "stub" if self.use_ai_stubs else "real"
+
+    @property
+    def normalized_video_gen_provider(self) -> str:
+        provider = self.video_gen_provider.strip().lower()
+        if provider == "veo":
+            return "veo"
+        if provider == "happyhorse":
+            return "happyhorse"
+        if provider == "wan":
+            return "wan"
+        return "wan"
+
+    @property
+    def video_gen_provider_label(self) -> str:
+        provider = self.normalized_video_gen_provider
+        if provider == "wan":
+            return "Wan"
+        if provider == "happyhorse":
+            return "HappyHorse"
+        return "Veo"
 
     @property
     def real_ai_ready(self) -> bool:

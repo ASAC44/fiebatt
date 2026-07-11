@@ -126,9 +126,13 @@ async def run(job_id: str) -> None:
             keyframes = await ffmpeg.extract_keyframes(
                 proj.video_path, KEYFRAMES_PER_SECOND, cached_pattern
             )
-        keyframe_urls = []
+        keyframe_paths: list[str] = []
+        keyframe_url_by_path: dict[str, str] = {}
         for p in keyframes:
-            keyframe_urls.append(await storage.publish(p, content_type="image/jpeg"))
+            url = await storage.publish(p, content_type="image/jpeg")
+            path_key = str(p)
+            keyframe_paths.append(path_key)
+            keyframe_url_by_path[path_key] = url
     except Exception as e:
         log.exception("keyframe extraction failed")
         async with AsyncSessionLocal() as db:
@@ -140,7 +144,10 @@ async def run(job_id: str) -> None:
         return
 
     try:
-        hits = await ai.gemini.find_entity_in_keyframes(identity, keyframe_urls)
+        # The VLM adapter reads image bytes from disk.  Published URLs are for
+        # the browser/UI only; passing presigned https URLs here makes the
+        # adapter try to open `https:/...` as a local file.
+        hits = await ai.gemini.find_entity_in_keyframes(identity, keyframe_paths)
     except Exception as e:
         log.exception("find_entity_in_keyframes failed")
         async with AsyncSessionLocal() as db:
@@ -169,7 +176,10 @@ async def run(job_id: str) -> None:
                 segment_id=None,
                 start_ts=h["start_ts"],
                 end_ts=h["end_ts"],
-                keyframe_url=h.get("keyframe_url"),
+                keyframe_url=keyframe_url_by_path.get(
+                    str(h.get("keyframe_url") or ""),
+                    h.get("keyframe_url"),
+                ),
                 confidence=h.get("confidence", 0.0),
             )
             db.add(app)

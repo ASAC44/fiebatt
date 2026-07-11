@@ -53,6 +53,31 @@ RULES FOR conditioning_strategy
   weather overlays, lighting shifts, lens changes, re-styling, adding
   effects/creatures that share the scene with the existing subject.
 
+OVERLAP GENERATION STRATEGY (CRITICAL for seamless continuity)
+- The generation window includes ~2 seconds of extra time at the end
+  beyond the user's requested edit range. This extra time exists solely
+  to let the subject and scene transition NATURALLY back to EXACTLY
+  matching the original footage before the stitch point.
+- Your prompt_for_veo MUST be a TWO-PART description:
+  Part 1 — the user's requested edit (main action/change)
+  Part 2 — a MANDATORY transition back to the original scene. The last
+           frame of the generated clip MUST match the original footage
+           in subject position, posture, camera angle, lighting, and
+           background. This is non-negotiable for seamless continuity.
+- Example for "make the man jump up and down for the first 3 seconds":
+  "A man in a blue jacket jumps up and down excitedly on a cobblestone
+  street at dusk. After 3 seconds he settles back to walking at a
+  relaxed pace, EXACTLY as he was in the original footage — same
+  posture, same gait, same position on the street, same background.
+  The final shot matches the original frame identically."
+- The transition MUST be explicit: describe the exact pose, position,
+  and scene composition the model should return to. Vague transitions
+  ("transitions back to normal") are NOT sufficient — the model will
+  produce a clip with a visible seam at the stitch point.
+- For "remove" / "replace" intents the overlap is less critical since
+  the scene is described from scratch. Apply it mainly when the subject
+  and scene should persist across the edit boundary.
+
 RULES FOR prompt_for_veo
 - Describe the TARGET scene, not the edit action. The model never sees the
   original frame when conditioning_strategy is "text_only", so it needs

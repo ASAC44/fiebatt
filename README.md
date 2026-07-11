@@ -91,6 +91,7 @@ smoke flow:
 - `VITE_*` vars are consumed by the frontend
 - backend, ai, and storage vars are consumed by fastapi workers/services
 - local dev can run with `USE_AI_STUBS=true`; the real demo path wants `USE_AI_STUBS=false`
+- `VIDEO_GEN_PROVIDER=wan` uses DashScope Wan source-video editing; `VIDEO_GEN_PROVIDER=veo` uses Google Veo via `GEMINI_API_KEY`; `VIDEO_GEN_PROVIDER=happyhorse` uses the DashScope HappyHorse fallback
 - `DATABASE_URL` can stay local for quick hacking or point at vultr managed postgres for the demo/deploy story
 - `VULTR_S3_*` controls media publishing; when unset, backend falls back to the local `/media` mount
 - `GPU_WORKER_URL` points at the sam/clip worker, either `http://localhost:8001` locally or the vultr gpu box in demo mode

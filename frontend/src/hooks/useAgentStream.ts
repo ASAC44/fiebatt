@@ -493,7 +493,7 @@ function handleSSEEvent(
     case "gen_dispatch": {
       const jobId = (data.job_id as string | undefined) ?? "";
       if (!jobId) break;
-      dispatch({ type: "prompt_plan_dispatched", jobId, vendor: "happyhorse" });
+      dispatch({ type: "prompt_plan_dispatched", jobId, vendor: "wan" });
       break;
     }
 

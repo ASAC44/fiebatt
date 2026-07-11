@@ -7,7 +7,7 @@ Flow per submitted job:
   2. extract source clip via ffmpeg
   3. grab the reference frame + crop the bbox (image-conditioning slot)
   4. ask Gemini for a structured edit plan (we use plan[0])
-  5. run one HappyHorse generation, write the resulting Variant row
+   5. run one generation (Wan or HappyHorse, per provider config), write the resulting Variant row
   6. score the result with Gemini (best-effort)
   7. flip job to 'done' (or 'error' if generation failed)
 
@@ -20,14 +20,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai import services as ai
+from ai.services import happyhorse
 from app.db.session import AsyncSessionLocal
 from app.models.job import Job, Variant
 from app.models.project import Project
@@ -35,9 +38,22 @@ from app.services import ffmpeg, job_events, storage
 
 log = logging.getLogger("iris.jobs.generate")
 
-# single-edit mode. keep the fan-out scaffolding in case we re-enable variants
-# later, but only ever request one plan + one generation.
+from ai.services.config import get_settings as _get_ai_settings
+_SETTINGS = _get_ai_settings()
+_PROVIDER = _SETTINGS.normalized_video_gen_provider
+_PROVIDER_LABEL = _SETTINGS.video_gen_provider_label
+
 VARIANT_COUNT = 1
+BRIDGE_CONTINUATION_SECONDS = 3.0
+BRIDGE_SEAM_CROSSFADE_SECONDS = 0.18
+BRIDGE_ACTION_PROMPT = (
+    "The man jumps up and down repeatedly in place. Keep identity, plaza, "
+    "camera, lighting, and background unchanged."
+)
+BRIDGE_CONTINUATION_PROMPT = (
+    "Continue naturally from this pose into a normal walking cycle. Keep "
+    "identity, plaza, camera, lighting, and background unchanged."
+)
 
 
 async def _update_job(db: AsyncSession, job_id: str, **fields) -> None:
@@ -87,6 +103,7 @@ async def _run_variant(
     frame_path: str | None,
     duration: int = 5,
     resolution: str = "720P",
+    source_video_url: str | None = None,
 ) -> None:
     async with AsyncSessionLocal() as db:
         await _update_variant(db, variant_id, status="processing")
@@ -97,14 +114,14 @@ async def _run_variant(
             await _emit(
                 job_id,
                 "gen_submit",
-                f"HappyHorse accepted the generation (task={evt.get('task_id')})",
+                f"{_PROVIDER_LABEL} accepted the generation (task={evt.get('task_id')})",
                 **{k: v for k, v in evt.items() if k != "kind"},
             )
         elif kind == "gen.poll":
             await _emit(
                 job_id,
                 "gen_poll",
-                f"HappyHorse still rendering... ({evt.get('elapsed')}s elapsed)",
+                f"{_PROVIDER_LABEL} still rendering... ({evt.get('elapsed')}s elapsed)",
                 **{k: v for k, v in evt.items() if k != "kind"},
             )
 
@@ -123,12 +140,14 @@ async def _run_variant(
             str(clip_path),
             plan,
             frame_path=frame_path,
+            source_video_url=source_video_url,
             on_tick=tick,
             duration=duration,
             resolution=resolution,
         )
         log.info(
-            "[gen.variant] happyhorse OK job=%s variant=%s took=%.1fs url=%s",
+            "[gen.variant] %s OK job=%s variant=%s took=%.1fs url=%s",
+            _PROVIDER_LABEL.lower(),
             job_id,
             variant_id,
             _time.monotonic() - t0,
@@ -136,10 +155,10 @@ async def _run_variant(
         )
     except Exception as e:
         log.exception(
-            "[gen.variant] happyhorse FAILED job=%s variant=%s err=%s",
-            job_id, variant_id, str(e)[:200],
+            "[gen.variant] %s FAILED job=%s variant=%s err=%s",
+            _PROVIDER_LABEL.lower(), job_id, variant_id, str(e)[:200],
         )
-        await _emit(job_id, "gen_error", f"HappyHorse generation failed: {e}", error=str(e)[:500])
+        await _emit(job_id, "gen_error", f"{_PROVIDER_LABEL} generation failed: {e}", error=str(e)[:500])
         async with AsyncSessionLocal() as db:
             await _update_variant(db, variant_id, status="error", error=str(e)[:500])
         return
@@ -161,7 +180,7 @@ async def _run_variant(
         await _emit(
             job_id,
             "gen_done",
-            "HappyHorse returned a generated clip",
+            f"{_PROVIDER_LABEL} returned a generated clip",
             url=variant_url,
             description=result.get("description") or plan.get("description"),
         )
@@ -174,6 +193,152 @@ async def _run_variant(
             url=variant_url,
             description=result.get("description") or plan.get("description"),
         )
+
+
+def _public_url_or_none(url: str) -> str | None:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    if parsed.hostname in {"localhost", "127.0.0.1", "0.0.0.0"}:
+        return None
+    return url
+
+
+async def _run_happyhorse_motion_bridge(
+    *,
+    job_id: str,
+    variant_id: str,
+    source_video_url: str,
+    reference_frame_path: str | None,
+    action_duration: float,
+    continuation_duration: float,
+    output_width: int,
+    output_height: int,
+    output_fps: float,
+    bridge_end_ts: float,
+    resolution: str,
+) -> None:
+    async with AsyncSessionLocal() as db:
+        await _update_variant(db, variant_id, status="processing")
+
+    async def tick(stage: str, evt: dict[str, Any]) -> None:
+        kind = evt.get("kind", "gen.tick")
+        if kind == "gen.submit":
+            await _emit(
+                job_id,
+                stage,
+                f"HappyHorse accepted {stage} (task={evt.get('task_id')})",
+                **{k: v for k, v in evt.items() if k != "kind"},
+            )
+        elif kind == "gen.poll":
+            await _emit(
+                job_id,
+                stage,
+                f"HappyHorse {stage} still rendering... ({evt.get('elapsed')}s elapsed)",
+                **{k: v for k, v in evt.items() if k != "kind"},
+            )
+
+    try:
+        await _emit(
+            job_id,
+            "gen_bridge_start",
+            "building jump-to-walk bridge with HappyHorse video-edit plus R2V",
+            action_duration=action_duration,
+            continuation_duration=continuation_duration,
+        )
+
+        action_path = Path(await happyhorse.generate_variant(
+            BRIDGE_ACTION_PROMPT,
+            reference_frame_path=reference_frame_path,
+            source_video_url=source_video_url,
+            duration=max(4, math.ceil(action_duration + 1.0)),
+            resolution=resolution,
+            on_tick=lambda evt: tick("gen_bridge_action", evt),
+        ))
+        await _emit(job_id, "gen_bridge_action_done", "jump segment rendered", path=str(action_path))
+
+        transition_frame, _ = storage.new_path("keyframes", "jpg")
+        await ffmpeg.extract_frame(action_path, action_duration, transition_frame)
+        await _emit(
+            job_id,
+            "gen_bridge_frame",
+            "extracted landing frame for R2V continuation",
+            frame_path=str(transition_frame),
+            ts=action_duration,
+        )
+
+        continuation_path = Path(await happyhorse.generate_propagation_variant(
+            BRIDGE_CONTINUATION_PROMPT,
+            style_reference_path=str(transition_frame),
+            reference_frame_path=str(transition_frame),
+            duration=max(3, math.ceil(continuation_duration)),
+            resolution=resolution,
+            on_tick=lambda evt: tick("gen_bridge_continue", evt),
+        ))
+        await _emit(
+            job_id,
+            "gen_bridge_continue_done",
+            "R2V walking continuation rendered",
+            path=str(continuation_path),
+        )
+
+        render_id = variant_id[:8]
+        action_part = storage.path_for("generated", f"_bridge_action_{render_id}.mp4")
+        continuation_part = storage.path_for("generated", f"_bridge_continue_{render_id}.mp4")
+        final_path, _ = storage.new_path("generated", "mp4")
+        action_part_end = action_duration + BRIDGE_SEAM_CROSSFADE_SECONDS
+
+        await ffmpeg.render_clip_span(
+            action_path,
+            0.0,
+            action_part_end,
+            action_part,
+            width=output_width,
+            height=output_height,
+            fps=output_fps,
+            volume=0.0,
+        )
+        await ffmpeg.render_clip_span(
+            continuation_path,
+            0.0,
+            continuation_duration,
+            continuation_part,
+            width=output_width,
+            height=output_height,
+            fps=output_fps,
+            volume=0.0,
+        )
+        await ffmpeg.concat_clips(
+            [action_part, continuation_part],
+            final_path,
+            transitions=[BRIDGE_SEAM_CROSSFADE_SECONDS],
+        )
+        variant_url = await storage.publish(final_path, content_type="video/mp4")
+
+        await _emit(
+            job_id,
+            "gen_bridge_stitch_done",
+            "stitched jump segment and R2V continuation",
+            url=variant_url,
+            bridge_end_ts=bridge_end_ts,
+            seam_crossfade_seconds=BRIDGE_SEAM_CROSSFADE_SECONDS,
+            action_part_end=action_part_end,
+        )
+
+        async with AsyncSessionLocal() as db:
+            await _update_variant(
+                db,
+                variant_id,
+                status="done",
+                url=variant_url,
+                description="jump motion bridged into a normal walk",
+            )
+            await _update_job(db, job_id, end_ts=bridge_end_ts)
+    except Exception as e:
+        log.exception("[gen.bridge] HappyHorse bridge failed job=%s variant=%s", job_id, variant_id)
+        await _emit(job_id, "gen_error", f"HappyHorse bridge failed: {e}", error=str(e)[:500])
+        async with AsyncSessionLocal() as db:
+            await _update_variant(db, variant_id, status="error", error=str(e)[:500])
 
 
 async def _score_variant_safe(frames: list[str], prompt: str) -> dict | None:
@@ -210,6 +375,20 @@ async def run(job_id: str) -> None:
         bbox = job.bbox_json or {}
         prompt = job.prompt or ""
         reference_frame_ts = float(job.reference_frame_ts or start_ts)
+        _, sequenced_motion, _ = ai._rewrite_motion_prompt(prompt)  # type: ignore[attr-defined]
+        should_try_bridge = _PROVIDER == "happyhorse" and sequenced_motion
+
+        # Normal edits accept only the requested range. The HappyHorse bridge
+        # needs extra continuation frames, so that path updates job.end_ts
+        # after the stitched bridge is rendered.
+        requested_end_ts = end_ts
+        context_overlap = BRIDGE_CONTINUATION_SECONDS if should_try_bridge else 2.0
+        context_end_ts = min(requested_end_ts + context_overlap, proj.duration)
+        gen_duration = min(
+            max(int(math.ceil(context_end_ts - start_ts)), 3),
+            15,
+        )
+        clip_end_ts = min(start_ts + gen_duration, proj.duration)
 
     bbox_w = float(bbox.get("w", 0.0))
     bbox_h = float(bbox.get("h", 0.0))
@@ -221,7 +400,9 @@ async def run(job_id: str) -> None:
         "kicking off generation pipeline",
         project_id=proj.id,
         start_ts=start_ts,
-        end_ts=end_ts,
+        end_ts=requested_end_ts,
+        context_end_ts=clip_end_ts,
+        bridge_candidate=should_try_bridge,
         bbox=bbox,
         bbox_is_full_frame=bbox_is_full_frame,
         prompt=prompt,
@@ -242,11 +423,16 @@ async def run(job_id: str) -> None:
     clip_tmp_path, _ = storage.new_path("clips", "mp4")
     frame_path, _ = storage.new_path("keyframes", "jpg")
 
-    await _emit(job_id, "extract_clip", f"slicing source {start_ts:.2f}s→{end_ts:.2f}s")
+    await _emit(
+        job_id,
+        "extract_clip",
+        f"slicing source context {start_ts:.2f}s→{clip_end_ts:.2f}s",
+        requested_end_ts=requested_end_ts,
+    )
     await _emit(job_id, "extract_frame", f"grabbing reference frame @ {reference_frame_ts:.2f}s")
 
     async def _do_extract_clip() -> tuple[Path, str]:
-        await ffmpeg.extract_clip(proj.video_path, start_ts, end_ts, clip_tmp_path)
+        await ffmpeg.extract_clip(proj.video_path, start_ts, clip_end_ts, clip_tmp_path)
         clip_url = await storage.publish(clip_tmp_path, content_type="video/mp4")
         return clip_tmp_path, clip_url
 
@@ -290,7 +476,7 @@ async def run(job_id: str) -> None:
             crop_path = None
 
     # Compute duration for HappyHorse — clamp to HappyHorse's supported range (3-15s)
-    segment_duration = min(max(round(end_ts - start_ts), 3), 15)
+    segment_duration = min(max(round(requested_end_ts - start_ts), 3), 15)
     generation_resolution = "720P"
 
     await _emit(
@@ -365,15 +551,49 @@ async def run(job_id: str) -> None:
     await _emit(
         job_id,
         "gen_start",
-        "dispatching prompt to HappyHorse",
+        f"dispatching prompt to {_PROVIDER_LABEL}",
         prompt=safe_plan["prompt"],
         strategy=strategy,
         conditioned_on=conditioned_on,
     )
 
-    await _run_variant(
-        job_id, variant_id, clip_path, clip_url, plan, conditioning_frame_effective, segment_duration, generation_resolution
+    source_video_url = _public_url_or_none(clip_url)
+    bridge_duration = max(0.0, clip_end_ts - requested_end_ts)
+    can_bridge = (
+        should_try_bridge
+        and source_video_url is not None
+        and conditioning_frame_effective is not None
+        and bridge_duration >= 1.0
     )
+    if can_bridge:
+        await _run_happyhorse_motion_bridge(
+            job_id=job_id,
+            variant_id=variant_id,
+            source_video_url=source_video_url,
+            reference_frame_path=conditioning_frame_effective,
+            action_duration=max(0.1, requested_end_ts - start_ts),
+            continuation_duration=bridge_duration,
+            output_width=proj.width or 1280,
+            output_height=proj.height or 720,
+            output_fps=proj.fps or 24.0,
+            bridge_end_ts=clip_end_ts,
+            resolution=generation_resolution,
+        )
+    else:
+        if should_try_bridge and source_video_url is None:
+            await _emit(
+                job_id,
+                "gen_bridge_skipped",
+                "HappyHorse bridge requires a public source video URL; using single-call generation",
+            )
+        await _run_variant(
+            job_id, variant_id, clip_path, clip_url,
+            {**plan, "_edit_prompt": prompt},
+            conditioning_frame_effective,
+            segment_duration,
+            generation_resolution,
+            source_video_url=source_video_url,
+        )
 
     # collect outcome
     async with AsyncSessionLocal() as db:

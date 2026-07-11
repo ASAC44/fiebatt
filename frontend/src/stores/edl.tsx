@@ -381,9 +381,16 @@ function coreReducer(state: State, a: Action): State {
       const idx = state.clips.findIndex((c) => c.id === a.id);
       if (idx < 0) return state;
       const current = state.clips[idx];
-      if (a.start < current.sourceStart || a.end > current.sourceEnd || a.start >= a.end) {
+      if (a.start < current.sourceStart || a.start >= a.end) {
         return state;
       }
+
+      // Clamp the split point to the clip's actual end. When the AI overlap
+      // window extends past the original clip's sourceEnd, we absorb the
+      // tail instead of silently no-oping (the previous guard `a.end >
+      // current.sourceEnd → return state` caused the whole dispatch to
+      // be dropped, leaving the timeline unchanged).
+      const splitEnd = Math.min(a.end, current.sourceEnd);
 
       const replacementClips: Clip[] = [];
       if (a.start - current.sourceStart > 1e-3) {
@@ -394,11 +401,11 @@ function coreReducer(state: State, a: Action): State {
         });
       }
       replacementClips.push(a.with);
-      if (current.sourceEnd - a.end > 1e-3) {
+      if (current.sourceEnd - splitEnd > 1e-3) {
         replacementClips.push({
           ...current,
           id: cryptoUid(),
-          sourceStart: a.end,
+          sourceStart: splitEnd,
         });
       }
 

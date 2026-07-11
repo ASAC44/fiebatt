@@ -13,7 +13,7 @@ imports. The backend expects:
 Two modes:
   - USE_AI_STUBS=true  (default) -> route to _stubs.py, no API keys needed
   - USE_AI_STUBS=false          -> adapt the real modules (Qwen/DashScope for VLM,
-                                   HappyHorse/DashScope for video generation,
+                                   Veo/Wan/HappyHorse for video generation,
                                    ElevenLabs for TTS) to the surface above.
 
 Name mapping from real modules:
@@ -21,12 +21,14 @@ Name mapping from real modules:
   qwen.score_variant                -> gemini.score_variant   (arg order adapted)
   qwen.identify_entity              -> gemini.identify_entity (attr rename)
   qwen.search_keyframes_for_entity -> gemini.find_entity_in_keyframes
+  veo.generate_variant              -> runway.generate
   happyhorse.generate_variant       -> runway.generate
   elevenlabs.generate_narration     -> elevenlabs.narrate    (path -> bytes)
 """
 from __future__ import annotations
 
 import json
+import re
 import types as _types
 from pathlib import Path
 
@@ -52,6 +54,48 @@ def _resolve_use_ai_stubs() -> bool:
 _USE_AI_STUBS = _resolve_use_ai_stubs()
 
 
+_MOTION_EDIT_RE = re.compile(
+    r"\b(jump|jumping|run|running|walk|walking|dance|dancing|wave|waving|"
+    r"turn|turning|spin|spinning|sit|sitting|stand|standing|kick|throw|"
+    r"catch|clap|clapping|nod|bow|fall|falls|leap|leaping)\b"
+)
+_SEQUENCED_MOTION_RE = re.compile(
+    r"\b(then|after|before|followed by|continues?|continue into|resume|"
+    r"resumes?|lands?|smoothly|without stopping|without pause|a few times?|"
+    r"once|twice|three times?)\b"
+)
+
+
+def _rewrite_motion_prompt(prompt_text: str) -> tuple[bool, bool, str]:
+    lowered = prompt_text.lower()
+    motion_edit = bool(_MOTION_EDIT_RE.search(lowered))
+    sequenced_motion = motion_edit and bool(_SEQUENCED_MOTION_RE.search(lowered))
+    if not motion_edit:
+        return False, False, prompt_text
+    if sequenced_motion:
+        return (
+            True,
+            True,
+            "MANDATORY MOTION EDIT: honor the requested action timing exactly. "
+            "Keep the movement phases in the order the user described. Do not "
+            "loop, extend, or repeat the action beyond the requested count. "
+            "When the prompt asks the subject to resume normal motion, blend "
+            "smoothly back into the original gait and forward momentum without "
+            "a stop, freeze, or hard reset. Keep the subject identity, scene, "
+            "camera, lighting, and background consistent.\n\n"
+            + prompt_text,
+        )
+    return (
+        True,
+        False,
+        "MANDATORY MOTION EDIT: perform the requested action clearly. Do not "
+        "merely reproduce the original motion or leave the subject unchanged. "
+        "Keep the subject identity, scene, camera, lighting, and background "
+        "consistent.\n\n"
+        + prompt_text,
+    )
+
+
 if _USE_AI_STUBS:
     gemini = _stubs.gemini
     runway = _stubs.runway
@@ -62,12 +106,15 @@ else:
     _real_settings = _get_ai_settings()
     if not _real_settings.real_ai_ready:
         raise RuntimeError(
-            "USE_AI_STUBS=false requires DASHSCOPE_API_KEY for the live gemini/happyhorse "
-            "provider path. leave USE_AI_STUBS=true for local stub mode."
+            "USE_AI_STUBS=false requires provider credentials for the live gemini/video path. "
+            "set GEMINI_API_KEY for Veo, DASHSCOPE_API_KEY for Wan/HappyHorse, "
+            "or leave USE_AI_STUBS=true for local stub mode."
         )
 
     from app.services import storage
     from ai.services import qwen as _gemini_real
+    from ai.services import veo as _veo
+    from ai.services import wan as _wan
     from ai.services import happyhorse as _happyhorse
     from ai.services import elevenlabs as _el_real
     from ai.services import entity_tracker as _et_real
@@ -162,47 +209,111 @@ else:
         find_entity_in_keyframes=_find_entity_in_keyframes,
     )
 
-    # ------------------------ runway (happyhorse) adapter ------------------------
+    # ------------------------ runway adapter (wan | veo | happyhorse) ------------------------
 
     async def _runway_generate(
         clip_path: str,
         plan: dict,
         style_ref: str | None = None,
         frame_path: str | None = None,
+        source_video_url: str | None = None,
         on_tick=None,
         duration: int = 5,
         resolution: str = "720P",
     ) -> dict:
-        """Drive one HappyHorse generation.
-
-        ``clip_path`` is the source MP4 slice — not passed to HappyHorse
-        (its image conditioning slot expects a still frame).
-
-        ``frame_path`` is a still image (png/jpg) that HappyHorse uses as the
-        opening frame. Pass ``None`` for text-only generation.
-
-        ``duration`` is passed to HappyHorse (3-15s range, clamped internally).
-
-        ``resolution`` — "720P" or "480P". 480P is ~2x faster for previews.
-        """
-        prompt_text = plan.get("prompt_for_runway") or plan.get("prompt_for_veo") or plan.get("prompt") or plan.get("description", "")
+        prompt_text = (
+            plan.get("_edit_prompt")
+            or plan.get("prompt_for_runway")
+            or plan.get("prompt_for_veo")
+            or plan.get("prompt")
+            or plan.get("description", "")
+        )
+        provider = _real_settings.normalized_video_gen_provider
         conditioning = frame_path or style_ref
-        if style_ref:
-            out_path = await _happyhorse.generate_propagation_variant(
-                prompt=prompt_text,
-                style_reference_path=style_ref,
-                reference_frame_path=frame_path,
-                duration=duration,
-                resolution=resolution,
-            )
+        motion_edit, sequenced_motion, prompt_text = _rewrite_motion_prompt(prompt_text)
+        effective_source_video_url = source_video_url
+        if motion_edit:
+            # Plain motion substitutions tend to get copied straight from the
+            # source clip when video-edit sees the original footage. For
+            # sequence-sensitive prompts ("jump a few times, then walk again"),
+            # Wan benefits from keeping the source clip so it can preserve the
+            # gait and transition timing after the action finishes.
+            if not (provider == "wan" and sequenced_motion):
+                effective_source_video_url = None
+
+        if provider == "wan":
+            if style_ref:
+                out_path = await _wan.generate_propagation_variant(
+                    prompt=prompt_text,
+                    style_reference_path=style_ref,
+                    reference_frame_path=frame_path,
+                    duration=duration,
+                    resolution=resolution,
+                )
+            elif effective_source_video_url:
+                # Wan's video-edit model receives the real source clip. This keeps
+                # the surrounding motion and temporal context instead of falling
+                # back to an unrelated text-only generation.
+                out_path = await _wan.generate_edit_variant(
+                    prompt=prompt_text,
+                    source_video_url=effective_source_video_url,
+                    reference_frame_path=conditioning,
+                    on_tick=on_tick,
+                    resolution=resolution,
+                )
+            else:
+                out_path = await _wan.generate_variant(
+                    prompt=prompt_text,
+                    reference_frame_path=conditioning,
+                    on_tick=on_tick,
+                    duration=duration,
+                    resolution=resolution,
+                )
+        elif provider == "veo":
+            if style_ref:
+                out_path = await _veo.generate_propagation_variant(
+                    prompt=prompt_text,
+                    style_reference_path=style_ref,
+                    reference_frame_path=frame_path,
+                    duration=duration,
+                    resolution=resolution,
+                )
+            else:
+                out_path = await _veo.generate_variant(
+                    prompt=prompt_text,
+                    reference_frame_path=conditioning,
+                    on_tick=on_tick,
+                    duration=duration,
+                    resolution=resolution,
+                )
         else:
-            out_path = await _happyhorse.generate_variant(
-                prompt=prompt_text,
-                reference_frame_path=conditioning,
-                on_tick=on_tick,
-                duration=duration,
-                resolution=resolution,
-            )
+            if style_ref:
+                out_path = await _happyhorse.generate_propagation_variant(
+                    prompt=prompt_text,
+                    style_reference_path=style_ref,
+                    reference_frame_path=frame_path,
+                    duration=duration,
+                    resolution=resolution,
+                )
+            else:
+                if effective_source_video_url:
+                    prompt_text = (
+                        "Edit the supplied video directly. Apply the requested change "
+                        "ONLY to the named subject; preserve the camera, framing, "
+                        "background, lighting, shadows, clothing, and every other "
+                        "person or object exactly as in the source. Respect the "
+                        "requested timing relative to the start of this video. "
+                        "Do not regenerate the whole scene.\n\n"
+                        + prompt_text
+                    )
+                out_path = await _happyhorse.generate_variant(
+                    prompt=prompt_text,
+                    reference_frame_path=conditioning,
+                    source_video_url=effective_source_video_url,
+                    on_tick=on_tick,
+                    duration=duration,
+                    resolution=resolution,
+                )
         published_url = await storage.publish(Path(out_path), content_type="video/mp4")
         return {
             "url": published_url,

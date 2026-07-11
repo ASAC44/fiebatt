@@ -91,7 +91,11 @@ export type JobResp = {
   status: JobStatus;
   variants: Variant[];
   error: string | null;
+  /** authoritative edit window accepted by the backend */
+  start_ts: number | null;
+  end_ts: number | null;
 };
+
 
 export type GenerateReq = {
   project_id: string;

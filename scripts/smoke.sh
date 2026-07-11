@@ -4,7 +4,7 @@
 set -euo pipefail
 
 BASE="${BASE:-http://localhost:8000}"
-VIDEO="${VIDEO:-backend/tests/fixtures/test_5s.mp4}"
+VIDEO="${VIDEO:-apps/backend/tests/fixtures/test_5s.mp4}"
 SID="${SID:-$(uuidgen)}"
 
 echo "session: $SID"

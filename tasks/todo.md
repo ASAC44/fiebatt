@@ -7,8 +7,8 @@
 - [completed] decouple `ai.services` stubs/tests from backend-only imports so the ai test suite can run in isolation
 - [completed] pin generate/accept flows to their original clip target and stop swallowing `/api/accept` failures in the frontend
 - [completed] run frontend verification and document the result
-- [completed] move the actual vite/react app from repo root into `frontend/`
-- [completed] keep root npm scripts working by turning root `package.json` into a thin wrapper around `frontend/`
+- [completed] move the actual vite/react app from repo root into `apps/frontend/`
+- [completed] keep root npm scripts working by turning root `package.json` into a thin wrapper around `apps/frontend/`
 - [completed] update docs/config so local dev still reads env from repo root after the move
 - [completed] remove the sentient font import-order warning from the frontend build
 - [completed] pull and merge the incoming dashboard changes once the teammate push lands
@@ -16,8 +16,8 @@
 - [completed] add a first-time onboarding flow for newly signed-in users before they hit the full editor
 - [completed] add an in-studio checklist / next-step guide so the dashboard teaches the core loop instead of dumping controls all at once
 - [completed] verify the revised onboarding flow against web interface / onboarding best practices and document the remaining gaps
-- [pending] reorg the editor frontend around feature folders instead of dumping everything into `frontend/src/components`
-- [pending] split `frontend/src/pages/Studio.tsx` into dashboard shell pieces (`topbar`, workspace layout, keyboard shortcuts, upload/export controls)
+- [pending] reorg the editor frontend around feature folders instead of dumping everything into `apps/frontend/src/components`
+- [pending] split `apps/frontend/src/pages/Studio.tsx` into dashboard shell pieces (`topbar`, workspace layout, keyboard shortcuts, upload/export controls)
 - [pending] pull ai edit flow ui into a shared editor module so `Inspector` and `VibePrompt` stop feeling like two separate dashboards
 - [pending] reduce inline styles in `VibePrompt` and move editor-specific styling next to the feature it belongs to
 - [completed] unify the duplicated generation session hooks into one canonical edit-session controller with optional continuity callbacks
@@ -43,7 +43,7 @@
 - [completed] tighten safe config mismatches in backend/ai wiring without adding network assumptions
 - [completed] run targeted verification for provider mode imports and dev startup checks
 - [completed] mount `ai.services.health` into the backend under `/api/ai` so observability is reachable from the main app
-- [completed] wire an optional gpu worker path into local compose without breaking the default frontend/backend/db loop
+- [completed] wire an optional gpu worker path into local compose without breaking the default apps/frontend + apps/backend + db loop
 - [completed] tighten docs and env examples for the vultr storage/db + gpu worker + ai observability demo story
 - [completed] run targeted verification for backend route mounting, compose validity, and docs accuracy
 
@@ -58,19 +58,19 @@
 - fixed by deriving the active preview frame from `clipAtTime(state.clips, state.playhead)` and `sourceTimeFor(...)`, then feeding that source timestamp into both identify and generate.
 - fixed by wiring `AbortSignal` through the api client and aborting the previous identify request whenever the bbox/clip changes or the effect cleans up. `VibePrompt` now also uses the active preview frame instead of the midpoint.
 - fixed by capturing a generation target snapshot per job and requiring `/api/accept` to succeed before the timeline is locally replaced.
-- verification: `npm run lint` passed, `npm run build` passed with a css import-order warning and a large bundle warning, `pytest ai/tests -q` passed (`17 passed, 8 skipped`)
-- repo cleanup: moved the real frontend app into `frontend/`, narrowed `.gitignore` so the folder itself is tracked, and kept root workflows stable with wrapper scripts in the root `package.json`.
-- repo cleanup verification: `npm --prefix frontend run lint` passed, `npm --prefix frontend run build` passed, `npm run lint` passed, and `npm run build` passed after the move.
-- font cleanup: moved the sentient font load out of `frontend/src/index.css` and into `frontend/index.html`, which removes vite's css import-order warning without changing typography.
+- verification: `npm run lint` passed, `npm run build` passed with a css import-order warning and a large bundle warning, `pytest apps/ai/tests -q` passed (`17 passed, 8 skipped`)
+- repo cleanup: moved the real frontend app into `apps/frontend/`, narrowed `.gitignore` so the folder itself is tracked, and kept root workflows stable with wrapper scripts in the root `package.json`.
+- repo cleanup verification: `npm --prefix apps/frontend run lint` passed, `npm --prefix apps/frontend run build` passed, `npm run lint` passed, and `npm run build` passed after the move.
+- font cleanup: moved the sentient font load out of `apps/frontend/src/index.css` and into `apps/frontend/index.html`, which removes vite's css import-order warning without changing typography.
 - dashboard reorg prep: current hot path is `Studio` + `Preview` + `Timeline` + `Inspector` + `VibePrompt` + `useGenerationSession` + `edl` store. once the incoming branch is pulled, those are the main seams to reorganize without changing product behavior.
 - current product reality vs pitch: backend already has real routes for upload/generate/accept/entities/propagate/timeline/narrate/export, but the frontend mostly exposes upload + prompt + accept + local timeline + export button. continuity propagation, narrated reveal, and observability are either missing or underexposed in the dashboard.
 - immediate build order: first fix truth-breaking bugs (`export`, reopen hydration, route/api mismatches), then expose continuity + reveal in the dashboard, then do the shell/file reorg around those stabilized workflows instead of reorganizing broken flows.
 - live-ai wiring cleanup: `ai.services` now resolves stub vs real mode from shared settings instead of a one-off env parse, so backend config and the ai facade stop disagreeing about which provider path is active.
 - live-ai prereqs: real mode now fails fast with a clear `GEMINI_API_KEY` message, `elevenlabs` errors clearly when its key is missing, and the dev backend script prints whether it is booting stub or real mode before uvicorn starts.
-- local install path: `backend/requirements.txt` now includes `google-genai` and `python-dotenv`, which were already assumed by the real-provider code path and infra docker image but missing from the backend's local install story.
+- local install path: `apps/backend/requirements.txt` now includes `google-genai` and `python-dotenv`, which were already assumed by the real-provider code path and infra docker image but missing from the backend's local install story.
 - config tightening: `MEDIA_URL_MODE` now normalizes case and validates allowed values, backend settings expose `ai_mode` / readiness helpers, and `/api/health` now reports ai mode plus storage mode so the running app advertises what it's actually wired to.
-- verification: `bash -n scripts/dev_backend.sh` passed, `backend/.venv/bin/python -m py_compile ...` passed for the touched python files, stub-mode import plus `/api/health` check passed, explicit real-mode import without `GEMINI_API_KEY` now fails with the expected clear runtime error, and `PYTHONPATH=\"$PWD:$PWD/backend\" USE_AI_STUBS=true backend/.venv/bin/python -m pytest ai/tests/test_adapters.py -q` passed (`6 passed, 2 skipped`).
-- observability slice: `backend/app/main.py` now mounts `ai.services.health` at `/api/ai`, so the main backend serves `/api/ai/health`, `/api/ai/timeline`, and `/api/ai/stream` without a sidecar app.
+- verification: `bash -n scripts/dev_backend.sh` passed, `apps/backend/.venv/bin/python -m py_compile ...` passed for the touched python files, stub-mode import plus `/api/health` check passed, explicit real-mode import without `GEMINI_API_KEY` now fails with the expected clear runtime error, and `PYTHONPATH=\"$PWD/apps:$PWD/apps/backend\" USE_AI_STUBS=true apps/backend/.venv/bin/python -m pytest apps/ai/tests/test_adapters.py -q` passed (`6 passed, 2 skipped`).
+- observability slice: `apps/backend/app/main.py` now mounts `ai.services.health` at `/api/ai`, so the main backend serves `/api/ai/health`, `/api/ai/timeline`, and `/api/ai/stream` without a sidecar app.
 - local infra slice: `infra/docker-compose.yml` now defaults compose-backend traffic to local postgres and adds a profile-gated `gpu-worker` service. default `frontend + backend + db` still stays lightweight; gpu startup is opt-in.
 - docs slice: `README.md` and `.env.example` now spell out the judge/demo path clearly: `USE_AI_STUBS=false`, vultr postgres for state, vultr object storage for media, `GPU_WORKER_URL` for sam/clip, and observability endpoints to keep open during the demo.
 - verification: backend route smoke passed with `TestClient` for `/api/health`, `/api/ai/health`, and `/api/ai/timeline?last_n=2`. compose verification was limited to yaml parsing because `docker` is not installed in this sandbox, so i could not run `docker compose config` or boot the gpu profile here.
@@ -84,7 +84,7 @@
 - vibe/pro convergence pass: `useGenerationSession` is now the one real generation controller, continuity callbacks hang off that shared hook, and vibe accepts now kick off the same entity-discovery flow the pro inspector uses.
 - studio shell cleanup: the right rail no longer collapses into a disconnected chat-only pane in vibe mode. checklist + inspector stay mounted, and the agent lives as a tab inside the same rail so clip context, continuity state, and chat stop competing as separate products.
 - agent surface cleanup: agent history now preserves prior assistant/model turns instead of downgrading them to user messages, export now has a dedicated `get_export_status` tool, and the agent system prompt reflects the actual preview/snapshot/score/remix workflow instead of pretending the product ends at generate-and-accept.
-- verification: `bun run lint` passed, `bun run build` passed twice after the refactor, and `python3 -m py_compile backend/app/api/routes/agent.py backend/app/services/agent_tools.py` passed.
+- verification: `bun run lint` passed, `bun run build` passed twice after the refactor, and `python3 -m py_compile apps/backend/app/api/routes/agent.py apps/backend/app/services/agent_tools.py` passed.
 - vibe edit flow cleanup: both `VibePrompt` and the inspector ai tab now derive a real playhead-centered edit window, pass that exact window through generation, and preserve the original source clip separately so accept can patch the right range back into the timeline.
 - vibe timeline integrity: generated accepts now use `replace_range` when the ai target is only a subrange, which stops vibe edits from nuking an entire source clip just because the user paused on one moment.
 - scrubber truthfulness: vibe scrubber segment markers now come from accumulated timeline spans rather than `sourceStart/sourceEnd`, so the scrubber finally reflects where clips actually sit in the edited reel.

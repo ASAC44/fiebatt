@@ -40,7 +40,7 @@ services:
     ports:
       - "8001:8001"
     volumes:
-      - ../gpu-worker/checkpoints:/app/checkpoints:ro
+      - ../apps/gpu-worker/checkpoints:/app/checkpoints:ro
 
   db:
     image: postgres:16-alpine

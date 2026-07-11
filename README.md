@@ -4,10 +4,10 @@ prompt-driven video editor for localized reality edits and continuity propagatio
 
 ## repo layout
 
-- `frontend/` — vite/react/typescript app
-- `backend/` — fastapi api, models, workers, export pipeline
-- `ai/` — provider adapters, prompts, ai-side tests
-- `gpu-worker/` — optional sam/clip worker
+- `apps/frontend/` — vite/react/typescript app
+- `apps/backend/` — fastapi api, models, workers, export pipeline
+- `apps/ai/` — provider adapters, prompts, ai-side tests
+- `apps/gpu-worker/` — optional sam/clip worker
 - `infra/` — dockerfiles, compose, deploy helpers
 
 ## local dev
@@ -21,7 +21,7 @@ prereqs:
 install frontend deps:
 
 ```bash
-npm install --prefix frontend
+npm install --prefix apps/frontend
 ```
 
 frontend from repo root:
@@ -33,7 +33,7 @@ npm run dev
 frontend directly:
 
 ```bash
-npm --prefix frontend run dev
+npm --prefix apps/frontend run dev
 ```
 
 backend:
@@ -42,7 +42,7 @@ backend:
 ./scripts/dev_backend.sh
 ```
 
-the frontend lives in `frontend/`, but vite reads env from the repo root so the existing root `.env` still works.
+the frontend lives in `apps/frontend/`, but vite reads env from the repo root so the existing root `.env` still works.
 the root `package.json` is just a thin wrapper so you can keep using the usual root commands without stuffing the actual app back into repo root.
 
 compose stack from repo root:
@@ -76,7 +76,7 @@ npm run build
 ai tests:
 
 ```bash
-pytest ai/tests -q
+pytest apps/ai/tests -q
 ```
 
 smoke flow:
@@ -132,7 +132,7 @@ for a concrete judge-facing setup:
 5. point `GPU_WORKER_URL` at the vultr gpu worker, or bring up the local compose gpu profile if you have the worker image + checkpoint available.
 6. keep `/api/ai/health`, `/api/ai/timeline`, and `/api/ai/stream` open during the demo so provider latency, error rate, and gpu reachability are visible instead of hand-waved.
 
-the local gpu profile assumes the sam checkpoint is present at `gpu-worker/checkpoints/sam2.1_hiera_small.pt`. if that file is missing, the worker can still boot and answer `/health`, but sam requests will fail when first used.
+the local gpu profile assumes the sam checkpoint is present at `apps/gpu-worker/checkpoints/sam2.1_hiera_small.pt`. if that file is missing, the worker can still boot and answer `/health`, but sam requests will fail when first used.
 
 ## iris CLI + agent skill
 
@@ -146,10 +146,10 @@ iris auth login --base-url http://localhost:8000
 install the agent skill (one-liner for any claude code user):
 
 ```bash
-mkdir -p ~/.claude/skills/iris-edit && curl -sL https://raw.githubusercontent.com/stephenhungg/iris/main/cli/SKILL.md -o ~/.claude/skills/iris-edit/SKILL.md
+mkdir -p ~/.claude/skills/iris-edit && curl -sL https://raw.githubusercontent.com/stephenhungg/iris/main/apps/cli/SKILL.md -o ~/.claude/skills/iris-edit/SKILL.md
 ```
 
-for other agents (codex, openclaw, cursor), paste the contents of `cli/SKILL.md` as a system prompt.
+for other agents (codex, openclaw, cursor), paste the contents of `apps/cli/SKILL.md` as a system prompt.
 
 docs: [docs.useiris.tech](https://docs.useiris.tech)
 

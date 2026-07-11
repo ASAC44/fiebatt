@@ -2,10 +2,26 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$REPO_ROOT/backend"
+cd "$REPO_ROOT/apps/backend"
 
-if [ ! -d .venv ]; then
-  python3 -m venv .venv
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [ -z "$PYTHON_BIN" ]; then
+  for candidate in python3.13 python3.12 python3.11 python3; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      PYTHON_BIN="$candidate"
+      break
+    fi
+  done
+fi
+
+if [ -z "$PYTHON_BIN" ]; then
+  echo "[dev_backend] no python interpreter found"
+  exit 1
+fi
+
+if [ ! -d .venv ] || ! .venv/bin/python -c "import sys" >/dev/null 2>&1 || ! .venv/bin/pip --version >/dev/null 2>&1; then
+  rm -rf .venv
+  "$PYTHON_BIN" -m venv .venv
 fi
 
 # shellcheck disable=SC1091
@@ -49,7 +65,7 @@ else
   fi
 fi
 
-# backend imports both `app.*` (from ./backend) and `ai.*` (from repo root)
-export PYTHONPATH="$REPO_ROOT:$REPO_ROOT/backend${PYTHONPATH:+:$PYTHONPATH}"
+# backend imports both `app.*` (from apps/backend) and `ai.*` (from apps)
+export PYTHONPATH="$REPO_ROOT/apps:$REPO_ROOT/apps/backend${PYTHONPATH:+:$PYTHONPATH}"
 
 exec uvicorn app.main:app --reload --host 0.0.0.0 --port 8000

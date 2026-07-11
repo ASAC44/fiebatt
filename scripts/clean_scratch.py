@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Garbage-collect the backend scratch directory.
 
-The FastAPI process treats `backend/storage/<category>/` as a disposable
+The FastAPI process treats `apps/backend/storage/<category>/` as a disposable
 cache for ffmpeg inputs/outputs. Nothing deletes from it, so on a long-
 running server it grows forever until the disk fills.
 
@@ -47,8 +47,8 @@ log = logging.getLogger("iris.clean_scratch")
 
 
 def _resolve_scratch_root(explicit: Path | None) -> Path:
-    """Find the scratch dir. Prefer --root, else backend/storage relative
-    to the script, else $PWD/backend/storage."""
+    """Find the scratch dir. Prefer --root, else apps/backend/storage relative
+    to the script, else $PWD/apps/backend/storage."""
     if explicit is not None:
         return explicit.resolve()
     here = Path(__file__).resolve().parent.parent
@@ -94,7 +94,7 @@ def _sweep(directory: Path, *, cutoff: float, dry_run: bool) -> tuple[int, int]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="prune scratch videos/keyframes")
     ap.add_argument("--root", type=Path, default=None,
-                    help="scratch dir (default: ./backend/storage)")
+                    help="scratch dir (default: ./apps/backend/storage)")
     ap.add_argument("--max-age-hours", type=float, default=48.0,
                     help="delete files older than this (default: 48)")
     ap.add_argument("--include-uploads", action="store_true",

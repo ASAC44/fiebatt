@@ -1,8 +1,8 @@
 FROM oven/bun:1 AS build
 WORKDIR /app
-COPY frontend/package.json frontend/bun.lock* ./
+COPY apps/frontend/package.json apps/frontend/bun.lock* ./
 RUN bun install --frozen-lockfile || bun install
-COPY frontend/ .
+COPY apps/frontend/ .
 # vite bakes VITE_* env vars into the bundle at build time
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_ANON_KEY

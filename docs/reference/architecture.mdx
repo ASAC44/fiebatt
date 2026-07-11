@@ -9,11 +9,11 @@ Iris is organized as a multi-surface application with a frontend editor, a backe
 
 ## Repository map
 
-- `frontend/`: React, Vite, route surfaces, editor UI, project browsing, continuity UI
-- `backend/`: FastAPI routes, database models, workers, media-processing pipeline
-- `ai/`: provider adapters, prompts, AI-side configuration and tests
-- `cli/`: command-line interface wrapping the backend API, includes multi-agent video analysis
-- `gpu-worker/`: optional segmentation and vision-heavy worker
+- `apps/frontend/`: React, Vite, route surfaces, editor UI, project browsing, continuity UI
+- `apps/backend/`: FastAPI routes, database models, workers, media-processing pipeline
+- `apps/ai/`: provider adapters, prompts, AI-side configuration and tests
+- `apps/cli/`: command-line interface wrapping the backend API, includes multi-agent video analysis
+- `apps/gpu-worker/`: optional segmentation and vision-heavy worker
 - `infra/`: local and deploy infrastructure helpers
 
 ## Frontend responsibilities
@@ -65,7 +65,7 @@ This lets users resume previous agent sessions, review what the agent did, and m
 
 ## CLI
 
-The `cli/` directory provides a command-line interface that wraps the backend API. It supports project listing, uploads, and triggering edits from the terminal.
+The `apps/cli/` directory provides a command-line interface that wraps the backend API. It supports project listing, uploads, and triggering edits from the terminal.
 
 The CLI also includes a multi-agent video analysis mode where multiple AI agents can collaboratively analyze and plan edits for a video, useful for batch processing and automated workflows.
 

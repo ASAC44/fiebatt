@@ -4,14 +4,14 @@ RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY backend/requirements.txt ./
+COPY apps/backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir google-genai python-dotenv
 
-COPY backend/ ./backend/
-COPY ai/ ./ai/
+COPY apps/backend/ ./apps/backend/
+COPY apps/ai/ ./apps/ai/
 
-ENV PYTHONPATH=/app:/app/backend
+ENV PYTHONPATH=/app/apps:/app/apps/backend
 
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

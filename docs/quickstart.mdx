@@ -51,10 +51,10 @@ description: "Run Iris locally, verify the stack, and make your first localized 
 
 The repo is split by responsibility:
 
-- `frontend/` for the Vite and React app
-- `backend/` for the FastAPI service and worker orchestration
-- `ai/` for provider adapters and prompts
-- `gpu-worker/` for optional segmentation and vision support
+- `apps/frontend/` for the Vite and React app
+- `apps/backend/` for the FastAPI service and worker orchestration
+- `apps/ai/` for provider adapters and prompts
+- `apps/gpu-worker/` for optional segmentation and vision support
 - `infra/` for Docker Compose and deployment helpers
 
 <div className="docs-stage">
@@ -69,7 +69,7 @@ The repo is split by responsibility:
   <Step title="Install frontend dependencies">
 
 ```bash
-npm install --prefix frontend
+npm install --prefix apps/frontend
 ```
 
   </Step>
@@ -87,7 +87,7 @@ The frontend runs on `http://localhost:3000`.
 Run the FastAPI backend with the repo-root environment loaded.
 
 ```bash
-cd backend && uvicorn app.main:app --reload --port 8000
+cd apps/backend && PYTHONPATH=..:$(pwd) uvicorn app.main:app --reload --port 8000
 ```
 
 The backend serves uploads, projects, generation, identify, mask, propagation, narration, and export on `http://localhost:8000`.
@@ -165,7 +165,7 @@ curl http://localhost:8000/api/ai/health
 
 ## Optional: the CLI
 
-Iris includes a command-line interface in the `cli/` directory that wraps the backend API. You can use it to list projects, upload clips, and trigger edits from your terminal. It also supports multi-agent video analysis for batch workflows.
+Iris includes a command-line interface in the `apps/cli/` directory that wraps the backend API. You can use it to list projects, upload clips, and trigger edits from your terminal. It also supports multi-agent video analysis for batch workflows.
 
 ## Read next
 

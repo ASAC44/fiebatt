@@ -1,0 +1,430 @@
+.studio {
+  /* resizable grid — splitters write to these vars */
+  --left-w: 320px;
+  --right-w: 320px;
+  --tl-h: 240px;
+  --split-x: 1px;
+  --split-y: 0px;
+  --bg: var(--background);
+  --panel: var(--background);
+  --panel-2: var(--background);
+  --panel-3: color-mix(in oklab, var(--background) 92%, var(--foreground));
+  --recessed: var(--background);
+  --ink: var(--foreground);
+  --ink-dim: color-mix(in oklab, var(--foreground) 78%, transparent);
+  --ink-fade: color-mix(in oklab, var(--foreground) 58%, transparent);
+  --ink-ghost: color-mix(in oklab, var(--foreground) 34%, transparent);
+  --edge: var(--border);
+  --edge-2: color-mix(in oklab, var(--border) 68%, var(--foreground));
+  --edge-bright: color-mix(in oklab, var(--primary) 40%, var(--border));
+  --chrome: var(--foreground);
+  --chrome-mid: var(--primary);
+  --chrome-lo: var(--muted-foreground);
+  --err: var(--destructive);
+  --f-ui: var(--font-instrument-sans), Arial, sans-serif;
+  --f-mono: var(--font-instrument-sans), Arial, sans-serif;
+  --gradient-chrome: linear-gradient(180deg, var(--primary), #b91c3c);
+  --gradient-chrome-text: linear-gradient(135deg, var(--primary), #fb7185, var(--foreground));
+  --dur-s: 120ms;
+  --dur-m: 180ms;
+  --ease: ease;
+
+  display: grid;
+  grid-template-rows: 40px minmax(0, 1fr) var(--tl-h);
+  height: 100vh;
+  max-height: 100vh;
+  background: var(--bg);
+  overflow: hidden;
+  position: relative;
+}
+
+/* ─── top bar ────────────────────────────────────────────────────────── */
+
+.topbar {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 0 10px;
+  background: var(--background);
+  border-bottom: 1px solid var(--edge);
+  user-select: none;
+  gap: 6px;
+  isolation: isolate;
+}
+
+.topbar__left,
+.topbar__right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.topbar__right { justify-content: flex-end; gap: 8px; }
+.topbar__center { display: flex; justify-content: center; }
+
+.topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 4px 4px;
+  border-radius: 2px;
+  transition: background var(--dur-s), box-shadow var(--dur-m) var(--ease);
+}
+.topbar__brand:hover {
+  background: var(--panel-2);
+  box-shadow: 0 0 32px -10px rgba(190, 220, 255, 0.22);
+}
+
+.topbar__mark {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: url("/logo.png") center / contain no-repeat;
+  box-shadow: none;
+  position: relative;
+}
+.topbar__mark::after {
+  content: none;
+}
+
+.topbar__word {
+  font-family: var(--f-ui);
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: 0;
+  color: var(--foreground);
+}
+
+.topbar__divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.18) 50%,
+    transparent 100%
+  );
+}
+
+.topbar__menu {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--ink-dim);
+  border-radius: 2px;
+  transition: background var(--dur-s), color var(--dur-s);
+}
+.topbar__menu:hover { background: var(--panel-2); color: var(--ink); }
+
+.topbar__proj {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--ink-dim);
+  padding: 4px 14px;
+  border-radius: 9999px;
+  background:
+    linear-gradient(180deg, rgba(24, 24, 24, 0.9), rgba(14, 14, 14, 0.9));
+  letter-spacing: 0.08em;
+  isolation: isolate;
+  /* chrome rim painted via gradient mask — stays crisp at 1px */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 1px 0 rgba(0, 0, 0, 0.35);
+}
+.topbar__proj::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background: linear-gradient(
+    135deg,
+    rgba(244, 244, 244, 0.42) 0%,
+    rgba(120, 120, 120, 0.12) 30%,
+    rgba(232, 232, 232, 0.4) 65%,
+    rgba(100, 100, 100, 0.14) 100%
+  );
+  -webkit-mask:
+    linear-gradient(#000, #000) content-box,
+    linear-gradient(#000, #000);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+}
+/* the small indicator dot that leads the label — a tiny polished bead. */
+.topbar__proj::after {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 30% 30%, #f8f8f8 0%, #b8b8b8 55%, #5a5a5a 100%);
+  box-shadow:
+    inset 0 -1px 0 rgba(0, 0, 0, 0.5),
+    0 0 6px rgba(232, 232, 232, 0.35);
+  order: -1;
+}
+
+.topbar__ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  font-size: 11px;
+  color: var(--ink-dim);
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  transition: border-color var(--dur-s), color var(--dur-s);
+}
+.topbar__ghost:hover { border-color: var(--edge-2); color: var(--ink); }
+
+/* vibe / pro toggle pill — subtle chrome rim in off state, fully filled
+   bevel in on state. mirrors the pill-nav aesthetic on the landing page. */
+.topbar__vibe {
+  position: relative;
+  padding: 4px 14px;
+  border-radius: 9999px;
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-fade);
+  background: transparent;
+  border: 1px solid var(--edge);
+  transition:
+    color var(--dur-s) var(--ease),
+    border-color var(--dur-s) var(--ease),
+    background var(--dur-m) var(--ease),
+    box-shadow var(--dur-m) var(--ease);
+  isolation: isolate;
+}
+.topbar__vibe:hover {
+  color: var(--ink);
+  border-color: var(--edge-2);
+  box-shadow: 0 0 22px -8px rgba(232, 232, 232, 0.35);
+}
+.topbar__vibe--on {
+  color: #0a0a0a;
+  border-color: transparent;
+  background:
+    linear-gradient(
+      180deg,
+      #f4f4f4 0%,
+      #d0d0d0 46%,
+      #9a9a9a 50%,
+      #bcbcbc 54%,
+      #e8e8e8 100%
+    );
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(0, 0, 0, 0.45);
+}
+.topbar__vibe--on:hover {
+  filter: brightness(1.06);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(0, 0, 0, 0.45),
+    0 0 32px -10px rgba(190, 220, 255, 0.45);
+}
+
+.topbar__export {
+  padding: 4px 16px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  background:
+    linear-gradient(
+      180deg,
+      #f4f4f4 0%,
+      #d0d0d0 46%,
+      #9a9a9a 50%,
+      #bcbcbc 54%,
+      #e8e8e8 100%
+    ),
+    linear-gradient(
+      135deg,
+      #707070 0%,
+      #B0B0B0 25%,
+      #E0E0E0 50%,
+      #B0B0B0 75%,
+      #707070 100%
+    );
+  background-size: 100% 100%, 220% 100%;
+  background-blend-mode: overlay;
+  animation: shimmer 6s ease-in-out infinite;
+}
+.topbar__export:hover:enabled {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(0, 0, 0, 0.45),
+    0 0 38px -8px rgba(190, 220, 255, 0.35);
+}
+
+/* ─── body: 3 columns + 2 vertical splitters ─────────────────────────── */
+
+.studio__body {
+  display: grid;
+  grid-template-columns:
+    var(--left-w)
+    var(--split-x)
+    minmax(0, 1fr)
+    var(--split-x)
+    var(--right-w);
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.studio__left,
+.studio__right {
+  position: relative;
+  min-height: 0;
+  background: var(--background);
+  display: flex;
+  flex-direction: column;
+}
+.studio__left,
+.studio__right {
+  border: 0;
+}
+
+/* inner bevel — a 1px sheen on the inward edge so the panel reads as a
+   real piece of metal sitting next to the splitter. */
+.studio__center {
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--background);
+  overflow: hidden;
+  padding-bottom: 8px;
+}
+
+/* ─── bottom: timeline ───────────────────────────────────────────────── */
+
+.studio__bottom {
+  border-top: 0;
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ─── splitters ──────────────────────────────────────────────────────── */
+/*
+ * Each splitter is a 1px visible rail with a wider invisible hit region.
+ * A wider hit region (::before) makes dragging forgiving without
+ * visually fattening the seam.
+ */
+
+.splitter {
+  position: relative;
+  background: var(--edge);
+  z-index: 5;
+}
+.splitter::before {
+  content: "";
+  position: absolute;
+  inset: -6px;
+}
+.splitter::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  background: var(--edge);
+  pointer-events: none;
+}
+
+.splitter--vertical {
+  cursor: col-resize;
+  width: 100%;
+  height: 100%;
+}
+.splitter--vertical::after {
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+}
+
+.splitter--horizontal {
+  cursor: row-resize;
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 8px;
+  background: transparent;
+  z-index: 5;
+}
+.splitter--horizontal::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: var(--edge);
+  transform: translateY(-50%);
+}
+.splitter--horizontal::after {
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 4px;
+  transform: translate(-50%, -50%);
+}
+
+/* ── vibe mode ── */
+/* 60/40 split: video player left, agent chat right */
+
+/* hide left sidebar and timeline in vibe mode */
+.studio--vibe .studio__left,
+.studio--vibe .studio__bottom {
+  display: none !important;
+}
+
+/* hide the left splitter and bottom splitter */
+.studio--vibe .splitter--vertical:first-of-type,
+.studio--vibe .studio__h-splitter-wrap {
+  display: none !important;
+}
+
+/* 60/40 grid: center (video) | splitter | right (chat) */
+.studio--vibe .studio__body {
+  grid-template-columns: 3fr var(--split-x) 2fr;
+}
+
+/* right sidebar is visible in vibe mode (agent chat fills it) */
+.studio--vibe .studio__right {
+  display: flex !important;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.studio--vibe .agent-chat {
+  height: 100%;
+  min-height: 0;
+  border-left: 0;
+}
+
+/* collapse the timeline row */
+.studio--vibe {
+  grid-template-rows: 40px 1fr;
+}
+
+/* hide the timeline toolbar row if it exists */
+.studio--vibe .tbar {
+  display: none !important;
+}
+
+/* make the preview video fill the space */
+.studio--vibe .pv {
+  height: 100%;
+}

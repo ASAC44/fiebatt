@@ -2,9 +2,13 @@
   "name": "iris-root",
   "private": true,
   "scripts": {
-    "dev": "npm --prefix frontend run dev",
-    "build": "npm --prefix frontend run build",
-    "preview": "npm --prefix frontend run preview",
-    "lint": "npm --prefix frontend run lint"
+    "dev": "npm --prefix apps/frontend run dev",
+    "build": "npm --prefix apps/frontend run build",
+    "preview": "npm --prefix apps/frontend run preview",
+    "lint": "npm --prefix apps/frontend run lint",
+    "web:dev": "npm --prefix apps/web run dev",
+    "web:build": "npm --prefix apps/web run build",
+    "web:start": "npm --prefix apps/web run start",
+    "web:lint": "npm --prefix apps/web run lint"
   }
 }

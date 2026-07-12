@@ -10,6 +10,7 @@ from app.db.init import create_all
 from app.workers.runner import JobRunner
 from app.api.routes import (
     health,
+    auth,
     upload,
     projects,
     generate,
@@ -76,6 +77,7 @@ if not settings.s3_enabled:
     )
 
 app.include_router(health.router, prefix="/api")
+app.include_router(auth.router, prefix="/api")
 app.include_router(upload.router, prefix="/api")
 app.include_router(projects.router, prefix="/api")
 app.include_router(generate.router, prefix="/api")

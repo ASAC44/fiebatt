@@ -5,20 +5,20 @@ description: "A high-level map of the fiebatt codebase and the responsibilities 
 
 # Architecture
 
-fiebatt is organized as a multi-surface application with a frontend editor, a backend API, AI adapters, and an optional GPU worker.
+fiebatt is organized as a multi-surface application with a Next.js editor, a backend API, AI adapters, and an optional GPU worker.
 
 ## Repository map
 
-- `apps/frontend/`: React, Vite, route surfaces, editor UI, project browsing, continuity UI
+- `apps/web/`: Next.js route surfaces, editor UI, project browsing, landing pages, continuity UI
 - `apps/backend/`: FastAPI routes, database models, workers, media-processing pipeline
 - `apps/ai/`: provider adapters, prompts, AI-side configuration and tests
 - `apps/cli/`: command-line interface wrapping the backend API, includes multi-agent video analysis
 - `apps/gpu-worker/`: optional segmentation and vision-heavy worker
 - `infra/`: local and deploy infrastructure helpers
 
-## Frontend responsibilities
+## Web responsibilities
 
-The frontend owns:
+The Next.js app owns:
 
 - navigation between landing, projects, and editor
 - upload initiation
@@ -73,8 +73,6 @@ The CLI also includes a multi-agent video analysis mode where multiple AI agents
 
 The project uses GitHub Actions for continuous integration and deployment:
 
-- **Typecheck** — runs TypeScript strict-mode checks on the frontend
-- **Tests** — runs backend and frontend test suites
+- **Typecheck/build** — runs the Next.js production build
+- **Tests** — runs backend and CLI test suites
 - **Auto-deploy** — pushes to Vultr on merge to main
-- **Docs sync** — automatically deploys documentation updates to Mintlify
-

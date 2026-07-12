@@ -11,11 +11,11 @@ class Session(Base):
     __tablename__ = "sessions"
 
     # id format:
-    #   • anon browsers → random uuid (from X-Session-Id header)
-    #   • signed-in users → "user:{supabase_uuid}" (stable across devices)
+    #   • anon compatibility → random uuid (from X-Session-Id header)
+    #   • signed-in users → "user:{user_id}" (stable across devices)
     id: Mapped[str] = mapped_column(String, primary_key=True)
 
-    # populated when the request carried a verified supabase jwt.
+    # populated when the request carried a verified first-party jwt.
     # null for anon sessions.
     user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     email: Mapped[Optional[str]] = mapped_column(String, nullable=True)

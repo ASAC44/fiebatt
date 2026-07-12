@@ -16,6 +16,7 @@ import {
   listConversations,
   type ChatMessageResp,
 } from "@/lib/api";
+import { getAuthToken, redirectToLogin } from "@/lib/auth";
 import {
   useAgent,
   type AgentAction,
@@ -124,6 +125,8 @@ export function useAgentStream(projectId?: string | null) {
           "Content-Type": "application/json",
           "X-Session-Id": getSessionId(),
         };
+        const token = getAuthToken();
+        if (token) headers.Authorization = `Bearer ${token}`;
 
         // Build conversation history from messages already in state.
         // We snapshot *before* the user message we just dispatched
@@ -156,6 +159,9 @@ export function useAgentStream(projectId?: string | null) {
         });
 
         if (!response.ok) {
+          if (response.status === 401) {
+            redirectToLogin();
+          }
           const text = await response.text().catch(() => "");
           throw new Error(`${response.status}: ${text}`);
         }

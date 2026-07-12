@@ -30,8 +30,8 @@ Everything in this folder is yours. FastAPI + Python.
 
 ## Key interactions
 - You import services from `apps/ai/` (Person 3) — gemini, runway, elevenlabs, entity tracker
-- Frontend (Person 1) consumes your API — coordinate on schema changes
+- Web app (Person 1) consumes your API — coordinate on schema changes
 - Audio: replaced segments = muted, originals = passthrough
 
 ## Don't touch
-- `apps/frontend/`, `ai/services/`, `infra/`
+- `apps/web/`, `ai/services/`, `infra/`

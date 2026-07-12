@@ -29,13 +29,13 @@ description: "Run fiebatt locally, verify the stack, and make your first localiz
 </div>
 
 <Tip>
-  The happy path is: install frontend dependencies, start the frontend, start the backend, verify health, then upload a clip and test one localized edit.
+  The happy path is: install web dependencies, start the web app, start the backend, verify health, then upload a clip and test one localized edit.
 </Tip>
 
 <div className="docs-card-grid">
   <div className="docs-card">
-    <h3>Frontend</h3>
-    <p>Vite and React app for landing, projects, and the active editing surface.</p>
+    <h3>Web app</h3>
+    <p>Next.js app for landing, projects, and the active editing surface.</p>
   </div>
   <div className="docs-card">
     <h3>Backend</h3>
@@ -51,7 +51,7 @@ description: "Run fiebatt locally, verify the stack, and make your first localiz
 
 The repo is split by responsibility:
 
-- `apps/frontend/` for the Vite and React app
+- `apps/web/` for the Next.js app
 - `apps/backend/` for the FastAPI service and worker orchestration
 - `apps/ai/` for provider adapters and prompts
 - `apps/gpu-worker/` for optional segmentation and vision support
@@ -66,20 +66,20 @@ The repo is split by responsibility:
   </p>
 
   <Steps>
-  <Step title="Install frontend dependencies">
+  <Step title="Install web dependencies">
 
 ```bash
-npm install --prefix apps/frontend
+npm install --prefix apps/web
 ```
 
   </Step>
-  <Step title="Start the frontend">
+  <Step title="Start the web app">
 
 ```bash
 npm run dev
 ```
 
-The frontend runs on `http://localhost:3000`.
+The web app runs on `http://localhost:3001`.
 
   </Step>
   <Step title="Start the backend">
@@ -100,7 +100,8 @@ curl http://localhost:8000/api/health
 curl http://localhost:8000/api/ai/health
 ```
 
-Open `http://localhost:3000` once both checks are green.
+Open `http://localhost:3001` once both checks are green.
+Create an account at `/signup`, then open `/projects` to start a reel.
 
   </Step>
   </Steps>

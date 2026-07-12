@@ -3,13 +3,17 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Loader2, Plus } from "lucide-react";
 
 import {
   deleteProject,
   listProjects,
+  me,
+  type Me,
   type ProjectListItem,
 } from "@/lib/api";
+import { clearAuthToken, hasAuthToken } from "@/lib/auth";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { ProjectCard } from "@/components/project-card";
@@ -39,14 +43,23 @@ const MOCK_PROJECTS = [
 ];
 
 export function ProjectsClient() {
+  const router = useRouter();
   const [items, setItems] = useState<ProjectListItem[] | null>(null);
+  const [profile, setProfile] = useState<Me | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
+    if (!hasAuthToken()) {
+      router.replace("/login?next=/projects");
+      return () => {
+        alive = false;
+      };
+    }
 
-    listProjects()
-      .then((projects) => {
+    Promise.all([me(), listProjects()])
+      .then(([currentUser, projects]) => {
+        if (alive) setProfile(currentUser);
         if (alive) setItems(projects);
       })
       .catch((err: unknown) => {
@@ -56,7 +69,15 @@ export function ProjectsClient() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [router]);
+
+  function handleLogout() {
+    clearAuthToken();
+    router.replace("/login");
+  }
+
+  const displayName = profile?.email?.split("@")[0] || "there";
+  const avatarLetter = (profile?.email?.[0] || "V").toUpperCase();
 
   async function handleDelete(projectId: string) {
     const previous = items;
@@ -92,8 +113,11 @@ export function ProjectsClient() {
           <div className="flex items-center gap-2">
             <ThemeToggle />
             <Button className="h-10 px-4 text-sm">Go premium</Button>
+            <Button className="h-10 px-4 text-sm" onClick={handleLogout} variant="ghost">
+              Log out
+            </Button>
             <span className="flex size-10 items-center justify-center rounded-full bg-card text-base font-semibold ring-1 ring-border">
-              V
+              {avatarLetter}
             </span>
           </div>
         </div>
@@ -102,7 +126,7 @@ export function ProjectsClient() {
       <section className="mx-auto flex max-w-7xl flex-col gap-8 px-5 py-8">
         <div>
           <h1 className="text-4xl font-semibold tracking-normal">
-            Welcome back, vimzh.dev
+            Welcome back, {displayName}
           </h1>
         </div>
 

@@ -15,7 +15,33 @@ Returns server liveness status.
 
 ### `GET /api/me`
 
-Returns the currently authenticated user profile.
+Returns the currently authenticated user profile for a JWT-backed session.
+
+## Auth
+
+### `POST /api/auth/signup`
+
+Creates a first-party fiebatt account.
+
+**Request Body:**
+- `email`: Account email address.
+- `password`: Password, minimum 8 characters.
+
+**Responses:**
+- `201 Created`: `{ "access_token": "string", "token_type": "bearer", "user": { "id": "string", "email": "string" } }`
+- `409 Conflict`: Email is already registered.
+
+### `POST /api/auth/login`
+
+Authenticates an existing account.
+
+**Request Body:**
+- `email`: Account email address.
+- `password`: Account password.
+
+**Responses:**
+- `200 OK`: `{ "access_token": "string", "token_type": "bearer", "user": { "id": "string", "email": "string" } }`
+- `401 Unauthorized`: Invalid email or password.
 
 ## AI and Agent Operations
 

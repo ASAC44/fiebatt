@@ -22,22 +22,17 @@ class Settings(BaseSettings):
     runway_api_key: str = ""
     elevenlabs_api_key: str = ""
 
-    # legacy supabase jwt signing secret (HS256). still used by older
-    # projects and required for the fast path when alg=HS256. when unset
-    # the app falls back to anon session cookies (offline dev).
-    supabase_jwt_secret: str = ""
-    # supabase project URL, e.g. "https://abc123.supabase.co". used to
-    # fetch JWKS (RS256/ES256 public keys) for modern supabase projects
-    # that signed their tokens asymmetrically. if unset, only HS256 tokens
-    # can be verified.
-    supabase_url: str = ""
+    auth_jwt_secret: str = "change-me"
+    auth_jwt_expires_minutes: int = 7 * 24 * 60
 
     max_video_seconds: int = 120
 
     allowed_origins: list[str] = [
         "http://localhost:5173",
         "http://localhost:3000",
+        "http://localhost:3001",
         "http://127.0.0.1:5173",
+        "http://127.0.0.1:3001",
     ]
 
     # when true, worker calls resolve to ai/services/_stubs.py

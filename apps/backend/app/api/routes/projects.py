@@ -35,7 +35,7 @@ class ProjectListItem(BaseModel):
 
 @router.get("/me", response_model=MeResponse)
 async def me(session: SessionModel = Depends(get_session)):
-    """Return the current session + whether it's tied to a google user."""
+    """Return the current session and whether it's tied to a signed-in user."""
     return MeResponse(
         session_id=session.id,
         user_id=session.user_id,

@@ -175,9 +175,14 @@ cp .env.example .env
 Important environment groups:
 
 - database: `DATABASE_URL`
+- auth: `AUTH_JWT_SECRET`, `AUTH_JWT_EXPIRES_MINUTES`
 - media storage: `VULTR_S3_*` or local media fallback
 - AI mode: `USE_AI_STUBS`
 - generation provider: `VIDEO_GEN_PROVIDER`
+
+The web app uses first-party email/password auth. Create an account at
+`/signup`, then log in at `/login`; the browser stores a JWT and sends it to
+the backend as `Authorization: Bearer <token>`.
 - GPU worker: `GPU_WORKER_URL`
 - provider keys: qwen / Gemini / DashScope / ElevenLabs keys depending on the path being tested
 
@@ -257,7 +262,7 @@ These are useful for local testing, docs, and repeatable demos.
 
 ## Notes for contributors
 
-- Keep the web app in `apps/web`; the old Vite frontend is legacy code and should not be the main product surface.
+- Keep the web app in `apps/web`; this is the only supported frontend.
 - Prefer backend API changes that preserve the same editor and CLI flow.
 - Keep generated media, debug frames, and scratch files out of the repository unless they are intentional documentation assets.
 - If you add a new backend capability, update the Excalidraw flow diagram and this README so the product story stays accurate.

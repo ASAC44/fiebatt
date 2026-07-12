@@ -15,6 +15,7 @@ _SCHEMA_UPGRADES_POSTGRES = [
     "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_id VARCHAR",
     "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS email VARCHAR",
     "CREATE INDEX IF NOT EXISTS ix_sessions_user_id ON sessions (user_id)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email)",
     # hot-path indexes for the queries we actually run today.
     # `projects(session_id, created_at DESC)` backs the library list.
     # `segments(project_id, active)` backs /api/timeline + accept's

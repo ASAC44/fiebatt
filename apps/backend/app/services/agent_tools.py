@@ -86,15 +86,10 @@ async def _get_project_or_error(
 ) -> Project:
     """Fetch a project and verify session ownership.
 
-    In local dev mode (no supabase configured) the session check is
-    relaxed so projects created by any session remain accessible.
+    Project access is scoped to the resolved session id.
     """
-    bs = _get_backend_settings()
-    dev_mode = not bool(bs.supabase_url.strip() or bs.supabase_jwt_secret.strip())
     proj = await db.get(Project, project_id)
-    if proj is None:
-        raise ValueError(f"project not found or access denied: {project_id}")
-    if not dev_mode and proj.session_id != session_id:
+    if proj is None or proj.session_id != session_id:
         raise ValueError(f"project not found or access denied: {project_id}")
     return proj
 

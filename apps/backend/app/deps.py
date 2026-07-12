@@ -6,7 +6,7 @@ from fastapi import Depends, Header, Request
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.supabase import extract_bearer, verify_supabase_token
+from app.auth.jwt import extract_bearer, verify_access_token
 from app.db.session import get_db
 from app.models.project import Project
 from app.models.session import Session as SessionModel
@@ -57,16 +57,16 @@ async def get_session(
     """Resolve the request's session row.
 
     Priority:
-      1. Verified Supabase JWT → session keyed by the google user id
-         (stable across browsers/devices for a given google account).
-      2. X-Session-Id header → anonymous browser session (legacy flow).
+      1. Verified first-party JWT → session keyed by the user id
+         (stable across browsers/devices for a given account).
+      2. X-Session-Id header → anonymous compatibility session.
       3. Fresh uuid → first-touch anon.
 
     On the first authenticated request with a pre-existing anon session,
     any projects under that anon session get re-parented onto the user
     session so the user doesn't lose anonymous work on sign-in.
     """
-    user = verify_supabase_token(extract_bearer(authorization) or "")
+    user = verify_access_token(extract_bearer(authorization) or "")
 
     if user is not None:
         sid = f"user:{user.id}"

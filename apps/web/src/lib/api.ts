@@ -1,7 +1,10 @@
 /**
  * thin wrapper around backend fetch. calls carry:
  *   - X-Session-Id: anonymous per-browser id for the backend Session row
- *   */
+ *   - Authorization: Bearer <jwt access token> if the user is signed in
+ */
+
+import { getAuthToken, redirectToLogin } from "@/lib/auth";
 
 const SESSION_KEY = "fiebatt.session_id";
 
@@ -24,7 +27,14 @@ async function request<T>(
     headers.set("Content-Type", "application/json");
   }
 
+  const token = getAuthToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
   const res = await fetch(path, { ...init, headers });
+  if (res.status === 401) {
+    redirectToLogin();
+    throw new Error("401 Unauthorized");
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`${res.status} ${res.statusText}: ${text}`);
@@ -52,6 +62,15 @@ export type Me = {
   user_id: string | null;
   email: string | null;
   signed_in: boolean;
+};
+
+export type AuthResponse = {
+  access_token: string;
+  token_type: "bearer";
+  user: {
+    id: string;
+    email: string;
+  };
 };
 
 export type ProjectListItem = {
@@ -256,6 +275,20 @@ export function me(): Promise<Me> {
   return request<Me>("/api/me");
 }
 
+export function signup(email: string, password: string): Promise<AuthResponse> {
+  return request<AuthResponse>("/api/auth/signup", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export function login(email: string, password: string): Promise<AuthResponse> {
+  return request<AuthResponse>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
 export function listProjects(): Promise<ProjectListItem[]> {
   return request<ProjectListItem[]>("/api/projects");
 }
@@ -434,6 +467,8 @@ export function streamJobEvents(
       const headers = new Headers();
       headers.set("X-Session-Id", getSessionId());
       headers.set("Accept", "text/event-stream");
+      const token = getAuthToken();
+      if (token) headers.set("Authorization", `Bearer ${token}`);
 
       const res = await fetch(`/api/jobs/${jobId}/stream`, {
         headers,

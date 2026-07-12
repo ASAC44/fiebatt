@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { getProject, listProjects, type ProjectDetail } from "@/lib/api";
+import { hasAuthToken } from "@/lib/auth";
 import { Studio, type StudioInitialProject } from "./Studio";
 
 function toInitialProject(project: ProjectDetail): StudioInitialProject {
@@ -22,9 +23,19 @@ export function EditorClient({ initialProjectId }: { initialProjectId?: string }
   const router = useRouter();
   const [project, setProject] = useState<StudioInitialProject | undefined>();
   const [loading, setLoading] = useState(Boolean(initialProjectId));
+  const [authAllowed, setAuthAllowed] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!hasAuthToken()) {
+      const next = initialProjectId
+        ? `/editor?projectId=${encodeURIComponent(initialProjectId)}`
+        : "/editor";
+      router.replace(`/login?next=${encodeURIComponent(next)}`);
+      return;
+    }
+    setAuthAllowed(true);
+
     if (!initialProjectId) {
       setProject(undefined);
       setLoading(false);
@@ -60,7 +71,15 @@ export function EditorClient({ initialProjectId }: { initialProjectId?: string }
     return () => {
       cancelled = true;
     };
-  }, [initialProjectId]);
+  }, [initialProjectId, router]);
+
+  if (!authAllowed) {
+    return (
+      <main className="grid h-screen place-items-center bg-background text-sm text-muted-foreground">
+        Opening login
+      </main>
+    );
+  }
 
   if (loading) {
     return (

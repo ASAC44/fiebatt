@@ -7,8 +7,8 @@
 - [completed] decouple `ai.services` stubs/tests from backend-only imports so the ai test suite can run in isolation
 - [completed] pin generate/accept flows to their original clip target and stop swallowing `/api/accept` failures in the frontend
 - [completed] run frontend verification and document the result
-- [completed] move the actual vite/react app from repo root into `apps/frontend/`
-- [completed] keep root npm scripts working by turning root `package.json` into a thin wrapper around `apps/frontend/`
+- [completed] move the actual nextjs/react app from repo root into `apps/web/`
+- [completed] keep root npm scripts working by turning root `package.json` into a thin wrapper around `apps/web/`
 - [completed] update docs/config so local dev still reads env from repo root after the move
 - [completed] remove the sentient font import-order warning from the frontend build
 - [completed] pull and merge the incoming dashboard changes once the teammate push lands
@@ -16,8 +16,8 @@
 - [completed] add a first-time onboarding flow for newly signed-in users before they hit the full editor
 - [completed] add an in-studio checklist / next-step guide so the dashboard teaches the core loop instead of dumping controls all at once
 - [completed] verify the revised onboarding flow against web interface / onboarding best practices and document the remaining gaps
-- [pending] reorg the editor frontend around feature folders instead of dumping everything into `apps/frontend/src/components`
-- [pending] split `apps/frontend/src/pages/Studio.tsx` into dashboard shell pieces (`topbar`, workspace layout, keyboard shortcuts, upload/export controls)
+- [pending] reorg the editor frontend around feature folders instead of dumping everything into `apps/web/src/components`
+- [pending] split `apps/web/src/pages/Studio.tsx` into dashboard shell pieces (`topbar`, workspace layout, keyboard shortcuts, upload/export controls)
 - [pending] pull ai edit flow ui into a shared editor module so `Inspector` and `VibePrompt` stop feeling like two separate dashboards
 - [pending] reduce inline styles in `VibePrompt` and move editor-specific styling next to the feature it belongs to
 - [completed] unify the duplicated generation session hooks into one canonical edit-session controller with optional continuity callbacks
@@ -43,7 +43,7 @@
 - [completed] tighten safe config mismatches in backend/ai wiring without adding network assumptions
 - [completed] run targeted verification for provider mode imports and dev startup checks
 - [completed] mount `ai.services.health` into the backend under `/api/ai` so observability is reachable from the main app
-- [completed] wire an optional gpu worker path into local compose without breaking the default apps/frontend + apps/backend + db loop
+- [completed] wire an optional gpu worker path into local compose without breaking the default apps/web + apps/backend + db loop
 - [completed] tighten docs and env examples for the vultr storage/db + gpu worker + ai observability demo story
 - [completed] run targeted verification for backend route mounting, compose validity, and docs accuracy
 
@@ -59,9 +59,9 @@
 - fixed by wiring `AbortSignal` through the api client and aborting the previous identify request whenever the bbox/clip changes or the effect cleans up. `VibePrompt` now also uses the active preview frame instead of the midpoint.
 - fixed by capturing a generation target snapshot per job and requiring `/api/accept` to succeed before the timeline is locally replaced.
 - verification: `npm run lint` passed, `npm run build` passed with a css import-order warning and a large bundle warning, `pytest apps/ai/tests -q` passed (`17 passed, 8 skipped`)
-- repo cleanup: moved the real frontend app into `apps/frontend/`, narrowed `.gitignore` so the folder itself is tracked, and kept root workflows stable with wrapper scripts in the root `package.json`.
-- repo cleanup verification: `npm --prefix apps/frontend run lint` passed, `npm --prefix apps/frontend run build` passed, `npm run lint` passed, and `npm run build` passed after the move.
-- font cleanup: moved the sentient font load out of `apps/frontend/src/index.css` and into `apps/frontend/index.html`, which removes vite's css import-order warning without changing typography.
+- repo cleanup: moved the real frontend app into `apps/web/`, narrowed `.gitignore` so the folder itself is tracked, and kept root workflows stable with wrapper scripts in the root `package.json`.
+- repo cleanup verification: `npm --prefix apps/web run lint` passed, `npm --prefix apps/web run build` passed, `npm run lint` passed, and `npm run build` passed after the move.
+- font cleanup: moved the sentient font load out of `apps/web/src/index.css` and into `apps/web/index.html`, which removes css tooling's css import-order warning without changing typography.
 - dashboard reorg prep: current hot path is `Studio` + `Preview` + `Timeline` + `Inspector` + `VibePrompt` + `useGenerationSession` + `edl` store. once the incoming branch is pulled, those are the main seams to reorganize without changing product behavior.
 - current product reality vs pitch: backend already has real routes for upload/generate/accept/entities/propagate/timeline/narrate/export, but the frontend mostly exposes upload + prompt + accept + local timeline + export button. continuity propagation, narrated reveal, and observability are either missing or underexposed in the dashboard.
 - immediate build order: first fix truth-breaking bugs (`export`, reopen hydration, route/api mismatches), then expose continuity + reveal in the dashboard, then do the shell/file reorg around those stabilized workflows instead of reorganizing broken flows.

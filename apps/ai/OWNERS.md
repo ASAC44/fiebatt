@@ -34,4 +34,4 @@ Everything in `apps/ai/` and `infra/` is yours.
 - Entity search runs async after accept, results go to continuity pack UI (Person 1)
 
 ## Don't touch
-- `apps/frontend/`, `apps/backend/app/api/`, `apps/backend/app/models/`
+- `apps/web/`, `apps/backend/app/api/`, `apps/backend/app/models/`

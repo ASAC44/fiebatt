@@ -1,0 +1,38 @@
+---
+title: "CLI Reference"
+description: "CLI for the fiebatt AI video editor — prompt-driven video editing from the terminal"
+---
+
+# CLI Reference
+
+<div className="docs-hero">
+  <div className="docs-hero__row">
+    <div>
+      <div className="docs-hero__eyebrow">tooling</div>
+      <h1>Edit videos from the terminal</h1>
+      <p>
+        The fiebatt CLI wraps every backend endpoint for scripting, automation,
+        and agent-driven editing. Any agent that can run bash can use it.
+      </p>
+    </div>
+  </div>
+</div>
+
+## Installation and Agent Setup
+
+To install the fiebatt CLI and set up the agent skill for prompt-driven video editing, follow these steps:
+
+1.  **Install the fiebatt CLI:**
+    ```bash
+    pip install fiebatt-edit
+    ```
+2.  **Set up the agent skill file:** This makes the fiebatt CLI available to AI agents (e.g., Claude).
+    ```bash
+    mkdir -p ~/.claude/skills/fiebatt-edit && curl -sL https://raw.githubusercontent.com/ASAC44/fiebatt/main/apps/cli/SKILL.md -o ~/.claude/skills/fiebatt-edit/SKILL.md
+    ```
+3.  **Authenticate with fiebatt:**
+    ```bash
+    fiebatt auth login --base-url https://fiebatt.local
+    ```
+
+Once installed and authenticated, you can start editing videos by saying "fiebatt edit" to your agent.

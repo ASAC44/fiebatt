@@ -1,0 +1,78 @@
+---
+title: "Architecture"
+description: "A high-level map of the fiebatt codebase and the responsibilities of each major subsystem."
+---
+
+# Architecture
+
+fiebatt is organized as a multi-surface application with a Next.js editor, a backend API, AI adapters, and an optional GPU worker.
+
+## Repository map
+
+- `apps/web/`: Next.js route surfaces, editor UI, project browsing, landing pages, continuity UI
+- `apps/backend/`: FastAPI routes, database models, workers, media-processing pipeline
+- `apps/ai/`: provider adapters, prompts, AI-side configuration and tests
+- `apps/cli/`: command-line interface wrapping the backend API, includes multi-agent video analysis
+- `apps/gpu-worker/`: optional segmentation and vision-heavy worker
+- `infra/`: local and deploy infrastructure helpers
+
+## Web responsibilities
+
+The Next.js app owns:
+
+- navigation between landing, projects, and editor
+- upload initiation
+- project browsing
+- selection interactions
+- generation controls
+- continuity workflow surfaces
+
+## Backend responsibilities
+
+The backend owns:
+
+- upload ingestion
+- project persistence
+- generation jobs
+- identification and mask endpoints
+- propagation and timeline updates
+- narration and export flows
+
+## Media-processing layer
+
+The FFmpeg service is the bridge between uploaded media and actual editorial operations such as probing, clipping, stitching, and keyframe extraction.
+
+## AI layer
+
+The AI layer abstracts provider-specific logic behind product-level operations.
+
+That lets the rest of the system talk about product actions such as identify, generate, narrate, and propagate instead of talking directly to provider SDKs everywhere.
+
+## Agent layer
+
+The agent layer powers in-app conversational editing through Gemini function calling. When a user sends a message via agent chat, the backend opens an SSE stream and lets Gemini decide which tools to invoke — identify, mask, generate, propagate — based on the user's natural language request.
+
+Tool calls and their results are streamed back as structured events so the frontend can visualize each step (tool call start, tool call end, suggestion, variant ready). This keeps the user informed while the agent orchestrates multi-step editing workflows autonomously.
+
+## Conversations
+
+Agent chat history is persisted in Postgres through two models:
+
+- **Conversation** — belongs to a project, has a title and timestamps
+- **ChatMessage** — belongs to a conversation, stores role (user/assistant/system) and content
+
+This lets users resume previous agent sessions, review what the agent did, and maintain context across editing sessions within the same project.
+
+## CLI
+
+The `apps/cli/` directory provides a command-line interface that wraps the backend API. It supports project listing, uploads, and triggering edits from the terminal.
+
+The CLI also includes a multi-agent video analysis mode where multiple AI agents can collaboratively analyze and plan edits for a video, useful for batch processing and automated workflows.
+
+## CI/CD
+
+The project uses GitHub Actions for continuous integration and deployment:
+
+- **Typecheck/build** — runs the Next.js production build
+- **Tests** — runs backend and CLI test suites
+- **Auto-deploy** — pushes to Vultr on merge to main

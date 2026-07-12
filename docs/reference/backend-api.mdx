@@ -1,0 +1,157 @@
+---
+title: "Backend API"
+description: "Practical route reference for every endpoint the fiebatt backend exposes."
+---
+
+# Backend API
+
+This page is a practical route reference, not a formal OpenAPI spec. All routes are prefixed with `/api`.
+
+## Health and status
+
+### `GET /api/health`
+
+Returns server liveness status.
+
+### `GET /api/me`
+
+Returns the currently authenticated user profile for a JWT-backed session.
+
+## Auth
+
+### `POST /api/auth/signup`
+
+Creates a first-party fiebatt account.
+
+**Request Body:**
+- `email`: Account email address.
+- `password`: Password, minimum 8 characters.
+
+**Responses:**
+- `201 Created`: `{ "access_token": "string", "token_type": "bearer", "user": { "id": "string", "email": "string" } }`
+- `409 Conflict`: Email is already registered.
+
+### `POST /api/auth/login`
+
+Authenticates an existing account.
+
+**Request Body:**
+- `email`: Account email address.
+- `password`: Account password.
+
+**Responses:**
+- `200 OK`: `{ "access_token": "string", "token_type": "bearer", "user": { "id": "string", "email": "string" } }`
+- `401 Unauthorized`: Invalid email or password.
+
+## AI and Agent Operations
+
+### `GET /api/ai/health`
+
+Returns AI provider reachability and configuration status.
+
+### `GET /api/ai/timeline`
+
+Returns a timeline of recent AI operations.
+
+### `GET /api/ai/stream`
+
+Returns a server-sent event stream of live AI operations.
+
+## Projects
+
+### `GET /api/projects`
+
+Returns a list of all projects for the current user.
+
+### `POST /api/projects`
+
+Creates a new project.
+
+### `GET /api/projects/{project_id}`
+
+Returns a single project by ID.
+
+### `DELETE /api/projects/{project_id}`
+
+Deletes a project and all its associated data, including segments, jobs, entities, and conversations.
+
+**Path Parameters:**
+- `project_id`: The ID of the project to delete.
+
+**Responses:**
+- `200 OK`: `{"status": "deleted", "project_id": "string"}`
+- `404 Not Found`: If the project does not exist or does not belong to the current session.
+
+## Project Segments
+
+### `GET /api/projects/{project_id}/segments`
+
+Returns all segments for a given project.
+
+### `POST /api/projects/{project_id}/segments`
+
+Creates a new segment for a project.
+
+## Project Jobs
+
+### `GET /api/projects/{project_id}/jobs`
+
+Returns all jobs for a given project.
+
+### `POST /api/projects/{project_id}/jobs`
+
+Creates a new job for a project.
+
+## Project Entities
+
+### `GET /api/projects/{project_id}/entities`
+
+Returns all entities for a given project.
+
+### `POST /api/projects/{project_id}/entities`
+
+Creates a new entity for a project.
+
+## Project Conversations
+
+### `GET /api/projects/{project_id}/conversations`
+
+Returns all conversations for a given project.
+
+### `POST /api/projects/{project_id}/conversations`
+
+Creates a new conversation for a project.
+
+## Uploads
+
+### `POST /api/upload`
+
+Uploads a new media file.
+
+**Request Body:**
+- `file`: The media file to upload.
+
+**Responses:**
+- `200 OK`: `{"upload_id": "string", "filename": "string", "size": "number"}`
+
+## Users
+
+### `GET /api/users`
+
+Returns a list of all users. (Admin only)
+
+### `GET /api/users/{user_id}`
+
+Returns a single user by ID. (Admin only)
+
+### `POST /api/users`
+
+Creates a new user. (Admin only)
+
+### `PUT /api/users/{user_id}`
+
+Updates an existing user. (Admin only)
+
+### `DELETE /api/users/{user_id}`
+
+Deletes a user. (Admin only)

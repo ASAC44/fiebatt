@@ -66,6 +66,16 @@ class Settings(BaseSettings):
             raise ValueError("MEDIA_URL_MODE must be 'presigned' or 'public'")
         return normalized
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _normalize_database_url(cls, value: object) -> str:
+        url = str(value or "").strip()
+        if url.startswith("postgres://"):
+            return "postgresql+asyncpg://" + url.removeprefix("postgres://")
+        if url.startswith("postgresql://"):
+            return "postgresql+asyncpg://" + url.removeprefix("postgresql://")
+        return url
+
     @property
     def ai_mode(self) -> str:
         return "stub" if self.use_ai_stubs else "real"

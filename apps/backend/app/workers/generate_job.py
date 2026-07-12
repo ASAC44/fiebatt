@@ -36,7 +36,7 @@ from app.models.job import Job, Variant
 from app.models.project import Project
 from app.services import ffmpeg, job_events, storage
 
-log = logging.getLogger("iris.jobs.generate")
+log = logging.getLogger("fiebatt.jobs.generate")
 
 from ai.services.config import get_settings as _get_ai_settings
 _SETTINGS = _get_ai_settings()

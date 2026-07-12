@@ -1,111 +1,214 @@
-# iris
+# fiebatt
 
-prompt-driven video editor for localized reality edits and continuity propagation.
+fiebatt is a prompt-driven video editor for precise, localized edits. It is built for the moment when you do not want to regenerate an entire video, but you do want to change one object, one action, or one short range inside an existing reel.
 
-## repo layout
+The product has three surfaces that all talk to the same backend:
 
-- `apps/frontend/` — vite/react/typescript app
-- `apps/backend/` — fastapi api, models, workers, export pipeline
-- `apps/ai/` — provider adapters, prompts, ai-side tests
-- `apps/gpu-worker/` — optional sam/clip worker
-- `infra/` — dockerfiles, compose, deploy helpers
+- a Next.js web editor for reviewing projects, editing timelines, chatting with the agent, comparing variants, and exporting the final reel
+- a FastAPI backend that owns uploads, projects, timelines, jobs, generation, scoring, propagation, and exports
+- a CLI/agent workflow so Codex, Claude, or shell scripts can drive the same editing loop from the terminal
 
-## local dev
+## What fiebatt does
 
-prereqs:
+1. Upload or reopen a source video.
+2. Scrub to the moment you want to change.
+3. Select a region if the edit should stay localized.
+4. Describe the edit in plain language.
+5. fiebatt builds a structured request with the active project, playhead, selected region, timeline state, and conversation history.
+6. The backend plans the edit, runs vision/localization, generates candidate variants, scores the results, and streams progress back to the UI.
+7. You compare the original and modified output, accept the best variant, and export the final cut.
 
-- node 20+
-- python 3.11+ with backend deps installed
-- ffmpeg on path
+## Technical flow
 
-install frontend deps:
+The full pipeline is captured as an Excalidraw diagram:
 
-```bash
-npm install --prefix apps/frontend
+![fiebatt technical flow](docs/images/fiebatt-technical-flow.svg)
+
+[Open the fiebatt technical flow diagram](apps/web/public/fiebatt-technical-flow.excalidraw)
+
+The diagram covers the end-to-end path from editor or CLI input through project context, qwen planning, CLIP retrieval, SAM2 masking, frame inspection, localized generation, scoring, variant storage, compare, timeline refresh, continuity, and export.
+
+## Why it is different
+
+Most AI video tools treat generation as the whole product. fiebatt treats generation as one step inside an editable timeline system.
+
+Current tools usually make you choose between two extremes:
+
+- traditional editors, where every mask, keyframe, export, and re-import is manual
+- prompt-to-video tools, where the output is detached from the original timeline and hard to revise precisely
+
+fiebatt sits between those extremes. A prompt is not just text. It is tied to project state, selected frame range, region geometry, previous messages, accepted edits, generated variants, scores, and the final export pipeline.
+
+## Main features
+
+### Project library
+
+The web app has a project library for reopening existing reels and starting new edits. Projects keep their source media, generated media, saved timeline state, and accepted changes.
+
+### Editor workspace
+
+The editor includes:
+
+- source video preview
+- timeline and clip controls
+- chat-based edit requests
+- region selection
+- variant preview and apply flow
+- compare mode for original versus modified output
+- export controls
+
+### Agent chat
+
+The chat panel sends messages to `/api/agent/chat`. Each message includes the active project and editor context, so the backend knows what the user means by “this moment,” “the subject,” or “the selected region.”
+
+Responses stream back as SSE events. The UI can show working states, tool details, generation briefs, variant previews, and final text as the backend progresses.
+
+### Vision and localization
+
+The vision path can use:
+
+- qwen vision for subject identification and prompt planning
+- CLIP-style retrieval for matching frames, crops, or similar appearances
+- SAM2 masks for turning a rough selected box into a more precise region
+- frame inspection for confidence, category, attributes, and crop context
+
+This is what lets fiebatt keep edits localized instead of blindly changing the full frame.
+
+### Generation and scoring
+
+Generation jobs produce candidate variants for a target edit window. Results are tracked with status, URLs, descriptions, errors, prompt adherence, and visual coherence scores.
+
+Scoring helps decide which outputs are worth showing and which should be rejected or retried.
+
+### Timeline persistence
+
+The editor stores a real EDL-style timeline. When a variant is accepted, the backend creates a generated segment and the frontend refreshes the timeline. Manual timeline changes are also saved back to the backend.
+
+### Continuity propagation
+
+After a generated edit is accepted, fiebatt can search for matching appearances and prepare continuity edits. This helps a localized change feel authored across the reel rather than isolated to one frame range.
+
+### Export
+
+Export jobs render the current timeline into a final MP4. The backend handles clip rendering, stitching, fps normalization, and final output URLs.
+
+### CLI and agent workflow
+
+The CLI wraps the same backend API that powers the web editor. That means an agent that can run shell commands can inspect a project, preview footage, generate edits, score variants, accept a result, propagate continuity, and export the final video without a custom integration.
+
+## Repository layout
+
+```text
+apps/
+  web/          Next.js app: landing page, project library, editor UI
+  backend/      FastAPI app: routes, database models, workers, export pipeline
+  ai/           AI service adapters, prompts, tests, vision/generation helpers
+  cli/          Command-line interface for scripting and agent workflows
+  gpu-worker/   Optional GPU service for SAM2 / vision helpers
+
+docs/
+  demo-clips/   Demo source clips
+  images/       Documentation images
+  product/      Product docs
+  reference/    API and architecture docs
+
+infra/          Docker, compose, and deployment helpers
+scripts/        Local development and smoke-test scripts
+storage/        Local development media storage
 ```
 
-frontend from repo root:
+## Local development
+
+### Prerequisites
+
+- Node 20+
+- Python 3.11+
+- ffmpeg on your PATH
+- backend dependencies installed in your Python environment
+
+### Install web dependencies
 
 ```bash
+cd apps/web
+npm install
+```
+
+### Run the web app
+
+```bash
+cd apps/web
 npm run dev
 ```
 
-frontend directly:
+The Next.js app runs on port `3001` by default.
 
-```bash
-npm --prefix apps/frontend run dev
-```
+### Run the backend
 
-backend:
+From the repository root:
 
 ```bash
 ./scripts/dev_backend.sh
 ```
 
-the frontend lives in `apps/frontend/`, but vite reads env from the repo root so the existing root `.env` still works.
-the root `package.json` is just a thin wrapper so you can keep using the usual root commands without stuffing the actual app back into repo root.
+The backend runs on port `8000` by default.
 
-compose stack from repo root:
+### Run with Docker Compose
 
 ```bash
-docker compose -f infra/docker-compose.yml up --build frontend backend db
+docker compose -f infra/docker-compose.yml up --build backend db
 ```
 
-optional gpu worker profile:
+If you want the optional GPU worker profile:
 
 ```bash
 docker compose -f infra/docker-compose.yml --profile gpu up --build gpu-worker
 ```
 
-the compose backend defaults to the local `db` container and to `http://gpu-worker:8001` when that gpu profile is running. if you set `DATABASE_URL` or `GPU_WORKER_URL` in the repo root `.env`, those override the compose defaults so you can point the same stack at vultr services.
+## Environment configuration
 
-## common commands
-
-frontend typecheck:
+Start with:
 
 ```bash
-npm run lint
+cp .env.example .env
 ```
 
-frontend prod build:
+Important environment groups:
 
-```bash
-npm run build
-```
+- database: `DATABASE_URL`
+- media storage: `VULTR_S3_*` or local media fallback
+- AI mode: `USE_AI_STUBS`
+- generation provider: `VIDEO_GEN_PROVIDER`
+- GPU worker: `GPU_WORKER_URL`
+- provider keys: qwen / Gemini / DashScope / ElevenLabs keys depending on the path being tested
 
-ai tests:
+For quick local development, `USE_AI_STUBS=true` keeps the pipeline testable without paid providers. For real generation, use `USE_AI_STUBS=false` and configure the required provider keys.
 
-```bash
-pytest apps/ai/tests -q
-```
+## Backend API map
 
-smoke flow:
+Core endpoints:
 
-```bash
-./scripts/smoke.sh
-```
+- `GET /api/health` checks backend liveness
+- `GET /api/projects` lists projects
+- `POST /api/upload` uploads a source video
+- `GET /api/projects/{id}` loads project state
+- `GET /api/timeline/{id}` loads timeline state
+- `PUT /api/timeline/{id}` saves the editor EDL
+- `POST /api/agent/chat` streams agent chat events
+- `POST /api/identify` identifies a selected region
+- `POST /api/mask` returns a SAM-style mask contour
+- `POST /api/generate` starts a generation job
+- `GET /api/jobs/{id}` checks generation status
+- `GET /api/jobs/{id}/stream` streams job events
+- `POST /api/accept` applies a generated variant
+- `GET /api/entities/{id}` lists matching appearances
+- `POST /api/propagate` starts continuity propagation
+- `POST /api/narrate` generates narration audio
+- `POST /api/export` starts final export
+- `GET /api/export/{id}` checks export status
 
-## env notes
+## AI observability
 
-- root `.env.example` is the starting point for local config
-- `VITE_*` vars are consumed by the frontend
-- backend, ai, and storage vars are consumed by fastapi workers/services
-- local dev can run with `USE_AI_STUBS=true`; the real demo path wants `USE_AI_STUBS=false`
-- `VIDEO_GEN_PROVIDER=wan` uses DashScope Wan source-video editing; `VIDEO_GEN_PROVIDER=veo` uses Google Veo via `GEMINI_API_KEY`; `VIDEO_GEN_PROVIDER=happyhorse` uses the DashScope HappyHorse fallback
-- `DATABASE_URL` can stay local for quick hacking or point at vultr managed postgres for the demo/deploy story
-- `VULTR_S3_*` controls media publishing; when unset, backend falls back to the local `/media` mount
-- `GPU_WORKER_URL` points at the sam/clip worker, either `http://localhost:8001` locally or the vultr gpu box in demo mode
-
-## ai observability
-
-the backend now mounts the ai observability router directly, so the main app exposes:
-
-- `GET /api/health` — backend liveness
-- `GET /api/ai/health` — ai service counters, latency rollups, estimated cost, gpu worker reachability
-- `GET /api/ai/timeline?last_n=50` — recent ai call timeline for live-demo debugging
-- `GET /api/ai/stream` — sse stream for a lightweight admin/dashboard panel
-
-quick smoke checks:
+The backend exposes lightweight AI observability routes:
 
 ```bash
 curl http://localhost:8000/api/health
@@ -113,48 +216,48 @@ curl http://localhost:8000/api/ai/health
 curl "http://localhost:8000/api/ai/timeline?last_n=10"
 ```
 
-browser sse snippet:
+There is also an SSE stream:
 
 ```js
-const es = new EventSource("http://localhost:8000/api/ai/stream");
-es.addEventListener("init", (event) => console.log("init", JSON.parse(event.data)));
-es.onmessage = (event) => console.log("tick", JSON.parse(event.data));
+const events = new EventSource("http://localhost:8000/api/ai/stream");
+events.addEventListener("init", (event) => console.log(JSON.parse(event.data)));
+events.onmessage = (event) => console.log(JSON.parse(event.data));
 ```
 
-## demo story
+## Common checks
 
-for a concrete judge-facing setup:
-
-1. run the frontend locally or via compose.
-2. run the backend with `USE_AI_STUBS=false`.
-3. point `DATABASE_URL` at vultr managed postgres so job/project state survives restarts.
-4. point `VULTR_S3_*` at vultr object storage so uploads, keyframes, variants, and exports come from durable urls instead of the local `/media` mount.
-5. point `GPU_WORKER_URL` at the vultr gpu worker, or bring up the local compose gpu profile if you have the worker image + checkpoint available.
-6. keep `/api/ai/health`, `/api/ai/timeline`, and `/api/ai/stream` open during the demo so provider latency, error rate, and gpu reachability are visible instead of hand-waved.
-
-the local gpu profile assumes the sam checkpoint is present at `apps/gpu-worker/checkpoints/sam2.1_hiera_small.pt`. if that file is missing, the worker can still boot and answer `/health`, but sam requests will fail when first used.
-
-## iris CLI + agent skill
-
-install the CLI:
+Web build:
 
 ```bash
-pip install iris-edit
-iris auth login --base-url http://localhost:8000
+cd apps/web
+npm run build
 ```
 
-install the agent skill (one-liner for any claude code user):
+AI tests:
 
 ```bash
-mkdir -p ~/.claude/skills/iris-edit && curl -sL https://raw.githubusercontent.com/stephenhungg/iris/main/apps/cli/SKILL.md -o ~/.claude/skills/iris-edit/SKILL.md
+pytest apps/ai/tests -q
 ```
 
-for other agents (codex, openclaw, cursor), paste the contents of `apps/cli/SKILL.md` as a system prompt.
+Smoke flow:
 
-docs: [docs.useiris.tech](https://docs.useiris.tech)
+```bash
+./scripts/smoke.sh
+```
 
-## current rough edges
+## Demo clips
 
-- frontend build currently warns about a large bundle
-- the gpu worker compose profile is explicit on purpose; default local dev should still work without docker gpu/runtime setup
-- real-provider demos still depend on valid provider keys plus a reachable gpu worker target
+Demo source clips live in:
+
+```text
+docs/demo-clips/
+```
+
+These are useful for local testing, docs, and repeatable demos.
+
+## Notes for contributors
+
+- Keep the web app in `apps/web`; the old Vite frontend is legacy code and should not be the main product surface.
+- Prefer backend API changes that preserve the same editor and CLI flow.
+- Keep generated media, debug frames, and scratch files out of the repository unless they are intentional documentation assets.
+- If you add a new backend capability, update the Excalidraw flow diagram and this README so the product story stays accurate.

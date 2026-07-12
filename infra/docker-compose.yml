@@ -24,7 +24,7 @@ services:
     env_file:
       - ../.env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://iris:iris@db:5432/iris}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://fiebatt:fiebatt@db:5432/fiebatt}
       GPU_WORKER_URL: ${GPU_WORKER_URL:-http://gpu-worker:8001}
       USE_AI_STUBS: ${USE_AI_STUBS:-true}
     volumes:
@@ -45,9 +45,9 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: iris
-      POSTGRES_PASSWORD: iris
-      POSTGRES_DB: iris
+      POSTGRES_USER: fiebatt
+      POSTGRES_PASSWORD: fiebatt
+      POSTGRES_DB: fiebatt
     ports:
       - "5432:5432"
     volumes:

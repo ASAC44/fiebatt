@@ -24,7 +24,7 @@ from app.services.ffmpeg import concat_clips
 from app.services.timeline_builder import TimelineItem, build_timeline
 from app.schemas.timeline import PersistedEDL
 
-log = logging.getLogger("iris.jobs.export")
+log = logging.getLogger("fiebatt.jobs.export")
 
 
 async def _render_clip(

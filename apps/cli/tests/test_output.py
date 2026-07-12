@@ -1,11 +1,11 @@
-"""Tests for iris_cli.output — JSON/table/status/result formatting."""
+"""Tests for fiebatt_cli.output — JSON/table/status/result formatting."""
 
 import json
 from typing import Any
 
 import pytest
 
-import iris_cli.output as output_mod
+import fiebatt_cli.output as output_mod
 
 
 @pytest.fixture(autouse=True)

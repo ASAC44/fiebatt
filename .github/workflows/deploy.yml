@@ -15,7 +15,7 @@ jobs:
           username: root
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
-            cd /opt/iris
+            cd /opt/fiebatt
             git fetch origin main
             git reset --hard origin/main
 

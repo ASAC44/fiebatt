@@ -257,7 +257,7 @@ async def _score_variant_impl(
     if not video_path.exists():
         raise HTTPException(status_code=404, detail="variant video not found")
 
-    with tempfile.TemporaryDirectory(prefix="iris-score-") as temp_root:
+    with tempfile.TemporaryDirectory(prefix="fiebatt-score-") as temp_root:
         temp_dir = Path(temp_root)
         variant_frame_paths = await asyncio.to_thread(
             sample_frames_from_clip,
@@ -435,7 +435,7 @@ async def score_continuity(
 
     client = _get_client()
     analyses: list[tuple[float, BoundaryAnalysis]] = []
-    with tempfile.TemporaryDirectory(prefix="iris-continuity-") as temp_root:
+    with tempfile.TemporaryDirectory(prefix="fiebatt-continuity-") as temp_root:
         temp_dir = Path(temp_root)
         for index, (prev_item, next_item) in enumerate(zip(timeline, timeline[1:]), start=1):
             boundary_ts = prev_item.end_ts

@@ -6,7 +6,7 @@
 
 import { supabase } from "../lib/supabase";
 
-const SESSION_KEY = "iris.session_id";
+const SESSION_KEY = "fiebatt.session_id";
 
 export function getSessionId(): string {
   let sid = localStorage.getItem(SESSION_KEY);

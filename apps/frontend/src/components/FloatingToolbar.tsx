@@ -11,7 +11,7 @@ type NavItem = {
   icon: ReactNode
 }
 
-function IrisToolbarIcon() {
+function fiebattToolbarIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden>
       <circle cx="12" cy="12" r="9" stroke="currentColor" />
@@ -69,7 +69,7 @@ function GoogleGlyph({ size = 13 }: { size?: number }) {
 }
 
 const items: NavItem[] = [
-  { id: 'top', label: 'Landing', icon: <IrisToolbarIcon /> },
+  { id: 'top', label: 'Landing', icon: <fiebattToolbarIcon /> },
   { id: 'about', label: 'About', icon: <AboutIcon /> },
   { id: 'features', label: 'Workflow', icon: <FeaturesIcon /> },
   { id: 'agents', label: 'Agents', icon: <TerminalIcon /> },

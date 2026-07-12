@@ -1,19 +1,19 @@
 ---
 title: "Continuity"
-description: "How Iris handles accepted edits across adjacent frames and ranges, leveraging AI scoring for analysis."
+description: "How fiebatt handles accepted edits across adjacent frames and ranges, leveraging AI scoring for analysis."
 ---
 
 # Continuity
 
-Continuity is one of the defining parts of the Iris workflow.
+Continuity is one of the defining parts of the fiebatt workflow.
 
-Once a user accepts a generated result, Iris can push that decision further through the surrounding cut so the edit feels authored instead of isolated.
+Once a user accepts a generated result, fiebatt can push that decision further through the surrounding cut so the edit feels authored instead of isolated.
 
 ## AI-driven Continuity Analysis
 
-Iris now leverages AI scoring to analyze and ensure continuity. When an edit is accepted, the system can use endpoints like `/api/score/continuity` to evaluate how well the change integrates with surrounding frames and segments. This analysis helps in propagating the edit effectively and identifying potential inconsistencies.
+fiebatt now leverages AI scoring to analyze and ensure continuity. When an edit is accepted, the system can use endpoints like `/api/score/continuity` to evaluate how well the change integrates with surrounding frames and segments. This analysis helps in propagating the edit effectively and identifying potential inconsistencies.
 
-## What continuity means in Iris
+## What continuity means in fiebatt
 
 In this project, continuity is about preserving a chosen visual interpretation across time.
 

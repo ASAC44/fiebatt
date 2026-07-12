@@ -423,9 +423,9 @@ function handleSSEEvent(
         ]);
         if (mutating.has(tool)) {
           // eslint-disable-next-line no-console
-          console.log("[agent sse] dispatching iris:timeline-refresh after", tool);
+          console.log("[agent sse] dispatching fiebatt:timeline-refresh after", tool);
           window.dispatchEvent(
-            new CustomEvent("iris:timeline-refresh", { detail: { tool } }),
+            new CustomEvent("fiebatt:timeline-refresh", { detail: { tool } }),
           );
         } else {
           // eslint-disable-next-line no-console
@@ -434,7 +434,7 @@ function handleSSEEvent(
       } else {
         // eslint-disable-next-line no-console
         console.warn(
-          `[agent sse] tool_call_end had no tool name (id=${id} status=${status}) — iris:timeline-refresh NOT dispatched`,
+          `[agent sse] tool_call_end had no tool name (id=${id} status=${status}) — fiebatt:timeline-refresh NOT dispatched`,
         );
       }
       break;

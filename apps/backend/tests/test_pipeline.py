@@ -1,5 +1,5 @@
 """
-End-to-end integration test for the iris pipeline.
+End-to-end integration test for the fiebatt pipeline.
 Exercises: upload → generate → accept → entity search → propagate → export
 All AI services run in stub mode (USE_AI_STUBS=true).
 """

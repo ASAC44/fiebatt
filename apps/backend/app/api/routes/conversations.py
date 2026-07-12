@@ -18,7 +18,7 @@ from app.models.conversation import Conversation, ChatMessage
 from app.models.project import Project
 from app.models.session import Session as SessionModel
 
-log = logging.getLogger("iris.conversations")
+log = logging.getLogger("fiebatt.conversations")
 router = APIRouter(tags=["conversations"])
 
 

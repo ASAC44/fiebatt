@@ -1,6 +1,6 @@
 """End-to-end pipeline test through stubs.
 
-Simulates the full iris flow:
+Simulates the full fiebatt flow:
   prompt -> edit plan -> generate 3 variants -> score -> accept -> entity search -> propagate
 
 Runs entirely with stubs, no API keys needed.

@@ -22,7 +22,7 @@ from app.models.project import Project
 from app.models.session import Session as SessionModel
 from app.schemas.identify import IdentifyRequest, IdentifyResponse, MaskOut
 
-log = logging.getLogger("iris.identify")
+log = logging.getLogger("fiebatt.identify")
 router = APIRouter(tags=["identify"])
 
 

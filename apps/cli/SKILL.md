@@ -1,19 +1,19 @@
 ---
-name: iris-edit
+name: fiebatt-edit
 version: 2.0.0
 description: |
   Professional AI video editing agent. Analyzes video via multi-agent vision,
-  then drives the iris CLI for localized edits with preview, color grading,
+  then drives the fiebatt CLI for localized edits with preview, color grading,
   quality scoring, timeline surgery, remix/refine, and batch operations.
   Supports full iteration loops: generate, score, remix, grade, preview, accept.
-  Use when asked to "edit a video", "change something in a video", or "iris edit".
+  Use when asked to "edit a video", "change something in a video", or "fiebatt edit".
 allowed-tools:
   - Bash
   - Read
   - AskUserQuestion
 triggers:
   - edit video
-  - iris edit
+  - fiebatt edit
   - vibe edit
   - change the video
   - make the video
@@ -21,26 +21,26 @@ triggers:
 mutating: true
 ---
 
-# iris Video Editing Agent
+# fiebatt Video Editing Agent
 
 ## 1. Prerequisites
 
 Before doing anything, verify the environment. Run all three checks:
 
 ```bash
-which iris
-iris auth status --json
+which fiebatt
+fiebatt auth status --json
 echo $GEMINI_API_KEY
 ```
 
-**If `which iris` fails:** The CLI is not installed. Install it:
+**If `which fiebatt` fails:** The CLI is not installed. Install it:
 ```bash
-pip install -e /path/to/iris/apps/cli
+pip install -e /path/to/fiebatt/apps/cli
 ```
 
-**If `iris auth status` shows `backend_reachable: false`:** The backend is not running or the URL is wrong. Set the correct URL:
+**If `fiebatt auth status` shows `backend_reachable: false`:** The backend is not running or the URL is wrong. Set the correct URL:
 ```bash
-iris auth login --base-url http://localhost:8000
+fiebatt auth login --base-url http://localhost:8000
 ```
 
 **If `GEMINI_API_KEY` is empty:** Analysis will not work. Ask the user to set it:
@@ -57,25 +57,25 @@ Do not proceed until all three checks pass.
 Follow these steps for any video editing task. Steps marked [ASK] require user confirmation before proceeding.
 
 1. **Upload** the video (or identify an existing project).
-2. **Analyze** the video with `iris analyze` to extract scenes, entities, and edit suggestions.
+2. **Analyze** the video with `fiebatt analyze` to extract scenes, entities, and edit suggestions.
 3. **Read the analysis** output. Understand what is in the video, where, and when.
 4. **[ASK] Present findings** to the user. Summarize scenes, entities, and suggest edits. Ask which edits the user wants.
-5. **Snapshot** the timeline with `iris snapshot` before making any edits.
+5. **Snapshot** the timeline with `fiebatt snapshot` before making any edits.
 6. **For each approved edit:**
-   a. Use `iris identify` to confirm the target region.
-   b. Use `iris preview` to inspect the current frame.
-   c. Use `iris generate` (or `iris batch-generate` for multiple edits).
-   d. Use `iris score --compare` to rank variants by quality.
+   a. Use `fiebatt identify` to confirm the target region.
+   b. Use `fiebatt preview` to inspect the current frame.
+   c. Use `fiebatt generate` (or `fiebatt batch-generate` for multiple edits).
+   d. Use `fiebatt score --compare` to rank variants by quality.
    e. **[ASK]** Show the variants, quality scores, and recommendation. Ask which to accept.
-   f. Use `iris accept` to lock in the chosen variant.
-   g. If the variant is close but not right, use `iris remix` to refine it instead of regenerating.
-7. **Color grade** for consistency: use `iris grade` to adjust individual segments, or `iris score --continuity` to find color jumps between segments.
-8. **Preview** the result with `iris preview --range` to verify before exporting.
+   f. Use `fiebatt accept` to lock in the chosen variant.
+   g. If the variant is close but not right, use `fiebatt remix` to refine it instead of regenerating.
+7. **Color grade** for consistency: use `fiebatt grade` to adjust individual segments, or `fiebatt score --continuity` to find color jumps between segments.
+8. **Preview** the result with `fiebatt preview --range` to verify before exporting.
 9. **[ASK] Propagate** accepted edits to other appearances of the same entity if applicable.
-10. **Optionally** add narration with `iris narrate`.
+10. **Optionally** add narration with `fiebatt narrate`.
 11. **[ASK] Export** the final video.
 
-**If something goes wrong:** Use `iris revert --snapshot SNAP_ID` to roll back to the checkpoint from step 5.
+**If something goes wrong:** Use `fiebatt revert --snapshot SNAP_ID` to roll back to the checkpoint from step 5.
 
 ---
 
@@ -87,25 +87,25 @@ Commands default to human-readable output. Append `--json` for machine-readable 
 
 **Login / configure:**
 ```bash
-iris auth login --token TOKEN
-iris auth login --base-url http://localhost:8000
-iris auth login --token TOKEN --base-url http://localhost:8000
+fiebatt auth login --token TOKEN
+fiebatt auth login --base-url http://localhost:8000
+fiebatt auth login --token TOKEN --base-url http://localhost:8000
 ```
 
 **Check connection:**
 ```bash
-iris auth status --json
+fiebatt auth status --json
 ```
 Expected output:
 ```json
 {"session_id": "...", "base_url": "...", "token_set": true, "backend_reachable": true}
 ```
-Error: If `backend_reachable` is `false`, the backend is down or the URL is wrong. Re-run `iris auth login --base-url <correct-url>`.
+Error: If `backend_reachable` is `false`, the backend is down or the URL is wrong. Re-run `fiebatt auth login --base-url <correct-url>`.
 
 ### 3.2 Upload
 
 ```bash
-iris upload /path/to/video.mp4
+fiebatt upload /path/to/video.mp4
 ```
 Expected output:
 ```json
@@ -117,7 +117,7 @@ Error: File not found -- verify the path exists and is a video file.
 
 **List all projects:**
 ```bash
-iris projects --json
+fiebatt projects --json
 ```
 Expected output:
 ```json
@@ -126,7 +126,7 @@ Expected output:
 
 **Get single project:**
 ```bash
-iris project proj_abc123 --json
+fiebatt project proj_abc123 --json
 ```
 Expected output:
 ```json
@@ -136,8 +136,8 @@ Expected output:
 ### 3.4 Analyze
 
 ```bash
-iris analyze proj_abc123 --json
-iris analyze proj_abc123 --fps 2.0 --chunk-size 4 --no-cache --json
+fiebatt analyze proj_abc123 --json
+fiebatt analyze proj_abc123 --fps 2.0 --chunk-size 4 --no-cache --json
 ```
 Parameters:
 - `--fps` (default 1.0): Frames per second to sample. Higher = more detail, slower.
@@ -168,7 +168,7 @@ Requires `GEMINI_API_KEY` env var. Error: If the key is missing, the command exi
 ### 3.5 Identify
 
 ```bash
-iris identify --project proj_abc123 --frame 3.5 --bbox "0.3,0.2,0.4,0.6" --json
+fiebatt identify --project proj_abc123 --frame 3.5 --bbox "0.3,0.2,0.4,0.6" --json
 ```
 Parameters:
 - `--project` / `-p`: Project ID.
@@ -183,7 +183,7 @@ Expected output:
 ### 3.6 Mask
 
 ```bash
-iris mask --project proj_abc123 --frame 3.5 --bbox "0.3,0.2,0.4,0.6" --json
+fiebatt mask --project proj_abc123 --frame 3.5 --bbox "0.3,0.2,0.4,0.6" --json
 ```
 Parameters: Same as `identify`.
 
@@ -195,7 +195,7 @@ Expected output:
 ### 3.7 Generate
 
 ```bash
-iris generate \
+fiebatt generate \
   --project proj_abc123 \
   --start 2.0 \
   --end 5.0 \
@@ -230,7 +230,7 @@ Errors:
 ### 3.8 Job Status
 
 ```bash
-iris job job_xyz --json
+fiebatt job job_xyz --json
 ```
 Expected output:
 ```json
@@ -241,7 +241,7 @@ Statuses: `pending`, `processing`, `completed`, `failed`.
 ### 3.9 Accept
 
 ```bash
-iris accept --job job_xyz --variant 0
+fiebatt accept --job job_xyz --variant 0
 ```
 Parameters:
 - `--job` / `-j`: Job ID from a completed generation.
@@ -255,7 +255,7 @@ Expected output:
 ### 3.10 Entity
 
 ```bash
-iris entity ent_1 --json
+fiebatt entity ent_1 --json
 ```
 Expected output:
 ```json
@@ -272,7 +272,7 @@ Expected output:
 ### 3.11 Propagate
 
 ```bash
-iris propagate \
+fiebatt propagate \
   --entity ent_1 \
   --source-url "https://...variant_url..." \
   --prompt "Apply the blue denim jacket to all appearances" \
@@ -298,7 +298,7 @@ Expected output:
 ### 3.12 Timeline
 
 ```bash
-iris timeline proj_abc123 --json
+fiebatt timeline proj_abc123 --json
 ```
 Expected output:
 ```json
@@ -314,7 +314,7 @@ Expected output:
 ### 3.13 Narrate
 
 ```bash
-iris narrate --variant var_0 --description "The jacket transforms into blue denim"
+fiebatt narrate --variant var_0 --description "The jacket transforms into blue denim"
 ```
 Parameters:
 - `--variant` / `-v`: Variant ID.
@@ -328,7 +328,7 @@ Expected output:
 ### 3.14 Export
 
 ```bash
-iris export proj_abc123 --json
+fiebatt export proj_abc123 --json
 ```
 Parameters:
 - `--no-wait`: Return immediately without polling.
@@ -342,7 +342,7 @@ Expected output:
 
 **Single frame:**
 ```bash
-iris preview proj_abc123 --frame 3.5 --json
+fiebatt preview proj_abc123 --frame 3.5 --json
 ```
 Expected output:
 ```json
@@ -351,7 +351,7 @@ Expected output:
 
 **Thumbnail strip (for scrubbing):**
 ```bash
-iris preview proj_abc123 --strip 0 10 --fps 1 --json
+fiebatt preview proj_abc123 --strip 0 10 --fps 1 --json
 ```
 Expected output:
 ```json
@@ -360,7 +360,7 @@ Expected output:
 
 **Low-res range preview:**
 ```bash
-iris preview proj_abc123 --range 2 5 --json
+fiebatt preview proj_abc123 --range 2 5 --json
 ```
 Expected output:
 ```json
@@ -372,25 +372,25 @@ Use preview to verify the current state before committing edits. Much faster tha
 
 **Split a segment:**
 ```bash
-iris split --project proj_abc123 --segment seg_1 --at 3.5
+fiebatt split --project proj_abc123 --segment seg_1 --at 3.5
 ```
 Splits the segment into two at timestamp 3.5s. Both halves inherit the original source.
 
 **Trim a segment:**
 ```bash
-iris trim --project proj_abc123 --segment seg_1 --start 2.0 --end 4.0
+fiebatt trim --project proj_abc123 --segment seg_1 --start 2.0 --end 4.0
 ```
 Adjusts segment boundaries. New range must be within original bounds.
 
 **Delete a segment:**
 ```bash
-iris delete --project proj_abc123 --segment seg_1
+fiebatt delete --project proj_abc123 --segment seg_1
 ```
 Soft-deletes (marks inactive). Can be restored via snapshot/revert.
 
 **Save a checkpoint:**
 ```bash
-iris snapshot proj_abc123
+fiebatt snapshot proj_abc123
 ```
 Expected output:
 ```json
@@ -399,7 +399,7 @@ Expected output:
 
 **Revert to checkpoint:**
 ```bash
-iris revert proj_abc123 --snapshot snap_abc
+fiebatt revert proj_abc123 --snapshot snap_abc
 ```
 Restores the entire timeline to the saved state.
 
@@ -409,7 +409,7 @@ Always take a snapshot before making destructive changes (delete, reorder, bulk 
 
 **Apply grading adjustments:**
 ```bash
-iris grade --segment seg_1 --brightness 20 --saturation -10 --temperature 5500
+fiebatt grade --segment seg_1 --brightness 20 --saturation -10 --temperature 5500
 ```
 Parameters (all optional, at least one required):
 - `--brightness`: -100 to 100
@@ -423,7 +423,7 @@ Creates a new graded segment. The original is preserved.
 
 **Preview grade on a single frame (fast):**
 ```bash
-iris grade-preview --segment seg_1 --brightness 20 --saturation -10
+fiebatt grade-preview --segment seg_1 --brightness 20 --saturation -10
 ```
 Returns a preview frame URL. Use this to check before applying to the full segment.
 
@@ -431,7 +431,7 @@ Returns a preview frame URL. Use this to check before applying to the full segme
 
 **Score a single variant:**
 ```bash
-iris score --variant var_0 --json
+fiebatt score --variant var_0 --json
 ```
 Expected output:
 ```json
@@ -447,13 +447,13 @@ Expected output:
 
 **Compare multiple variants:**
 ```bash
-iris score --compare var_0 var_1 var_2 --json
+fiebatt score --compare var_0 var_1 var_2 --json
 ```
 Returns rankings with strengths/weaknesses for each. Use this to pick the best variant intelligently.
 
 **Check timeline continuity:**
 ```bash
-iris score --continuity proj_abc123 --json
+fiebatt score --continuity proj_abc123 --json
 ```
 Analyzes segment boundaries for color jumps, flicker, and temporal inconsistency.
 Expected output:
@@ -465,7 +465,7 @@ Run this after making multiple edits to catch consistency problems.
 ### 3.19 Remix
 
 ```bash
-iris remix --variant var_0 --modifier "make the colors warmer, fix edge artifacts"
+fiebatt remix --variant var_0 --modifier "make the colors warmer, fix edge artifacts"
 ```
 Parameters:
 - `--variant` / `-v`: Source variant ID to refine.
@@ -479,7 +479,7 @@ Use remix when a variant is close but not right — "more vivid", "less saturate
 
 **Batch generate (up to 10 edits in parallel):**
 ```bash
-iris batch-generate --edits edits.json
+fiebatt batch-generate --edits edits.json
 ```
 Where `edits.json` contains:
 ```json
@@ -492,7 +492,7 @@ Returns: `{"job_ids": ["job_1", "job_2", ...]}`
 
 **Batch accept:**
 ```bash
-iris batch-accept --accepts accepts.json
+fiebatt batch-accept --accepts accepts.json
 ```
 Where `accepts.json` contains:
 ```json
@@ -534,7 +534,7 @@ Then ask: "This will apply the edit to N other appearances of [entity]. Proceed?
 
 ### Before export
 Confirm the timeline looks correct:
-- Show `iris timeline` output
+- Show `fiebatt timeline` output
 - List all edits applied
 
 Then ask: "Ready to export the final video?"
@@ -548,7 +548,7 @@ Then ask: "Ready to export the final video?"
 - BBox format is `"x,y,w,h"` where all values are normalized 0-1.
   - `x,y` = top-left corner of the box.
   - `w,h` = width and height of the box.
-- If no hint exists, use `iris identify` with an approximate bbox to verify you have the right region before generating.
+- If no hint exists, use `fiebatt identify` with an approximate bbox to verify you have the right region before generating.
 
 ### Choosing segment boundaries
 - Segments MUST be 2-15 seconds. The backend rejects anything outside this range.
@@ -573,18 +573,18 @@ Then ask: "Ready to export the final video?"
 
 | Problem | Cause | Fix |
 |---------|-------|-----|
-| `backend_reachable: false` | Backend not running or wrong URL | Start the backend. Run `iris auth login --base-url <url>`. |
+| `backend_reachable: false` | Backend not running or wrong URL | Start the backend. Run `fiebatt auth login --base-url <url>`. |
 | `GEMINI_API_KEY required` | Env var not set | `export GEMINI_API_KEY="..."` |
 | Segment length error | `end - start` outside 2-15s range | Adjust `--start` and `--end` to a 2-15s window. |
-| Generation job `failed` | Model error or bad prompt | Check `iris job JOB_ID --json` for error details. Retry with a simpler prompt. |
+| Generation job `failed` | Model error or bad prompt | Check `fiebatt job JOB_ID --json` for error details. Retry with a simpler prompt. |
 | Upload fails | File too large or unsupported format | Videos must be under 120 seconds. Use mp4, mov, or webm. |
-| Polling timeout | Job taking too long | Use `--no-wait`, then check manually with `iris job JOB_ID`. |
+| Polling timeout | Job taking too long | Use `--no-wait`, then check manually with `fiebatt job JOB_ID`. |
 | `identify` returns low confidence | Bad bbox or wrong frame | Try a different frame timestamp or widen the bbox. |
 | Propagation partial failure | Some appearances too different | Check results, then generate individual edits for failed appearances. |
 
 ### Retry logic
 If a `generate` or `propagate` command fails:
-1. Check the job status with `iris job JOB_ID --json` for error details.
+1. Check the job status with `fiebatt job JOB_ID --json` for error details.
 2. Retry once with the same parameters.
 3. If it fails again, try adjusting: simplify the prompt, tweak the bbox, or shift the time range.
 4. Report the failure to the user with the error details.
@@ -596,9 +596,9 @@ If a `generate` or `propagate` command fails:
 This skill file works with any agent that can execute bash commands and interact with users:
 - **Claude Code:** Place this file at `apps/cli/SKILL.md`. It will be discovered automatically via the `triggers` frontmatter.
 - **OpenClaw, Codex, Cursor, or other agents:** Paste the full content of this file into the system prompt. The agent needs `Bash` access and the ability to ask the user questions at decision gates.
-- **CI/CD or scripts:** The iris CLI is fully scriptable. Strip the decision gates and use `--json` output with `--no-wait` for async workflows. Poll with `iris job JOB_ID --json` until status is `completed`.
+- **CI/CD or scripts:** The fiebatt CLI is fully scriptable. Strip the decision gates and use `--json` output with `--no-wait` for async workflows. Poll with `fiebatt job JOB_ID --json` until status is `completed`.
 
 The only runtime dependencies are:
-- Python 3.10+ with the `iris-cli` package installed.
-- A running iris backend at the configured `base_url`.
+- Python 3.10+ with the `fiebatt-cli` package installed.
+- A running fiebatt backend at the configured `base_url`.
 - `GEMINI_API_KEY` for the `analyze` command.

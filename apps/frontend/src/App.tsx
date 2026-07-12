@@ -13,10 +13,10 @@ import FloatingToolbar from './components/FloatingToolbar'
 import SmokeOrbBackground from './components/SmokeOrbBackground'
 import { useAuth } from './lib/useAuth'
 
-const IRIS_SVG = '/iris-logo.svg'
-const IRIS_METAL_TINT = '#badcff'
-const IRIS_WORDMARK_TEXT = 'iris.'
-const IRIS_WORDMARK_MASK = {
+const FIEBATT_SVG = '/fiebatt-logo.svg'
+const FIEBATT_METAL_TINT = '#badcff'
+const FIEBATT_WORDMARK_TEXT = 'fiebatt.'
+const FIEBATT_WORDMARK_MASK = {
   fontFamily: 'Sentient, Georgia, serif',
   fontSize: 344,
   fontWeight: 300,
@@ -44,7 +44,7 @@ const FLOWER_METALLIC_PROPS = {
   contour: 0.25,
   lightColor: '#f4fbff',
   darkColor: '#000000',
-  tintColor: IRIS_METAL_TINT,
+  tintColor: FIEBATT_METAL_TINT,
 } as const
 
 const WORDMARK_METALLIC_PROPS = {
@@ -66,7 +66,7 @@ const WORDMARK_METALLIC_PROPS = {
   contour: 0.25,
   lightColor: '#f4fbff',
   darkColor: '#000000',
-  tintColor: IRIS_METAL_TINT,
+  tintColor: FIEBATT_METAL_TINT,
 } as const
 
 // motion design system (lottiefiles + framerlabs + palmer)
@@ -111,7 +111,7 @@ const SPRING = {
 
 // ── loader ──────────────────────────────────────────────────────────
 
-const ASCII_IRIS = `                               ....
+const ASCII_FIEBATT = `                               ....
                            ,;;'''';;,                    ,;;;;,
                  ,        ;;'      \`;;,               .,;;;'   ;
               ,;;;       ;;          \`;;,';;;,.     ,%;;'     '
@@ -193,7 +193,7 @@ function Loader({ onComplete }: { onComplete: () => void }) {
   return (
     <motion.div exit={{ opacity: 0 }} transition={{ duration: DUR.standard, ease: EASE.accelerate }}
       style={{ position: 'fixed', inset: 0, zIndex: 100, background: '#000', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '32px' }}>
-      <AsciiScramble text={ASCII_IRIS} />
+      <AsciiScramble text={ASCII_FIEBATT} />
       <div style={{ width: '120px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
         <div style={{ width: '100%', height: '1px', background: 'rgba(255,255,255,0.1)', position: 'relative', overflow: 'hidden' }}>
           <div style={{ position: 'absolute', inset: 0, right: 'auto', width: `${progress}%`, background: 'rgba(255,255,255,0.3)' }} />
@@ -365,7 +365,7 @@ function Hero({ onStudio }: { onStudio: () => void }) {
         <div data-intro="chrome"
           style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '40px', opacity: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'rgba(255,255,255,0.3)', letterSpacing: '0.08em' }}>IRIS®</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'rgba(255,255,255,0.3)', letterSpacing: '0.08em' }}>FIEBATT®</span>
               <div style={{ display: 'flex', gap: '16px', marginTop: '8px' }}>
                 {['Localized edits', 'Continuity', 'CLI + agents'].map((tag, i) => (
                   <span key={i} style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'rgba(255,255,255,0.12)' }}>{tag}</span>
@@ -393,15 +393,15 @@ function Hero({ onStudio }: { onStudio: () => void }) {
               zIndex: 2,
             }}
           >
-            <MetallicPaint imageSrc={IRIS_SVG} {...FLOWER_METALLIC_PROPS} />
+            <MetallicPaint imageSrc={FIEBATT_SVG} {...FLOWER_METALLIC_PROPS} />
           </motion.div>
 
           <div data-intro="logo-dark"
             style={{ opacity: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '18px', filter: 'drop-shadow(0 0 60px rgba(255,255,255,0.08))' }}>
             <div style={{ position: 'relative', width: 'clamp(560px, 62vw, 1240px)', height: 'clamp(128px, 15vw, 252px)', marginLeft: 'clamp(-260px, -15vw, -160px)', marginTop: 'clamp(14px, 1.4vw, 24px)' }}>
-              <MetallicPaint text={IRIS_WORDMARK_TEXT} textOptions={IRIS_WORDMARK_MASK} {...WORDMARK_METALLIC_PROPS} />
+              <MetallicPaint text={FIEBATT_WORDMARK_TEXT} textOptions={FIEBATT_WORDMARK_MASK} {...WORDMARK_METALLIC_PROPS} />
               <span style={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 }}>
-                {IRIS_WORDMARK_TEXT}
+                {FIEBATT_WORDMARK_TEXT}
               </span>
             </div>
 
@@ -411,7 +411,7 @@ function Hero({ onStudio }: { onStudio: () => void }) {
                   onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 0 0 1px rgba(255,255,255,0.3) inset, 0 22px 56px rgba(190,220,255,0.26)')} onMouseLeave={e => (e.currentTarget.style.boxShadow = '0 0 0 1px rgba(255,255,255,0.24) inset, 0 18px 48px rgba(186,220,255,0.18)')}>Open Studio</button>
               </Magnetic>
               <Magnetic intensity={0.18}>
-                <button onClick={() => window.open('https://docs.useiris.tech/product/editor-workflow', '_blank', 'noopener,noreferrer')} style={{ fontFamily: 'var(--font-body)', fontSize: '15px', padding: '15px 34px', border: '1px solid rgba(186,220,255,0.2)', width: '194px', background: 'linear-gradient(135deg, rgba(16,18,22,0.96), rgba(4,4,6,0.94), rgba(18,22,28,0.96), rgba(4,4,6,0.94), rgba(16,18,22,0.96))', backgroundSize: '200% 100%', color: 'rgba(236,244,255,0.92)', fontWeight: 400, letterSpacing: '0.04em', cursor: 'pointer', animation: 'shimmer 6s ease-in-out infinite', transition: 'box-shadow 0.3s, transform 0.3s', textAlign: 'center', boxSizing: 'border-box', textTransform: 'none', lineHeight: 1.1, boxShadow: '0 0 0 1px rgba(255,255,255,0.05) inset, 0 16px 42px rgba(118,150,188,0.12)' }}
+                <button onClick={() => window.open('https://docs.fiebatt.local/product/editor-workflow', '_blank', 'noopener,noreferrer')} style={{ fontFamily: 'var(--font-body)', fontSize: '15px', padding: '15px 34px', border: '1px solid rgba(186,220,255,0.2)', width: '194px', background: 'linear-gradient(135deg, rgba(16,18,22,0.96), rgba(4,4,6,0.94), rgba(18,22,28,0.96), rgba(4,4,6,0.94), rgba(16,18,22,0.96))', backgroundSize: '200% 100%', color: 'rgba(236,244,255,0.92)', fontWeight: 400, letterSpacing: '0.04em', cursor: 'pointer', animation: 'shimmer 6s ease-in-out infinite', transition: 'box-shadow 0.3s, transform 0.3s', textAlign: 'center', boxSizing: 'border-box', textTransform: 'none', lineHeight: 1.1, boxShadow: '0 0 0 1px rgba(255,255,255,0.05) inset, 0 16px 42px rgba(118,150,188,0.12)' }}
                   onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 0 0 1px rgba(255,255,255,0.08) inset, 0 20px 50px rgba(190,220,255,0.18)')} onMouseLeave={e => (e.currentTarget.style.boxShadow = '0 0 0 1px rgba(255,255,255,0.05) inset, 0 16px 42px rgba(118,150,188,0.12)')}>View Workflow</button>
               </Magnetic>
             </div>
@@ -504,7 +504,7 @@ function HeroLogoLoop() {
       gap={46}
       hoverSpeed={12}
       fadeOut
-      ariaLabel="Iris tech stack loop"
+      ariaLabel="fiebatt tech stack loop"
       style={{
         height: '100%',
       }}
@@ -661,7 +661,7 @@ function SectionStage({
 const STEPS = [
   { num: '01', label: 'scrub', desc: 'Scrub to the exact frame or range you want to change.' },
   { num: '02', label: 'select', desc: 'Draw a box or use a mask-assisted selection to isolate the subject or region.' },
-  { num: '03', label: 'prompt', desc: 'Describe the change in plain language and let Iris generate candidate edits.' },
+  { num: '03', label: 'prompt', desc: 'Describe the change in plain language and let fiebatt generate candidate edits.' },
   { num: '04', label: 'accept', desc: 'Compare the variants, accept the strongest result, and carry it forward through the cut.' },
 ]
 
@@ -687,7 +687,7 @@ function Thesis() {
         style={{ position: 'absolute', bottom: '12%', left: '2%', width: '200px', height: '140px', objectFit: 'cover', rotate: '2deg', border: '1px solid rgba(255,255,255,0.06)', pointerEvents: 'none', zIndex: 1, opacity: 0.2 }} />
 
       <ScrollReveal y={0}
-        style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'rgba(255,255,255,0.2)', letterSpacing: '0.2em', marginBottom: '40px' }}>© iris — 001 / about</ScrollReveal>
+        style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'rgba(255,255,255,0.2)', letterSpacing: '0.2em', marginBottom: '40px' }}>© fiebatt — 001 / about</ScrollReveal>
 
       <ScrollReveal as="h2" y={-40}
         style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontSize: 'clamp(48px, 8vw, 128px)', lineHeight: 0.95, letterSpacing: '-0.03em', color: '#fff', marginBottom: '0' }}>
@@ -701,11 +701,11 @@ function Thesis() {
         <div>
           <ScrollReveal as="p"
             style={{ fontFamily: 'var(--font-body)', fontSize: '18px', lineHeight: 1.78, color: 'rgba(255,255,255,0.5)', marginBottom: '32px', maxWidth: '34ch' }}>
-            Iris is built for specific editorial changes, not full-scene regeneration. Scrub to an exact frame or short range, isolate the subject, and tell Iris what should change.
+            fiebatt is built for specific editorial changes, not full-scene regeneration. Scrub to an exact frame or short range, isolate the subject, and tell fiebatt what should change.
           </ScrollReveal>
           <ScrollReveal as="p" delay={0.1}
             style={{ fontFamily: 'var(--font-body)', fontSize: '18px', lineHeight: 1.78, color: 'rgba(255,255,255,0.44)', marginBottom: '48px', maxWidth: '36ch' }}>
-            Instead of locking you into one opaque output, Iris generates multiple interpretations for the moment you selected. You review the options, accept the strongest take, and continue with a timeline that still feels authored.
+            Instead of locking you into one opaque output, fiebatt generates multiple interpretations for the moment you selected. You review the options, accept the strongest take, and continue with a timeline that still feels authored.
           </ScrollReveal>
           <ScrollReveal y={0} delay={0.2}
             style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '24px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '24px' }}>
@@ -754,7 +754,7 @@ function Features() {
   return (
     <SectionStage id="features" style={{ padding: '160px 64px', maxWidth: '1200px', margin: '0 auto' }}>
       <ScrollReveal y={0}
-        style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'rgba(255,255,255,0.2)', letterSpacing: '0.2em', marginBottom: '40px' }}>© iris — 002 / capabilities</ScrollReveal>
+        style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'rgba(255,255,255,0.2)', letterSpacing: '0.2em', marginBottom: '40px' }}>© fiebatt — 002 / capabilities</ScrollReveal>
 
       <ScrollReveal as="h2" y={-40}
         style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontSize: 'clamp(40px, 6vw, 96px)', lineHeight: 0.95, letterSpacing: '-0.03em', color: '#fff', marginBottom: '80px' }}>
@@ -770,11 +770,11 @@ function Features() {
 
 // ── social proof ───────────────────────────────────────────────────
 
-const INSTALL_CMD = `Install the iris video editing CLI and agent skill file. Run these commands:
-1. pip install iris-edit
-2. mkdir -p ~/.claude/skills/iris-edit && curl -sL https://raw.githubusercontent.com/stephenhungg/iris/main/apps/cli/SKILL.md -o ~/.claude/skills/iris-edit/SKILL.md
-3. iris auth login --base-url https://useiris.tech
-Then say "iris edit" to start editing videos.`
+const INSTALL_CMD = `Install the fiebatt video editing CLI and agent skill file. Run these commands:
+1. pip install fiebatt-edit
+2. mkdir -p ~/.claude/skills/fiebatt-edit && curl -sL https://raw.githubusercontent.com/ASAC44/fiebatt/main/apps/cli/SKILL.md -o ~/.claude/skills/fiebatt-edit/SKILL.md
+3. fiebatt auth login --base-url https://fiebatt.local
+Then say "fiebatt edit" to start editing videos.`
 
 function CopyInstallButton() {
   const [copied, setCopied] = useState(false)
@@ -811,36 +811,36 @@ function CopyInstallButton() {
 }
 
 const AGENT_TERMINAL_LINES = [
-  '$ pip install iris-edit',
-  '$ mkdir -p ~/.claude/skills/iris-edit && curl -sL https://raw.githubusercontent.com/stephenhungg/iris/main/apps/cli/SKILL.md -o ~/.claude/skills/iris-edit/SKILL.md',
-  '$ iris analyze proj_iris --fps 2.0',
-  '$ iris generate --project proj_iris --start 12.0 --end 14.0 --bbox "0.2,0.3,0.4,0.3" --prompt "replace the phone with a chrome orb"',
-  '$ iris score --compare var_01 var_02 var_03',
-  '$ iris accept --job job_abc --variant 0',
-  '$ iris export proj_iris',
+  '$ pip install fiebatt-edit',
+  '$ mkdir -p ~/.claude/skills/fiebatt-edit && curl -sL https://raw.githubusercontent.com/ASAC44/fiebatt/main/apps/cli/SKILL.md -o ~/.claude/skills/fiebatt-edit/SKILL.md',
+  '$ fiebatt analyze proj_fiebatt --fps 2.0',
+  '$ fiebatt generate --project proj_fiebatt --start 12.0 --end 14.0 --bbox "0.2,0.3,0.4,0.3" --prompt "replace the phone with a chrome orb"',
+  '$ fiebatt score --compare var_01 var_02 var_03',
+  '$ fiebatt accept --job job_abc --variant 0',
+  '$ fiebatt export proj_fiebatt',
 ]
 
 function SocialProof() {
   return (
     <SectionStage id="agents" style={{ padding: '160px 64px', maxWidth: '1200px', margin: '0 auto' }}>
       <ScrollReveal y={0}
-        style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'rgba(255,255,255,0.2)', letterSpacing: '0.2em', marginBottom: '64px' }}>© iris — 003 / signal</ScrollReveal>
+        style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'rgba(255,255,255,0.2)', letterSpacing: '0.2em', marginBottom: '64px' }}>© fiebatt — 003 / signal</ScrollReveal>
 
       <ScrollReveal as="h2" y={-24}
         style={{ fontFamily: 'var(--font-display)', fontWeight: 300, fontSize: 'clamp(36px, 5vw, 80px)', lineHeight: 0.95, letterSpacing: '-0.03em', color: '#fff', marginBottom: '24px' }}>
-        iris works<br />in the terminal.
+        fiebatt works<br />in the terminal.
       </ScrollReveal>
 
       <ScrollReveal as="p" y={0}
         style={{ maxWidth: '760px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'rgba(255,255,255,0.28)', letterSpacing: '0.08em', lineHeight: 1.9, marginBottom: '56px' }}>
-        The Iris CLI wraps the backend for scripting, automation, and agent-driven editing. Any agent that can run shell commands can inspect projects, trigger localized changes, review variants, and export results without a custom integration.
+        The fiebatt CLI wraps the backend for scripting, automation, and agent-driven editing. Any agent that can run shell commands can inspect projects, trigger localized changes, review variants, and export results without a custom integration.
       </ScrollReveal>
 
       <ScrollReveal as="p" y={0} delay={0.06}
         style={{ maxWidth: '760px', fontFamily: 'var(--font-body)', fontSize: '16px', color: 'rgba(255,255,255,0.42)', lineHeight: 1.8, marginBottom: '56px' }}>
         Read the full workflow in the{' '}
         <a
-          href="https://docs.useiris.tech"
+          href="https://docs.fiebatt.local"
           target="_blank"
           rel="noreferrer"
           style={{
@@ -953,7 +953,7 @@ function CTA({ onStudio }: { onStudio: () => void }) {
       <div style={{ position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none', background: 'linear-gradient(to bottom, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.12) 18%, rgba(0,0,0,0.02) 40%, rgba(0,0,0,0.08) 74%, rgba(0,0,0,0.36) 100%)' }} />
       <div style={{ position: 'relative', zIndex: 1 }}>
       <ScrollReveal y={0}
-        style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'rgba(255,255,255,0.2)', letterSpacing: '0.2em', marginBottom: '64px' }}>© iris — 004 / rewrite</ScrollReveal>
+        style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'rgba(255,255,255,0.2)', letterSpacing: '0.2em', marginBottom: '64px' }}>© fiebatt — 004 / rewrite</ScrollReveal>
 
       <ScrollReveal y={0}
         style={{ display: 'flex', justifyContent: 'center', marginBottom: '64px' }}>
@@ -990,7 +990,7 @@ function CTA({ onStudio }: { onStudio: () => void }) {
             }}
           />
           <ASCIIText
-            text="<iris>"
+            text="<fiebatt>"
             enableWaves
             asciiFontSize={7}
             textFontSize={272}
@@ -1034,17 +1034,17 @@ function Footer() {
       { label: 'Angelina', href: 'https://www.linkedin.com/in/angelina-sun-13014131b/' },
     ],
     Links: [
-      { label: 'Docs', href: 'https://docs.useiris.tech' },
-      { label: 'Quickstart', href: 'https://docs.useiris.tech/quickstart' },
-      { label: 'Workflow', href: 'https://docs.useiris.tech/product/editor-workflow' },
-      { label: 'GitHub', href: 'https://github.com/stephenhungg/iris' },
+      { label: 'Docs', href: 'https://docs.fiebatt.local' },
+      { label: 'Quickstart', href: 'https://docs.fiebatt.local/quickstart' },
+      { label: 'Workflow', href: 'https://docs.fiebatt.local/product/editor-workflow' },
+      { label: 'GitHub', href: 'https://github.com/ASAC44/fiebatt' },
     ],
   }
 
   return (
     <SectionStage as="footer" style={{ padding: '120px 64px 60px', borderTop: '1px solid rgba(255,255,255,0.06)', overflow: 'hidden' }}>
       {/* ghost watermark */}
-      <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontFamily: 'var(--font-display)', fontSize: 'clamp(120px, 20vw, 300px)', fontWeight: 300, color: '#fff', opacity: 0.03, pointerEvents: 'none', userSelect: 'none', letterSpacing: '-0.03em' }}>iris</div>
+      <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontFamily: 'var(--font-display)', fontSize: 'clamp(120px, 20vw, 300px)', fontWeight: 300, color: '#fff', opacity: 0.03, pointerEvents: 'none', userSelect: 'none', letterSpacing: '-0.03em' }}>fiebatt</div>
 
       {/* closing philosophy */}
       <ScrollReveal as="p" y={0}
@@ -1070,8 +1070,8 @@ function Footer() {
 
       {/* bottom row */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontFamily: 'var(--font-display)', fontSize: '16px', background: 'linear-gradient(135deg, #707070, #B0B0B0, #E0E0E0, #B0B0B0, #707070)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>iris®</span>
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'rgba(255,255,255,0.08)', letterSpacing: '0.15em' }}>© iris — fin</span>
+        <span style={{ fontFamily: 'var(--font-display)', fontSize: '16px', background: 'linear-gradient(135deg, #707070, #B0B0B0, #E0E0E0, #B0B0B0, #707070)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>fiebatt®</span>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'rgba(255,255,255,0.08)', letterSpacing: '0.15em' }}>© fiebatt — fin</span>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'rgba(255,255,255,0.15)', letterSpacing: '0.15em' }}>© 2026 · built at citrus hack</span>
       </div>
     </SectionStage>
@@ -1096,7 +1096,7 @@ function useIntroTimeline() {
     gsap.set('[data-intro="hero-images"]', { opacity: 0 })
     gsap.set('[data-intro="nav"]', { opacity: 0, y: -140 })
 
-    // 1. iris text first
+    // 1. fiebatt text first
     tl.to('[data-intro="logo-dark"], [data-intro="metallic"]', {
       opacity: 1,
       duration: 0.8,
@@ -1164,8 +1164,8 @@ export default function App() {
       {/* preload metallic paint shaders during loader (offscreen, invisible) */}
       {!loaderDone && (
         <div aria-hidden style={{ position: 'fixed', width: 1, height: 1, opacity: 0.001, overflow: 'hidden', pointerEvents: 'none', zIndex: -1 }}>
-          <MetallicPaint imageSrc={IRIS_SVG} {...FLOWER_METALLIC_PROPS} />
-          <MetallicPaint text={IRIS_WORDMARK_TEXT} textOptions={IRIS_WORDMARK_MASK} {...WORDMARK_METALLIC_PROPS} />
+          <MetallicPaint imageSrc={FIEBATT_SVG} {...FLOWER_METALLIC_PROPS} />
+          <MetallicPaint text={FIEBATT_WORDMARK_TEXT} textOptions={FIEBATT_WORDMARK_MASK} {...WORDMARK_METALLIC_PROPS} />
         </div>
       )}
 

@@ -96,7 +96,7 @@ body {
   opacity: 0.3 !important;
 }
 
-.iris-hero-lockup {
+.fiebatt-hero-lockup {
   position: relative;
   display: block;
   width: 100%;
@@ -104,7 +104,7 @@ body {
   padding-left: clamp(28px, 5vw, 92px);
 }
 
-.iris-hero-mark {
+.fiebatt-hero-mark {
   position: absolute;
   left: calc(
     clamp(32px, 4.8vw, 88px) +
@@ -119,7 +119,7 @@ body {
   transform: translateZ(0);
 }
 
-.iris-hero-wordmark-block {
+.fiebatt-hero-wordmark-block {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -128,14 +128,14 @@ body {
   padding-left: clamp(32px, 4.8vw, 88px);
 }
 
-.iris-hero-wordmark {
+.fiebatt-hero-wordmark {
   position: relative;
   width: min(100%, clamp(520px, 58vw, 1180px));
   height: clamp(116px, 13vw, 220px);
   margin-top: clamp(6px, 0.8vw, 16px);
 }
 
-.iris-hero-actions {
+.fiebatt-hero-actions {
   margin-left: clamp(2px, 0.6vw, 12px);
   display: flex;
   align-items: center;
@@ -144,11 +144,11 @@ body {
 }
 
 @media (max-width: 1024px) {
-  .iris-hero-lockup {
+  .fiebatt-hero-lockup {
     padding-left: clamp(18px, 4vw, 48px);
   }
 
-  .iris-hero-mark {
+  .fiebatt-hero-mark {
     left: calc(
       clamp(32px, 4.8vw, 88px) +
       clamp(2px, 0.6vw, 12px) +
@@ -157,40 +157,40 @@ body {
     );
   }
 
-  .iris-hero-wordmark-block {
+  .fiebatt-hero-wordmark-block {
     padding-left: clamp(28px, 4vw, 64px);
   }
 
-  .iris-hero-wordmark {
+  .fiebatt-hero-wordmark {
     width: min(100%, clamp(440px, 56vw, 920px));
     height: clamp(104px, 12vw, 180px);
   }
 }
 
 @media (max-width: 720px) {
-  .iris-hero-lockup {
+  .fiebatt-hero-lockup {
     display: grid;
     grid-template-columns: 1fr;
     row-gap: 20px;
     padding-left: 0;
   }
 
-  .iris-hero-mark {
+  .fiebatt-hero-mark {
     position: relative;
     top: 0;
   }
 
-  .iris-hero-wordmark-block {
+  .fiebatt-hero-wordmark-block {
     padding-left: 0;
   }
 
-  .iris-hero-wordmark {
+  .fiebatt-hero-wordmark {
     width: min(100%, 540px);
     height: clamp(92px, 18vw, 140px);
     margin-top: 0;
   }
 
-  .iris-hero-actions {
+  .fiebatt-hero-actions {
     margin-left: 0;
   }
 }

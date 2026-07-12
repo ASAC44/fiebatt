@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="780" viewBox="0 0 1400 780" role="img" aria-labelledby="title desc">
+  <title id="title">fiebatt technical flow</title>
+  <desc id="desc">End-to-end fiebatt pipeline from editor or CLI input through project context, agent planning, CLIP, SAM2, generation, scoring, compare, timeline refresh, continuity, and export.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" orient="auto">
+      <path d="M2 2 L10 6 L2 10" fill="none" stroke="#E11D48" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <style>
+      .bg { fill: #ffffff; }
+      .label { fill: #E11D48; font: 600 14px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .title { fill: #111111; font: 700 34px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .sub { fill: #555555; font: 18px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .card { stroke: #242424; stroke-width: 2; rx: 24; }
+      .card-title { fill: #111111; font: 700 20px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .card-copy { fill: #333333; font: 14px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .chip { fill: #666666; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .arrow { fill: none; stroke: #E11D48; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrow); }
+      .muted-arrow { fill: none; stroke: #777777; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect class="bg" width="1400" height="780" rx="28"/>
+  <text class="title" x="52" y="62">fiebatt technical pipeline</text>
+  <text class="sub" x="54" y="98">A prompt becomes project-aware context, runs through vision, generation, scoring, review, and exports back to a real timeline.</text>
+
+  <text class="label" x="56" y="146">Input</text>
+  <text class="label" x="282" y="146">Context</text>
+  <text class="label" x="508" y="146">Agent</text>
+  <text class="label" x="734" y="146">Vision</text>
+  <text class="label" x="960" y="146">Generation</text>
+  <text class="label" x="1186" y="146">Delivery</text>
+
+  <g transform="translate(52 170)">
+    <rect class="card" width="185" height="150" fill="#EEF3EA"/>
+    <text class="card-title" x="18" y="34">Editor / CLI</text>
+    <text class="card-copy" x="18" y="66">Chat, Codex, Claude,</text>
+    <text class="card-copy" x="18" y="86">or shell scripts send</text>
+    <text class="card-copy" x="18" y="106">plain-language edits.</text>
+    <text class="chip" x="18" y="132">message + playhead</text>
+  </g>
+
+  <g transform="translate(278 170)">
+    <rect class="card" width="185" height="150" fill="#F6ECEF"/>
+    <text class="card-title" x="18" y="34">Project memory</text>
+    <text class="card-copy" x="18" y="66">Load source media, EDL,</text>
+    <text class="card-copy" x="18" y="86">accepted edits, entities,</text>
+    <text class="card-copy" x="18" y="106">and chat history.</text>
+    <text class="chip" x="18" y="132">project_id + timeline</text>
+  </g>
+
+  <g transform="translate(504 170)">
+    <rect class="card" width="185" height="150" fill="#ECEFF5"/>
+    <text class="card-title" x="18" y="34">qwen planner</text>
+    <text class="card-copy" x="18" y="66">Rewrite intent into a</text>
+    <text class="card-copy" x="18" y="86">generation brief, target</text>
+    <text class="card-copy" x="18" y="106">window, and tool plan.</text>
+    <text class="chip" x="18" y="132">prompt_plan</text>
+  </g>
+
+  <g transform="translate(730 130)">
+    <rect class="card" width="185" height="130" fill="#F5F1E8"/>
+    <text class="card-title" x="18" y="34">CLIP retrieval</text>
+    <text class="card-copy" x="18" y="66">Find matching frames,</text>
+    <text class="card-copy" x="18" y="86">crops, and appearances.</text>
+    <text class="chip" x="18" y="112">semantic match</text>
+  </g>
+
+  <g transform="translate(730 300)">
+    <rect class="card" width="185" height="130" fill="#F5F1E8"/>
+    <text class="card-title" x="18" y="34">SAM2 mask</text>
+    <text class="card-copy" x="18" y="66">Turn a rough box into</text>
+    <text class="card-copy" x="18" y="86">a precise edit region.</text>
+    <text class="chip" x="18" y="112">mask contour</text>
+  </g>
+
+  <g transform="translate(956 130)">
+    <rect class="card" width="185" height="130" fill="#EEF0F2"/>
+    <text class="card-title" x="18" y="34">Generate</text>
+    <text class="card-copy" x="18" y="66">Create candidate edits</text>
+    <text class="card-copy" x="18" y="86">for the selected window.</text>
+    <text class="chip" x="18" y="112">job_id + variants</text>
+  </g>
+
+  <g transform="translate(956 300)">
+    <rect class="card" width="185" height="130" fill="#EEF0F2"/>
+    <text class="card-title" x="18" y="34">Scoring agent</text>
+    <text class="card-copy" x="18" y="66">Evaluate prompt fit,</text>
+    <text class="card-copy" x="18" y="86">coherence, and stability.</text>
+    <text class="chip" x="18" y="112">quality metadata</text>
+  </g>
+
+  <g transform="translate(1182 170)">
+    <rect class="card" width="185" height="150" fill="#FFE8F0"/>
+    <text class="card-title" x="18" y="34">Review + export</text>
+    <text class="card-copy" x="18" y="66">Compare, accept, refresh</text>
+    <text class="card-copy" x="18" y="86">the EDL, propagate if</text>
+    <text class="card-copy" x="18" y="106">needed, then export MP4.</text>
+    <text class="chip" x="18" y="132">compare + export</text>
+  </g>
+
+  <path class="arrow" d="M240 245 H270"/>
+  <path class="arrow" d="M466 245 H496"/>
+  <path class="arrow" d="M692 245 H722"/>
+  <path class="arrow" d="M918 198 H948"/>
+  <path class="arrow" d="M918 365 H948"/>
+  <path class="arrow" d="M1144 245 H1174"/>
+  <path class="muted-arrow" d="M823 264 V292"/>
+  <path class="muted-arrow" d="M1048 264 V292"/>
+
+  <g transform="translate(278 520)">
+    <rect class="card" width="844" height="145" fill="#FFF7FA" stroke="#E11D48" stroke-dasharray="9 7"/>
+    <text class="card-title" x="26" y="40">Streaming loop</text>
+    <text class="card-copy" x="26" y="74">/api/agent/chat sends SSE events back to the UI while the backend runs tools.</text>
+    <text class="card-copy" x="26" y="98">The editor renders working states, tool details, generation briefs, variant cards, and final qwen text as they arrive.</text>
+    <text class="chip" x="26" y="124">SSE events · tool_call_* · variant_ready · timeline refresh</text>
+  </g>
+</svg>

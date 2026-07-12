@@ -13,7 +13,7 @@ from app.models.session import Session as SessionModel
 from app.schemas.mask import MaskRequest, MaskResponse
 from app.services import ffmpeg, storage
 
-log = logging.getLogger("iris.mask")
+log = logging.getLogger("fiebatt.mask")
 
 router = APIRouter(tags=["mask"])
 

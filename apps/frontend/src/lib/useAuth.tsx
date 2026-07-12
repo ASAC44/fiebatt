@@ -14,7 +14,7 @@ import { getOAuthRedirect, isSupabaseConfigured, supabase } from "./supabase";
 // thin react context over the supabase session. one source of truth:
 // whenever supabase fires onAuthStateChange, we re-render.
 
-const DEV_USER_ID_KEY = "iris.dev_user_id";
+const DEV_USER_ID_KEY = "fiebatt.dev_user_id";
 
 function getDevUserId(): string {
   let id = localStorage.getItem(DEV_USER_ID_KEY);

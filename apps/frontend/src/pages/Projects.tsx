@@ -48,7 +48,7 @@ export function Projects({
         <div className="projects-topbar__left">
           <button className="projects-brand" onClick={onExit}>
             <span className="projects-brand__mark" aria-hidden />
-            <span className="projects-brand__word">iris</span>
+            <span className="projects-brand__word">fiebatt</span>
           </button>
           <span style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.08)', margin: '0 10px' }} />
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'rgba(255,255,255,0.3)', letterSpacing: '0.14em' }}>library</span>
@@ -78,7 +78,7 @@ export function Projects({
         <div className="projects-subhead">
           <p>
             every reel you've cut lives here. pick one up where you left off,
-            or start a fresh edit - iris remembers nothing you didn't teach it.
+            or start a fresh edit - fiebatt remembers nothing you didn't teach it.
           </p>
           <div className="projects-count">
             {items === null ? '-' : String(items.length).padStart(3, '0')} videos

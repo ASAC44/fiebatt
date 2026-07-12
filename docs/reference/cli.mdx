@@ -1,6 +1,6 @@
 ---
 title: "CLI Reference"
-description: "CLI for the iris AI video editor — prompt-driven video editing from the terminal"
+description: "CLI for the fiebatt AI video editor — prompt-driven video editing from the terminal"
 ---
 
 # CLI Reference
@@ -11,7 +11,7 @@ description: "CLI for the iris AI video editor — prompt-driven video editing f
       <div className="docs-hero__eyebrow">tooling</div>
       <h1>Edit videos from the terminal</h1>
       <p>
-        The Iris CLI wraps every backend endpoint for scripting, automation,
+        The fiebatt CLI wraps every backend endpoint for scripting, automation,
         and agent-driven editing. Any agent that can run bash can use it.
       </p>
     </div>
@@ -20,19 +20,19 @@ description: "CLI for the iris AI video editor — prompt-driven video editing f
 
 ## Installation and Agent Setup
 
-To install the Iris CLI and set up the agent skill for prompt-driven video editing, follow these steps:
+To install the fiebatt CLI and set up the agent skill for prompt-driven video editing, follow these steps:
 
-1.  **Install the Iris CLI:**
+1.  **Install the fiebatt CLI:**
     ```bash
-    pip install iris-edit
+    pip install fiebatt-edit
     ```
-2.  **Set up the agent skill file:** This makes the Iris CLI available to AI agents (e.g., Claude).
+2.  **Set up the agent skill file:** This makes the fiebatt CLI available to AI agents (e.g., Claude).
     ```bash
-    mkdir -p ~/.claude/skills/iris-edit && curl -sL https://raw.githubusercontent.com/stephenhungg/iris/main/apps/cli/SKILL.md -o ~/.claude/skills/iris-edit/SKILL.md
+    mkdir -p ~/.claude/skills/fiebatt-edit && curl -sL https://raw.githubusercontent.com/ASAC44/fiebatt/main/apps/cli/SKILL.md -o ~/.claude/skills/fiebatt-edit/SKILL.md
     ```
-3.  **Authenticate with Iris:**
+3.  **Authenticate with fiebatt:**
     ```bash
-    iris auth login --base-url https://useiris.tech
+    fiebatt auth login --base-url https://fiebatt.local
     ```
 
-Once installed and authenticated, you can start editing videos by saying "iris edit" to your agent.
+Once installed and authenticated, you can start editing videos by saying "fiebatt edit" to your agent.

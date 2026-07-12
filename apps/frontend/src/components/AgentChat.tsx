@@ -66,7 +66,7 @@ export function AgentChat({ projectId }: AgentChatProps) {
   // Variant card "apply" — user picked a specific finished variant. Ask
   // the agent to call accept_variant with that index so the generated
   // clip lands on the timeline. Studio listens for the completion event
-  // (iris:timeline-refresh) and re-hydrates the EDL from the server.
+  // (fiebatt:timeline-refresh) and re-hydrates the EDL from the server.
   const handleApplyVariant = useCallback(
     (jobId: string, variantIndex: number) => {
       if (!projectId) return;
@@ -484,7 +484,7 @@ export function AgentChat({ projectId }: AgentChatProps) {
       <div className="agent-chat">
         {/* header */}
         <div className="agent-chat__header">
-          <span className="agent-chat__title">iris agent</span>
+          <span className="agent-chat__title">fiebatt agent</span>
           {messages.length > 0 && (
             <button className="agent-chat__clear" onClick={clearChat}>
               clear

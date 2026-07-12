@@ -1,7 +1,7 @@
 """Agent chat route — POST /api/agent/chat.
 
 Streams SSE events from a Qwen-powered agent (DashScope OpenAI-compatible API)
-that can call iris editing tools (analyze, identify, generate, accept, export,
+that can call fiebatt editing tools (analyze, identify, generate, accept, export,
 etc.) via function calling.  The agent loops: text tokens stream to the client,
 function calls are executed in-process, and their results are fed back to the
 model until it finishes.
@@ -31,7 +31,7 @@ from app.models.session import Session as SessionModel
 from app.services.agent_tools import execute_tool
 from app.services import job_events
 
-log = logging.getLogger("iris.agent")
+log = logging.getLogger("fiebatt.agent")
 router = APIRouter(prefix="/agent", tags=["agent"])
 
 # ---- request schema ----
@@ -64,7 +64,7 @@ class AgentChatRequest(BaseModel):
 # ---- system prompt ----
 
 SYSTEM_PROMPT = """\
-You are the iris video editing agent. You help users edit videos using AI-powered tools.
+You are the fiebatt video editing agent. You help users edit videos using AI-powered tools.
 
 Operate like an editing copilot, not just a prompt box.
 
@@ -82,7 +82,7 @@ Preferred workflow:
 5. Before destructive timeline moves, use snapshot_timeline so reverts stay cheap.
 6. Use score_variant, score_continuity, remix_variant, split_segment, trim_segment, delete_segment, and color_grade when they clearly improve the edit.
 7. NEVER call accept_variant on your own. Acceptance is a human decision —
-   the iris UI shows the rendered variants to the user with their own
+   the fiebatt UI shows the rendered variants to the user with their own
    "apply" button, and only fires accept_variant when they click it. Your
    job ends at "variants ready, here's what I made, tell me which one to
    apply or ask for a remix".
@@ -116,7 +116,7 @@ Propagation workflow (for edits that should apply across the full video):
 
 CRITICAL — editor context:
 The "Current editor context" block at the end of these instructions is ground
-truth supplied by the iris frontend on every turn. It already contains the
+truth supplied by the fiebatt frontend on every turn. It already contains the
 active project_id, the user's playhead timestamp, the full reel duration,
 and any bounding box the user has drawn on the preview. You MUST use those
 values directly. Do NOT ask the user for a project_id, a bounding box, or

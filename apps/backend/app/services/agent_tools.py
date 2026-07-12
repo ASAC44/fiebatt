@@ -28,7 +28,7 @@ from app.services.timeline_builder import build_timeline
 from google import genai
 from google.genai import types
 
-log = logging.getLogger("iris.agent_tools")
+log = logging.getLogger("fiebatt.agent_tools")
 
 MIN_SEG_LEN = 2.0
 MAX_SEG_LEN = 15.0
@@ -917,7 +917,7 @@ async def _get_export_status(
         if key:
             download_url = storage.download_url_for_key(
                 key,
-                filename=f"iris-{job.project_id[:8]}.mp4",
+                filename=f"fiebatt-{job.project_id[:8]}.mp4",
             )
         else:
             download_url = export_url
@@ -1206,7 +1206,7 @@ async def _score_variant(
         raise ValueError("variant video not found")
 
     client = _get_gemini_client()
-    with tempfile.TemporaryDirectory(prefix="iris-agent-score-") as temp_root:
+    with tempfile.TemporaryDirectory(prefix="fiebatt-agent-score-") as temp_root:
         temp_dir = Path(temp_root)
         frame_paths = await _sample_video_frames(
             src=variant_video_path,
@@ -1269,7 +1269,7 @@ async def _score_continuity(
 
     client = _get_gemini_client()
     analyses: list[tuple[float, dict[str, Any]]] = []
-    with tempfile.TemporaryDirectory(prefix="iris-agent-continuity-") as temp_root:
+    with tempfile.TemporaryDirectory(prefix="fiebatt-agent-continuity-") as temp_root:
         temp_dir = Path(temp_root)
         for index, (prev_item, next_item) in enumerate(zip(timeline, timeline[1:]), start=1):
             boundary_ts = prev_item.end_ts

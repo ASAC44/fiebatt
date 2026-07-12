@@ -1,4 +1,4 @@
-"""Tests for iris_cli.config — config loading, saving, and client kwargs."""
+"""Tests for fiebatt_cli.config — config loading, saving, and client kwargs."""
 
 import json
 import uuid
@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-import iris_cli.config as config_mod
+import fiebatt_cli.config as config_mod
 
 
 @pytest.fixture(autouse=True)

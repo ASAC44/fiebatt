@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://useiris.tech/sitemap.xml
+Sitemap: https://fiebatt.local/sitemap.xml

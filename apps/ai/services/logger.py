@@ -22,7 +22,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
-logger = logging.getLogger("iris.ai")
+logger = logging.getLogger("fiebatt.ai")
 
 # rough cost estimates per API call (for tracking burn rate)
 COST_ESTIMATES = {

@@ -1,6 +1,6 @@
 """Spike: test Gemini edit plan generation.
 
-Run: cd /path/to/iris && python scripts/spike_gemini.py
+Run: cd /path/to/fiebatt && python scripts/spike_gemini.py
 Requires: GEMINI_API_KEY in .env
 """
 

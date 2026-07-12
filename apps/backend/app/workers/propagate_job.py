@@ -20,7 +20,7 @@ from app.models.propagation import PropagationJob, PropagationResult
 from app.models.segment import Segment
 from app.services import ffmpeg, storage
 
-log = logging.getLogger("iris.jobs.propagate")
+log = logging.getLogger("fiebatt.jobs.propagate")
 
 
 async def _run_one(

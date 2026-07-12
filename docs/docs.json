@@ -1,7 +1,7 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
-  "name": "Iris",
+  "name": "fiebatt",
   "description": "Prompt-driven video editing docs for localized edits, variant generation, and continuity propagation.",
   "appearance": {
     "default": "dark",
@@ -13,11 +13,11 @@
     "dark": "#000000"
   },
   "logo": {
-    "dark": "/images/iris-logo.svg",
-    "light": "/images/iris-logo.svg",
+    "dark": "/images/fiebatt-logo.svg",
+    "light": "/images/fiebatt-logo.svg",
     "href": "/"
   },
-  "favicon": "/images/iris-logo.svg",
+  "favicon": "/images/fiebatt-logo.svg",
   "navigation": {
     "groups": [
       {
@@ -57,7 +57,7 @@
     "links": [
       {
         "label": "GitHub",
-        "href": "https://github.com/stephenhungg/iris"
+        "href": "https://github.com/ASAC44/fiebatt"
       },
       {
         "label": "Workflow",
@@ -72,7 +72,7 @@
   },
   "anchors": [
     {
-      "anchor": "iris",
+      "anchor": "fiebatt",
       "pages": [
         "index",
         "quickstart",
@@ -81,17 +81,17 @@
     },
     {
       "anchor": "reference",
-      "href": "https://github.com/stephenhungg/iris"
+      "href": "https://github.com/ASAC44/fiebatt"
     }
   ],
   "footer": {
     "socials": {
-      "github": "https://github.com/stephenhungg/iris"
+      "github": "https://github.com/ASAC44/fiebatt"
     }
   },
   "seo": {
     "metatags": {
-      "canonical": "https://docs.useiris.tech"
+      "canonical": "https://docs.fiebatt.local"
     }
   }
 }

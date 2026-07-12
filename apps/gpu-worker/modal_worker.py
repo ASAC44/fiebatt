@@ -4,13 +4,13 @@ Replaces the self-hosted Vultr GPU worker with a serverless Modal function.
 Deploy: `modal deploy apps/gpu-worker/modal_worker.py`
 Test:   `modal run apps/gpu-worker/modal_worker.py`
 
-The iris backend calls the deployed web endpoint at:
-  https://<your-modal-username>--iris-sam2-segment.modal.run
+The fiebatt backend calls the deployed web endpoint at:
+  https://<your-modal-username>--fiebatt-sam2-segment.modal.run
 """
 
 import modal
 
-app = modal.App("iris-sam2")
+app = modal.App("fiebatt-sam2")
 
 # build the image with SAM2 + dependencies
 sam_image = (

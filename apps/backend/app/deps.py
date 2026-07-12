@@ -11,7 +11,7 @@ from app.db.session import get_db
 from app.models.project import Project
 from app.models.session import Session as SessionModel
 
-log = logging.getLogger("iris.deps")
+log = logging.getLogger("fiebatt.deps")
 
 
 async def _migrate_anon_session(
@@ -22,7 +22,7 @@ async def _migrate_anon_session(
 ) -> None:
     """Re-parent an anonymous session's projects onto the signed-in session.
 
-    Runs when a user who previously used iris anonymously signs in for the
+    Runs when a user who previously used fiebatt anonymously signs in for the
     first time — their uploads/edits follow them to their real account
     instead of being orphaned under the random browser uuid.
 

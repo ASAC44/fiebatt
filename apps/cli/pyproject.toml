@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "iris-edit"
+name = "fiebatt-edit"
 version = "0.1.0"
-description = "CLI for the iris AI video editor — prompt-driven video editing from the terminal"
+description = "CLI for the fiebatt AI video editor — prompt-driven video editing from the terminal"
 requires-python = ">=3.11"
 readme = "SKILL.md"
 license = "MIT"
@@ -32,15 +32,15 @@ dependencies = [
 test = ["pytest>=8.0"]
 
 [project.urls]
-Homepage = "https://useiris.tech"
-Documentation = "https://docs.useiris.tech"
-Repository = "https://github.com/stephenhungg/iris"
+Homepage = "https://fiebatt.local"
+Documentation = "https://docs.fiebatt.local"
+Repository = "https://github.com/ASAC44/fiebatt"
 
 [project.scripts]
-iris = "iris_cli.main:app"
+fiebatt = "fiebatt_cli.main:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["iris_cli"]
+packages = ["fiebatt_cli"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

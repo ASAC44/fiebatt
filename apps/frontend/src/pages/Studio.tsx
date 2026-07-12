@@ -263,7 +263,7 @@ function StudioInner({
   initialProjectRef.current = initialProject;
 
   // Always-current snapshot of the EDL so event-driven effects (like
-  // ``iris:timeline-refresh``) can read the *live* source list without
+  // ``fiebatt:timeline-refresh``) can read the *live* source list without
   // closing over stale values or forcing a re-run of their useEffect on
   // every tiny state change.
   const stateRef = useRef(state);
@@ -397,7 +397,7 @@ function StudioInner({
     const handler = async (ev: Event) => {
       // eslint-disable-next-line no-console
       console.log(
-        "[studio] iris:timeline-refresh fired for project",
+        "[studio] fiebatt:timeline-refresh fired for project",
         pid,
         "detail=",
         (ev as CustomEvent).detail,
@@ -467,11 +467,11 @@ function StudioInner({
       }
     };
 
-    window.addEventListener("iris:timeline-refresh", handler);
+    window.addEventListener("fiebatt:timeline-refresh", handler);
     return () => {
       // eslint-disable-next-line no-console
       console.log("[studio] timeline-refresh listener DETACHED from project", pid);
-      window.removeEventListener("iris:timeline-refresh", handler);
+      window.removeEventListener("fiebatt:timeline-refresh", handler);
     };
   }, [effectiveProjectId, dispatch]);
 
@@ -841,7 +841,7 @@ function StudioInner({
               <ExportComplete
                 url={exportUrl}
                 downloadUrl={exportDownloadUrl ?? exportUrl}
-                downloadFilename={`iris-${(initialProject?.projectId ?? state.sources[0]?.projectId ?? 'reel').slice(0, 8)}.mp4`}
+                downloadFilename={`fiebatt-${(initialProject?.projectId ?? state.sources[0]?.projectId ?? 'reel').slice(0, 8)}.mp4`}
                 fps={initialProject?.fps ?? state.sources[0]?.fps ?? null}
                 duration={totalDuration(state.clips)}
                 bytes={exportBytes}
@@ -1108,7 +1108,7 @@ function TopBar({
       <div className="topbar__left">
         <button className="topbar__brand" onClick={onExit} title="back to landing">
           <span className="topbar__mark" aria-hidden />
-          <span className="topbar__word">iris</span>
+          <span className="topbar__word">fiebatt</span>
         </button>
         <span className="topbar__divider" />
         {onLibrary && (
@@ -1210,7 +1210,7 @@ function SaveChip({
 
   return (
     <span
-      title={errored ? "last save failed — will retry on next edit" : "timeline auto-saved to iris"}
+      title={errored ? "last save failed — will retry on next edit" : "timeline auto-saved to fiebatt"}
       style={{
         display: "inline-flex",
         alignItems: "center",

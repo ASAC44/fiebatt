@@ -11,7 +11,7 @@ import asyncio
 import logging
 from typing import Awaitable, Callable
 
-log = logging.getLogger("iris.jobs")
+log = logging.getLogger("fiebatt.jobs")
 
 
 class JobRunner:

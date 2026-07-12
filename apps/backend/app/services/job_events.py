@@ -24,7 +24,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
-log = logging.getLogger("iris.jobs.events")
+log = logging.getLogger("fiebatt.jobs.events")
 
 # cap replay history so long-running jobs don't balloon memory.
 _MAX_HISTORY = 500

@@ -144,7 +144,7 @@ export default function Home() {
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] h-40 bg-gradient-to-b from-transparent via-[#F4F4F1]/20 to-[#F4F4F1]/75" />
         <CardNav
           logo="/logo.png"
-          logoAlt="Iris Logo"
+          logoAlt="fiebatt logo"
           brandText="fiebatt"
           items={navItems}
           baseColor="#fff"

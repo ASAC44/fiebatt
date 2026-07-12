@@ -13,7 +13,7 @@ import numpy as np
 from PIL import Image
 from fastapi import FastAPI
 
-app = FastAPI(title="iris-gpu-worker")
+app = FastAPI(title="fiebatt-gpu-worker")
 
 # ---------- lazy model loading ----------
 

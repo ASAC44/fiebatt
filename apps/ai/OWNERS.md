@@ -22,7 +22,7 @@ Everything in `apps/ai/` and `infra/` is yours.
 - Vultr setup (backend + workers + storage)
 - Docker / docker-compose
 - Environment config
-- Domain setup (iris.tech)
+- Domain setup (fiebatt.tech)
 
 ## Day 1 blockers (spike these first)
 1. **Runway spatial grounding** — does Runway Gen-4 honor bbox region emphasis via prompt text? If not, fallback to full-frame generation or switch to Stable Video Diffusion + ControlNet.

@@ -396,7 +396,7 @@ class CanvAscii {
 }
 
 export default function ASCIIText({
-  text = '< iris >',
+  text = '< fiebatt >',
   asciiFontSize = 8,
   textFontSize = 200,
   textColor = '#f4f4f4',

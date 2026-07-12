@@ -1,5 +1,5 @@
-const ONBOARDING_KEY_PREFIX = "iris.onboarding.completed";
-const CHECKLIST_KEY_PREFIX = "iris.editor.checklist.dismissed";
+const ONBOARDING_KEY_PREFIX = "fiebatt.onboarding.completed";
+const CHECKLIST_KEY_PREFIX = "fiebatt.editor.checklist.dismissed";
 
 function safeRead(key: string): string | null {
   if (typeof window === "undefined") return null;

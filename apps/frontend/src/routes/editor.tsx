@@ -55,7 +55,7 @@ function EditorLoader({ onDone }: { onDone: () => void }) {
           animation: 'shimmer 4s ease-in-out infinite',
         }}
       >
-        iris.
+        fiebatt.
       </motion.span>
 
       <motion.div

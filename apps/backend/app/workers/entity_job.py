@@ -19,7 +19,7 @@ from app.models.project import Project
 from app.models.segment import Segment
 from app.services import ffmpeg, storage
 
-log = logging.getLogger("iris.jobs.entity")
+log = logging.getLogger("fiebatt.jobs.entity")
 
 KEYFRAMES_PER_SECOND = 1.0
 

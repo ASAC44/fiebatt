@@ -1,8 +1,8 @@
-"""Tests for iris_cli.parsers — bbox parsing."""
+"""Tests for fiebatt_cli.parsers — bbox parsing."""
 
 import pytest
 
-from iris_cli.parsers import parse_bbox
+from fiebatt_cli.parsers import parse_bbox
 
 
 class TestParseBbox:

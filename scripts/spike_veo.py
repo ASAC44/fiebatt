@@ -79,7 +79,7 @@ async def test_image_conditioned():
         [
             "ffmpeg", "-y",
             "-f", "lavfi", "-i",
-            "color=c=0x333333:s=640x360:d=1,drawtext=text='IRIS TEST':fontsize=48:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2",
+            "color=c=0x333333:s=640x360:d=1,drawtext=text='FIEBATT TEST':fontsize=48:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2",
             "-frames:v", "1", frame_path,
         ],
         capture_output=True,

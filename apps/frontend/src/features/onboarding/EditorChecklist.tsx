@@ -52,7 +52,7 @@ export function EditorChecklist({
   const steps = useMemo<ChecklistStep[]>(() => {
     const continuityHint = hasContinuityPack
       ? "your tracked subject showed up elsewhere. review the continuity pack before export."
-      : "once a variant lands, iris can search for matching appearances and prep continuity edits.";
+      : "once a variant lands, fiebatt can search for matching appearances and prep continuity edits.";
 
     return [
       {
@@ -98,7 +98,7 @@ export function EditorChecklist({
           <div className="editor-checklist__eyebrow">guided edit flow</div>
           <h2 className="editor-checklist__title">don&apos;t boil the ocean all at once</h2>
           <p className="editor-checklist__copy">
-            the core loop is still simple: choose a moment, tell iris what fact to rewrite,
+            the core loop is still simple: choose a moment, tell fiebatt what fact to rewrite,
             accept the best result, then either propagate it or export.
           </p>
         </div>

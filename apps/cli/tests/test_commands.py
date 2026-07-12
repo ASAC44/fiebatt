@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from iris_cli.main import app
+from fiebatt_cli.main import app
 
 runner = CliRunner()
 
@@ -13,10 +13,10 @@ runner = CliRunner()
 class TestHelpOutput:
     """Basic CLI help and wiring tests."""
 
-    def test_iris_help_exits_zero(self) -> None:
+    def test_fiebatt_help_exits_zero(self) -> None:
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
-        assert "iris" in result.output.lower()
+        assert "fiebatt" in result.output.lower()
 
     def test_generate_help_shows_options(self) -> None:
         result = runner.invoke(app, ["generate", "--help"])
@@ -37,11 +37,11 @@ class TestHelpOutput:
 
 
 class TestAuthStatus:
-    """iris auth status wiring."""
+    """fiebatt auth status wiring."""
 
-    @patch("iris_cli.commands.auth.IrisClient")
-    @patch("iris_cli.commands.auth.get_client_kwargs")
-    @patch("iris_cli.commands.auth.load_config")
+    @patch("fiebatt_cli.commands.auth.FiebattClient")
+    @patch("fiebatt_cli.commands.auth.get_client_kwargs")
+    @patch("fiebatt_cli.commands.auth.load_config")
     def test_auth_status_wiring(
         self,
         mock_load: MagicMock,
@@ -66,10 +66,10 @@ class TestAuthStatus:
 
 
 class TestProjectsCommand:
-    """iris projects wiring."""
+    """fiebatt projects wiring."""
 
-    @patch("iris_cli.commands.projects.IrisClient")
-    @patch("iris_cli.commands.projects.get_client_kwargs")
+    @patch("fiebatt_cli.commands.projects.FiebattClient")
+    @patch("fiebatt_cli.commands.projects.get_client_kwargs")
     def test_projects_lists(
         self,
         mock_kwargs: MagicMock,
@@ -92,8 +92,8 @@ class TestProjectsCommand:
 class TestJsonFlag:
     """--json flag sets output format."""
 
-    @patch("iris_cli.commands.projects.IrisClient")
-    @patch("iris_cli.commands.projects.get_client_kwargs")
+    @patch("fiebatt_cli.commands.projects.FiebattClient")
+    @patch("fiebatt_cli.commands.projects.get_client_kwargs")
     def test_json_flag_sets_format(
         self,
         mock_kwargs: MagicMock,

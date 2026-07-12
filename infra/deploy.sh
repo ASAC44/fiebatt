@@ -1,5 +1,5 @@
 #!/bin/bash
-# deploy iris to a vultr VPS
+# deploy fiebatt to a vultr VPS
 # usage: ./deploy.sh <server-ip>
 
 set -e
@@ -11,19 +11,19 @@ if [ -z "$SERVER" ]; then
   exit 1
 fi
 
-echo "deploying iris to $SERVER..."
+echo "deploying fiebatt to $SERVER..."
 
 # sync repo to server
 rsync -avz --exclude node_modules --exclude .venv --exclude storage --exclude .git \
-  ../ root@$SERVER:/opt/iris/
+  ../ root@$SERVER:/opt/fiebatt/
 
 # build and start on server
 ssh root@$SERVER << 'EOF'
-  cd /opt/iris/infra
+  cd /opt/fiebatt/infra
   docker compose down
   docker compose build
   docker compose up -d
-  echo "iris is live"
+  echo "fiebatt is live"
 EOF
 
-echo "done. iris is running at http://$SERVER"
+echo "done. fiebatt is running at http://$SERVER"

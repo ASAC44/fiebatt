@@ -1,17 +1,17 @@
-"""Tests for iris_cli.client — IrisClient construction, headers, URL building, and HTTP dispatch."""
+"""Tests for fiebatt_cli.client — FiebattClient construction, headers, URL building, and HTTP dispatch."""
 
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from iris_cli.client import IrisClient
+from fiebatt_cli.client import FiebattClient
 
 
 @pytest.fixture()
-def client() -> IrisClient:
-    """A default IrisClient for tests."""
-    return IrisClient(
+def client() -> FiebattClient:
+    """A default FiebattClient for tests."""
+    return FiebattClient(
         base_url="http://localhost:8000",
         session_id="test-session-id",
         token="test-token",
@@ -19,9 +19,9 @@ def client() -> IrisClient:
 
 
 @pytest.fixture()
-def client_no_token() -> IrisClient:
-    """An IrisClient without a token."""
-    return IrisClient(
+def client_no_token() -> FiebattClient:
+    """An FiebattClient without a token."""
+    return FiebattClient(
         base_url="http://localhost:8000",
         session_id="test-session-id",
         token=None,
@@ -29,39 +29,39 @@ def client_no_token() -> IrisClient:
 
 
 class TestConstructor:
-    """IrisClient constructor stores fields correctly."""
+    """FiebattClient constructor stores fields correctly."""
 
-    def test_sets_base_url(self, client: IrisClient) -> None:
+    def test_sets_base_url(self, client: FiebattClient) -> None:
         assert client.base_url == "http://localhost:8000"
 
     def test_strips_trailing_slash(self) -> None:
-        c = IrisClient(base_url="http://localhost:8000/", session_id="s", token=None)
+        c = FiebattClient(base_url="http://localhost:8000/", session_id="s", token=None)
         assert c.base_url == "http://localhost:8000"
 
-    def test_sets_session_id(self, client: IrisClient) -> None:
+    def test_sets_session_id(self, client: FiebattClient) -> None:
         assert client.session_id == "test-session-id"
 
-    def test_sets_token(self, client: IrisClient) -> None:
+    def test_sets_token(self, client: FiebattClient) -> None:
         assert client.token == "test-token"
 
 
 class TestHeaders:
     """_headers() includes the right authorization and session headers."""
 
-    def test_includes_session_id(self, client: IrisClient) -> None:
+    def test_includes_session_id(self, client: FiebattClient) -> None:
         headers = client._headers()
         assert headers["X-Session-Id"] == "test-session-id"
 
-    def test_includes_authorization_when_token_set(self, client: IrisClient) -> None:
+    def test_includes_authorization_when_token_set(self, client: FiebattClient) -> None:
         headers = client._headers()
         assert headers["Authorization"] == "Bearer test-token"
 
-    def test_omits_authorization_when_token_none(self, client_no_token: IrisClient) -> None:
+    def test_omits_authorization_when_token_none(self, client_no_token: FiebattClient) -> None:
         headers = client_no_token._headers()
         assert "Authorization" not in headers
 
     def test_omits_authorization_when_token_empty(self) -> None:
-        c = IrisClient(base_url="http://localhost:8000", session_id="s", token="")
+        c = FiebattClient(base_url="http://localhost:8000", session_id="s", token="")
         headers = c._headers()
         assert "Authorization" not in headers
 
@@ -69,13 +69,13 @@ class TestHeaders:
 class TestUrl:
     """_url() constructs the correct full URL."""
 
-    def test_simple_path(self, client: IrisClient) -> None:
+    def test_simple_path(self, client: FiebattClient) -> None:
         assert client._url("/projects") == "http://localhost:8000/api/projects"
 
-    def test_nested_path(self, client: IrisClient) -> None:
+    def test_nested_path(self, client: FiebattClient) -> None:
         assert client._url("/projects/abc123") == "http://localhost:8000/api/projects/abc123"
 
-    def test_health_path(self, client: IrisClient) -> None:
+    def test_health_path(self, client: FiebattClient) -> None:
         assert client._url("/health") == "http://localhost:8000/api/health"
 
 
@@ -97,7 +97,7 @@ class TestHttpMethods:
     )
     def test_get_methods(
         self,
-        client: IrisClient,
+        client: FiebattClient,
         method_name: str,
         call_kwargs: dict[str, Any],
         expected_http_method: str,
@@ -161,7 +161,7 @@ class TestHttpMethods:
     )
     def test_post_methods(
         self,
-        client: IrisClient,
+        client: FiebattClient,
         method_name: str,
         call_kwargs: dict[str, Any],
         expected_path: str,
@@ -173,7 +173,7 @@ class TestHttpMethods:
             assert args[0][0] == "POST"
             assert args[0][1] == expected_path
 
-    def test_generate_includes_reference_frame(self, client: IrisClient) -> None:
+    def test_generate_includes_reference_frame(self, client: FiebattClient) -> None:
         with patch.object(client, "_request", return_value={}) as mock_req:
             client.generate(
                 project_id="p1",
@@ -186,7 +186,7 @@ class TestHttpMethods:
             body = mock_req.call_args[1]["json"]
             assert body["reference_frame_ts"] == 0.5
 
-    def test_generate_omits_reference_frame_when_none(self, client: IrisClient) -> None:
+    def test_generate_omits_reference_frame_when_none(self, client: FiebattClient) -> None:
         with patch.object(client, "_request", return_value={}) as mock_req:
             client.generate(
                 project_id="p1",

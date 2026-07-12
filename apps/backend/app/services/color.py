@@ -138,7 +138,7 @@ async def _measure_visual_stats(path: Path) -> dict[str, float]:
         return await _signalstats_for_input(path)
 
     ts = max(probe_data["duration"] / 2.0, 0.0)
-    with tempfile.TemporaryDirectory(prefix="iris-color-") as tmp_dir:
+    with tempfile.TemporaryDirectory(prefix="fiebatt-color-") as tmp_dir:
         frame_path = Path(tmp_dir) / "sample.jpg"
         await ffmpeg.extract_frame(path, ts, frame_path)
         return await _signalstats_for_input(frame_path)

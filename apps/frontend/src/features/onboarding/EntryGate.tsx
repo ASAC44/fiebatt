@@ -98,7 +98,7 @@ export function FirstRunOnboardingView({
         <div className="entry-gate__topbar">
           <div className="entry-gate__brand">
             <span className="entry-gate__brand-mark" aria-hidden />
-            <span>iris onboarding</span>
+            <span>fiebatt onboarding</span>
           </div>
           <div className="entry-gate__session">
             first session for {String(displayName).toLowerCase()}
@@ -135,7 +135,7 @@ export function FirstRunOnboardingView({
               {[
                 ["upload a reel", "start with one source clip, not a pile of random assets."],
                 ["scrub to the exact frame", "the edit should be anchored to the moment you actually care about."],
-                ["box the subject", "tell iris what object or person the fact change belongs to."],
+                ["box the subject", "tell fiebatt what object or person the fact change belongs to."],
                 ["prompt, compare, accept", "land one clean before/after, then worry about continuity and export."],
               ].map(([label, copy], index) => (
                 <div key={label} className="entry-gate__step">

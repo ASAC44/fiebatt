@@ -27,7 +27,7 @@ from fastapi import UploadFile
 from app.config.settings import get_settings
 
 
-log = logging.getLogger("iris.storage")
+log = logging.getLogger("fiebatt.storage")
 settings = get_settings()
 
 
@@ -45,7 +45,7 @@ def _client():
             region_name=settings.vultr_s3_region,
             aws_access_key_id=settings.vultr_s3_access_key,
             aws_secret_access_key=settings.vultr_s3_secret_key,
-            # virtual-hosted-style (iris.sjc1.vultrobjects.com) works on
+            # virtual-hosted-style (fiebatt.sjc1.vultrobjects.com) works on
             # vultr, but path-style is friendlier with arbitrary endpoints.
             config=BotoConfig(signature_version="s3v4", s3={"addressing_style": "path"}),
         )

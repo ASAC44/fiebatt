@@ -26,7 +26,7 @@ const DEFAULT_CARDS: ShowcaseCard[] = [
     image: '/frames/card-editing.gif',
     label: '03 / agent + CLI',
     title: 'scriptable by any agent',
-    description: 'The iris CLI wraps every editing operation. Any agent that can run bash — Claude Code, Codex, OpenClaw — can edit videos autonomously.',
+    description: 'The fiebatt CLI wraps every editing operation. Any agent that can run bash — Claude Code, Codex, OpenClaw — can edit videos autonomously.',
   },
   {
     image: '/frames/card-vibe.gif',
@@ -158,7 +158,7 @@ export default function CardSwapShowcase({ cards = DEFAULT_CARDS }: CardSwapShow
           continuity.
         </h3>
         <p style={{ fontFamily: 'var(--font-body)', fontSize: '19px', lineHeight: 1.72, color: 'rgba(255,255,255,0.5)', margin: '0 0 28px', maxWidth: '34ch' }}>
-          Iris is not a one-shot generator. It layers planning, generation, tracking, and continuity into a single editing workflow.
+          fiebatt is not a one-shot generator. It layers planning, generation, tracking, and continuity into a single editing workflow.
         </p>
         <p style={{ fontFamily: 'var(--font-body)', fontSize: '16px', lineHeight: 1.8, color: 'rgba(255,255,255,0.38)', margin: '0 0 40px', maxWidth: '38ch' }}>
           Select a moment, preview multiple outcomes, and keep the strongest interpretation moving through the cut with enough continuity to feel authored.

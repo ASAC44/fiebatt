@@ -19,11 +19,11 @@ uploads if you've confirmed everything is published.
 # Install as a user crontab (runs every 6 hours):
 #
 #   crontab -e
-#   0 */6 * * * cd /Users/matthewkim/Documents/iris && \
+#   0 */6 * * * cd /Users/matthewkim/Documents/fiebatt && \
 #     /usr/bin/env python3 scripts/clean_scratch.py >> \
-#     /tmp/iris-clean-scratch.log 2>&1
+#     /tmp/fiebatt-clean-scratch.log 2>&1
 #
-# Or as a launchd agent on macOS (~/Library/LaunchAgents/iris.clean.plist).
+# Or as a launchd agent on macOS (~/Library/LaunchAgents/fiebatt.clean.plist).
 """
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ DEFAULT_CATEGORIES = (
 )
 OPTIONAL_CATEGORIES = ("uploads",)
 
-log = logging.getLogger("iris.clean_scratch")
+log = logging.getLogger("fiebatt.clean_scratch")
 
 
 def _resolve_scratch_root(explicit: Path | None) -> Path:

@@ -24,7 +24,7 @@ from jwt import PyJWKClient, PyJWKClientError
 from app.config.settings import get_settings
 
 
-log = logging.getLogger("iris.auth")
+log = logging.getLogger("fiebatt.auth")
 
 # PyJWKClient caches keys internally by `kid`, so reusing a single instance
 # across requests keeps verification cheap (one HTTP fetch per project

@@ -7,8 +7,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # database url. defaults to local sqlite so the app boots without postgres.
-    # for real deploys set DATABASE_URL=postgresql+asyncpg://iris:iris@host:5432/iris
-    database_url: str = "sqlite+aiosqlite:///./iris.db"
+    # for real deploys set DATABASE_URL=postgresql+asyncpg://fiebatt:fiebatt@host:5432/fiebatt
+    database_url: str = "sqlite+aiosqlite:///./fiebatt.db"
 
     # local scratch dir — ffmpeg needs real file paths, so we write here first
     # and upload to vultr on publish(). once s3 is wired this is just a cache,

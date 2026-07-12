@@ -2,8 +2,6 @@ name: Railway Deploy
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
 
 concurrency:
   group: railway-deploy

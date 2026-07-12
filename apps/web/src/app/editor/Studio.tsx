@@ -937,7 +937,12 @@ function StudioInner({
           {mode === 'vibe' ? (
             <AgentChat demoMode={demoMode} projectId={continuityProjectId} />
           ) : (
-            <Inspector />
+            <Inspector
+              mode={mode}
+              continuity={continuity}
+              projectId={continuityProjectId}
+              showAiTab={mode === "pro"}
+            />
           )}
         </aside>
       </section>

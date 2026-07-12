@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fiebatt-edit"
+version = "0.1.0"
+description = "CLI for the fiebatt AI video editor — prompt-driven video editing from the terminal"
+requires-python = ">=3.11"
+readme = "SKILL.md"
+license = "MIT"
+authors = [
+  { name = "Stephen Hung", email = "stephenhung@berkeley.edu" },
+]
+keywords = ["video", "editing", "ai", "gemini", "cli"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Topic :: Multimedia :: Video",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+  "typer>=0.9",
+  "httpx>=0.28",
+  "rich>=13",
+  "google-genai>=1.73",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[project.urls]
+Homepage = "https://fiebatt.local"
+Documentation = "https://docs.fiebatt.local"
+Repository = "https://github.com/ASAC44/fiebatt"
+
+[project.scripts]
+fiebatt = "fiebatt_cli.main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["fiebatt_cli"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

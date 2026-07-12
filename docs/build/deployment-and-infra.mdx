@@ -1,0 +1,61 @@
+---
+title: "Deployment"
+description: "How Iris deploys to Vultr via Docker Compose and GitHub Actions."
+---
+
+# Deployment
+
+<div className="docs-hero">
+  <div class="docs-hero__row">
+    <div>
+      <div class="docs-hero__eyebrow">infrastructure</div>
+      <h1>Push to main. It deploys.</h1>
+      <p>
+        Iris runs on a Vultr VPS via Docker Compose. GitHub Actions handles
+        CI checks and auto-deployment on every push to main.
+      </p>
+    </div>
+  </div>
+</div>
+
+## Production Environment
+
+Iris uses Docker Compose for orchestrating services in production.
+The frontend service's Docker image is built with specific environment variables passed as build arguments, which are then baked into the frontend bundle.
+These include:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+- `VITE_SUPABASE_REDIRECT`
+- `VITE_BACKEND_URL`
+
+Ensure these variables are configured in your deployment environment (e.g., via a `.env` file or environment variables on the host) so they can be passed to the Docker build process.
+
+## Production Architecture
+
+Iris runs as a multi-service application on a single Vultr VPS:
+
+- **Frontend**: A Vite application served by Nginx.
+- **Backend**: A FastAPI application.
+- **Database**: Postgres.
+- **Redis**: For caching and task queues.
+- **GPU Worker (optional)**: For accelerated media processing.
+
+All services are containerized with Docker and orchestrated using Docker Compose.
+
+## Deployment Workflow
+
+1.  **Push to `main`**: Any push to the `main` branch triggers a GitHub Actions workflow.
+2.  **CI Checks**: The workflow runs tests and linting.
+3.  **Docker Build**: New Docker images for the frontend and backend are built.
+4.  **Deployment**: The updated images are pulled and deployed to the Vultr VPS via SSH and `docker compose up -d`.
+
+This ensures that `main` is always production-ready and automatically deployed.
+
+## Configuration
+
+Environment variables are managed via a `.env` file on the VPS, which is loaded by Docker Compose.
+
+## Monitoring
+
+Basic health checks are available via `/api/health` and `/api/ai/health` endpoints. For more detailed observability, refer to the [Observability](/build/observability) documentation.

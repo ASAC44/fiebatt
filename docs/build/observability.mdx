@@ -1,0 +1,60 @@
+---
+title: "Observability"
+description: "Health endpoints, AI telemetry, and debugging tools."
+---
+
+# Observability
+
+## Health endpoints
+
+```bash
+# system health — reports ai mode, storage mode, service readiness
+GET /api/health
+
+# ai observability — total calls, latency, error rates
+GET /api/ai/health
+
+# ai call timeline — recent AI operations with timing
+GET /api/ai/timeline
+
+# live event stream — real-time AI operation events
+GET /api/ai/stream
+```
+
+## AI modes
+
+| Mode | `USE_AI_STUBS` | Behavior |
+|------|---------------|----------|
+| Stub | `true` | Deterministic responses, no API calls, fast |
+| Real | `false` | Live Gemini/Veo/ElevenLabs calls, requires API keys |
+
+The `/api/health` response tells you which mode is active:
+
+```json
+{
+  "ok": true,
+  "ai_mode": "stub",
+  "real_ai_ready": true,
+  "narration_ai_ready": false,
+  "storage_mode": "local"
+}
+```
+
+## Debugging tips
+
+- Check `ai_mode` first — most generation issues are caused by running in stub mode without realizing it
+- `storage_mode: "local"` means media is served from `/media/` mount, not S3
+- Backend logs include `[iris.*]` prefixed logger names for each subsystem
+- The agent chat endpoint streams SSE events — use browser DevTools Network tab to inspect the event stream in real time
+
+## Job tracking
+
+Long-running operations (generate, export, propagate) are background jobs. Poll status via:
+
+```bash
+GET /api/jobs/{job_id}          # generation jobs
+GET /api/export/{export_job_id} # export jobs
+GET /api/propagate/{prop_id}    # propagation jobs
+```
+
+Each returns a `status` field: `pending` → `processing` → `done` | `error`.

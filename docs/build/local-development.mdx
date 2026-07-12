@@ -1,0 +1,114 @@
+---
+title: "Local Development"
+description: "Environment setup, dev servers, and local workflow for Iris."
+---
+
+# Local Development
+
+<div className="docs-hero">
+  <div className="docs-hero__row">
+    <div>
+      <div className="docs-hero__eyebrow">environment</div>
+      <h1>Run the full stack locally</h1>
+      <p>
+        Iris runs as two processes locally: a Vite frontend on port 3000 and a
+        FastAPI backend on port 8000. Both read from a shared .env at the repo root.
+      </p>
+    </div>
+  </div>
+</div>
+
+## Environment Setup
+
+### Prerequisites
+
+- Docker and Docker Compose
+- Python 3.10+
+- Node.js 18+
+
+### Clone the repository
+
+```bash
+git clone https://github.com/stephenhungg/iris.git
+cd iris
+```
+
+### Install dependencies
+
+```bash
+# Backend
+pip install -r backend/requirements.txt
+
+# Frontend
+npm install --prefix frontend
+```
+
+### Configure environment variables
+
+Create a `.env` file in the root of the repository. This file will hold your API keys and other configuration.
+
+```ini
+# Example .env file
+OPENAI_API_KEY="sk-..."
+GEMINI_API_KEY="AIza..."
+VEO_API_KEY="AIza..."
+
+# Optional: Override the default Veo model for video generation.
+# Defaults to "veo-3.1-fast-generate-preview" for free-tier compatibility.
+# Set to "veo-3.1-generate-preview" for higher quality (requires paid plan).
+# VEO_MODEL="veo-3.1-generate-preview"
+
+# Database configuration (for local development, SQLite is often sufficient)
+DATABASE_URL="sqlite:///./iris.db"
+```
+
+## Running the Stack
+
+### Start the backend
+
+```bash
+cd backend
+uvicorn app.main:app --reload --port 8000
+```
+
+### Start the frontend
+
+```bash
+cd frontend
+npm run dev
+```
+
+The frontend will be available at `http://localhost:3000`.
+
+## Local Workflow
+
+### Making changes
+
+- **Backend:** Changes to Python files in `backend/` will trigger a reload of the Uvicorn server.
+- **Frontend:** Changes to React files in `frontend/` will trigger a hot module reload in your browser.
+
+### Database migrations
+
+If you make changes to database models, you'll need to run migrations:
+
+```bash
+# From the backend directory
+alembic revision --autogenerate -m "Your migration message"
+alembic upgrade head
+```
+
+## Testing
+
+### Backend tests
+
+```bash
+# From the backend directory
+pytest
+```
+
+### Frontend tests
+
+```bash
+# From the frontend directory
+npm test
+```

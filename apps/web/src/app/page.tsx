@@ -91,6 +91,35 @@ const workflowSteps = [
   },
 ];
 
+const comparisonCards = [
+  {
+    title: "Current video tools",
+    subtitle: "Timeline-first, manual, and hard to automate.",
+    color: "bg-white/55",
+    points: [
+      "Prompt tools usually regenerate broad shots instead of making localized timeline edits.",
+      "Traditional editors rely on manual masking, keyframing, exporting, and re-importing.",
+      "Automation is brittle because the UI, project state, and render pipeline are not agent-native.",
+      "Variant review is often disconnected from the original cut and final export path.",
+      "Object identity and continuity usually require separate tracking, roto, or compositing workflows.",
+      "AI results are difficult to reuse because prompts, variants, scores, and timeline decisions are not stored together.",
+    ],
+  },
+  {
+    title: "fiebatt",
+    subtitle: "Prompt-first editing with a real timeline underneath.",
+    color: "bg-[#FFE8F0]",
+    points: [
+      "Every prompt is tied to project context, playhead time, selected region, and conversation history.",
+      "CLIP, SAM2, qwen, scoring, and generation workers cooperate around the same edit window.",
+      "Claude, Codex, and shell scripts can drive the same backend loop through the CLI.",
+      "Accepting a variant updates the EDL, keeps continuity available, and exports from one surface.",
+      "Entity search can find matching appearances so localized edits can propagate beyond a single moment.",
+      "Generation briefs, tool calls, scores, variants, and accepted edits stay attached to the project history.",
+    ],
+  },
+];
+
 export default function Home() {
   return (
     <main className="bg-[#F4F4F1] text-black">
@@ -280,6 +309,49 @@ export default function Home() {
                   <p className="mt-5 text-base leading-7 text-neutral-700">
                     {item.copy}
                   </p>
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="border-t border-black/10 px-6 py-24 md:py-32">
+        <div className="mx-auto max-w-7xl">
+          <div className="mb-12 max-w-3xl">
+            <p className="text-sm font-medium text-primary">Why different</p>
+            <h2 className="mt-4 text-4xl font-semibold tracking-normal text-neutral-950 md:text-6xl">
+              Not another prompt-to-video wrapper.
+            </h2>
+            <p className="mt-5 text-lg leading-8 text-neutral-700">
+              fiebatt treats generation as one step inside an editable reel system,
+              not the whole product.
+            </p>
+          </div>
+
+          <div className="grid gap-5 lg:grid-cols-2">
+            {comparisonCards.map((card) => (
+              <article
+                className={`${card.color} rounded-3xl border border-black/10 p-7 md:p-9`}
+                key={card.title}
+              >
+                <div className="mb-10">
+                  <h3 className="text-3xl font-semibold tracking-normal text-neutral-950 md:text-4xl">
+                    {card.title}
+                  </h3>
+                  <p className="mt-3 text-base leading-7 text-neutral-600">
+                    {card.subtitle}
+                  </p>
+                </div>
+                <div className="space-y-4">
+                  {card.points.map((point) => (
+                    <div className="flex gap-4" key={point}>
+                      <span className="mt-2 size-2 shrink-0 rounded-full bg-primary/75" />
+                      <p className="text-base leading-7 text-neutral-700">
+                        {point}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               </article>
             ))}

@@ -1,0 +1,150 @@
+---
+title: "fiebatt Overview"
+description: "Prompt-driven video editing for localized changes, variant selection, and continuity-aware workflows."
+---
+
+# fiebatt
+
+<div className="docs-hero">
+  <div className="docs-hero__row">
+    <div>
+      <div className="docs-mark">
+        <img src="/images/fiebatt-logo.svg" alt="fiebatt logo" />
+        <div className="docs-mark__label">fiebatt documentation</div>
+      </div>
+      <div className="docs-hero__eyebrow">localized video editing</div>
+      <h1>Prompt-driven editing for reality changes</h1>
+      <p>
+        fiebatt is built around a simple idea: point at a specific moment, describe
+        what changes, compare multiple interpretations, and keep editorial control
+        over what happens next.
+      </p>
+      <div className="docs-cta-row">
+        <span className="docs-pill">select</span>
+        <span className="docs-pill">prompt</span>
+        <span className="docs-pill">accept</span>
+        <span className="docs-pill">propagate</span>
+      </div>
+    </div>
+    <div className="docs-slab">
+      <div className="docs-section__eyebrow">what fiebatt is best at</div>
+      <ul className="docs-mini-list">
+        <li>Changing one part of one moment without rebuilding the whole shot</li>
+        <li>Comparing variants instead of trusting one blind generation</li>
+        <li>Carrying accepted edits forward through continuity-aware flows</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<Tip>
+  fiebatt is strongest when you want to change one part of one moment without regenerating an entire scene from scratch.
+</Tip>
+
+<div className="docs-card-grid">
+  <div className="docs-card">
+    <h3>Localized edits</h3>
+    <p>Change the exact region and moment you care about instead of replacing an entire sequence.</p>
+  </div>
+  <div className="docs-card">
+    <h3>Variant selection</h3>
+    <p>Generate multiple outcomes, compare them quickly, and choose the one that actually works.</p>
+  </div>
+  <div className="docs-card">
+    <h3>Continuity follow-through</h3>
+    <p>Push accepted edits through adjacent frames so the result feels authored, not accidental.</p>
+  </div>
+</div>
+
+<div className="docs-stage">
+  <div className="docs-section__eyebrow">core interaction</div>
+  <h2 className="docs-section__title">The editing loop</h2>
+  <p className="docs-section__lead">
+    fiebatt is not a one-shot generator. It is an editing system built around timing,
+    selection, comparison, and acceptance.
+  </p>
+
+  <Steps>
+  <Step title="Select the moment">
+    Upload a source clip, scrub to the exact frame or range you care about, and isolate the subject with a box or mask-assisted selection.
+  </Step>
+  <Step title="Prompt the change">
+    Describe the change in plain language. fiebatt turns that edit intent into candidate video variants instead of asking you to rebuild the entire shot.
+  </Step>
+  <Step title="Choose and continue">
+    Review the interpretations, accept the strongest result, and carry that choice forward through continuity-aware editing.
+  </Step>
+  </Steps>
+</div>
+
+<div className="docs-metric-grid">
+  <div className="docs-metric">
+    <div className="docs-metric__value">1</div>
+    <div className="docs-metric__label">source moment</div>
+    <p>Every change starts from a precise frame or short range.</p>
+  </div>
+  <div className="docs-metric">
+    <div className="docs-metric__value">N</div>
+    <div className="docs-metric__label">generated options</div>
+    <p>The product expects comparison, not blind trust in a single output.</p>
+  </div>
+  <div className="docs-metric">
+    <div className="docs-metric__value">1</div>
+    <div className="docs-metric__label">accepted result</div>
+    <p>Acceptance is part of the interaction model, not a fallback.</p>
+  </div>
+  <div className="docs-metric">
+    <div className="docs-metric__value">+</div>
+    <div className="docs-metric__label">continuity carry</div>
+    <p>The accepted look can continue into surrounding context.</p>
+  </div>
+</div>
+
+<div className="docs-band">
+  <strong>fiebatt is for editorial precision.</strong> The product shines when a human
+  already knows what should change and wants generation to stay inside that decision.
+</div>
+
+fiebatt is not a one-shot text-to-video tool.
+
+It is an editing system built around:
+
+- **Localized edits** instead of full-scene regeneration
+- **Variant selection** instead of single-output guessing
+- **Continuity propagation** instead of isolated frame changes
+- **Project memory** instead of disposable sessions
+
+<div className="docs-stage">
+  <div className="docs-section__eyebrow">what exists today</div>
+  <h2 className="docs-section__title">Current product surfaces</h2>
+  <div className="docs-flow-grid">
+    <div className="docs-flow">
+      <h3>Landing and routing</h3>
+      <p>A landing page, a projects page, and an editor route frame the end-to-end experience.</p>
+    </div>
+    <div className="docs-flow">
+      <h3>Editing workflow</h3>
+      <p>Upload, selection, prompt-driven generation, review, acceptance, and continuity tooling.</p>
+    </div>
+    <div className="docs-flow">
+      <h3>System support</h3>
+      <p>FastAPI routes, AI observability, object storage support, and an optional GPU worker.</p>
+    </div>
+  </div>
+</div>
+
+## Why the workflow matters
+
+Traditional editors are precise but manual. Generators are expressive but often too global.
+
+fiebatt sits between those two extremes. The goal is not to replace editing. The goal is to make specific editorial changes feel direct.
+
+<Note>
+  The defining fiebatt interaction is: scrub to a moment, select the region, describe the change, review variants, then accept the strongest result.
+</Note>
+
+## Start here
+
+- [quickstart](/quickstart) for the fastest path to a running local setup
+- [editor workflow](/product/editor-workflow) for the full product loop
+- [architecture](/reference/architecture) for the repo and service layout

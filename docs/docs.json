@@ -1,0 +1,97 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "fiebatt",
+  "description": "Prompt-driven video editing docs for localized edits, variant generation, and continuity propagation.",
+  "appearance": {
+    "default": "dark",
+    "strict": true
+  },
+  "colors": {
+    "primary": "#ffffff",
+    "light": "#badcff",
+    "dark": "#000000"
+  },
+  "logo": {
+    "dark": "/images/fiebatt-logo.svg",
+    "light": "/images/fiebatt-logo.svg",
+    "href": "/"
+  },
+  "favicon": "/images/fiebatt-logo.svg",
+  "navigation": {
+    "groups": [
+      {
+        "group": "Start here",
+        "pages": [
+          "index",
+          "quickstart"
+        ]
+      },
+      {
+        "group": "Product",
+        "pages": [
+          "product/editor-workflow",
+          "product/continuity",
+          "product/library-and-projects"
+        ]
+      },
+      {
+        "group": "Build and run",
+        "pages": [
+          "build/local-development",
+          "build/deployment-and-infra",
+          "build/observability"
+        ]
+      },
+      {
+        "group": "Reference",
+        "pages": [
+          "reference/architecture",
+          "reference/backend-api",
+          "reference/cli"
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "GitHub",
+        "href": "https://github.com/ASAC44/fiebatt"
+      },
+      {
+        "label": "Workflow",
+        "href": "/product/editor-workflow"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Quickstart",
+      "href": "/quickstart"
+    }
+  },
+  "anchors": [
+    {
+      "anchor": "fiebatt",
+      "pages": [
+        "index",
+        "quickstart",
+        "product/editor-workflow"
+      ]
+    },
+    {
+      "anchor": "reference",
+      "href": "https://github.com/ASAC44/fiebatt"
+    }
+  ],
+  "footer": {
+    "socials": {
+      "github": "https://github.com/ASAC44/fiebatt"
+    }
+  },
+  "seo": {
+    "metatags": {
+      "canonical": "https://docs.fiebatt.local"
+    }
+  }
+}

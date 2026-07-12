@@ -1,0 +1,400 @@
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@100..900&display=swap");
+
+:root {
+  --fiebatt-bg: #000000;
+  --fiebatt-bg-deep: #050505;
+  --fiebatt-panel: rgba(255, 255, 255, 0.03);
+  --fiebatt-panel-strong: rgba(255, 255, 255, 0.05);
+  --fiebatt-edge: rgba(255, 255, 255, 0.12);
+  --fiebatt-edge-soft: rgba(255, 255, 255, 0.08);
+  --fiebatt-text-soft: rgba(255, 255, 255, 0.62);
+  --fiebatt-text-dim: rgba(255, 255, 255, 0.24);
+  --fiebatt-glow: rgba(186, 220, 255, 0.12);
+  --fiebatt-glow-strong: rgba(186, 220, 255, 0.2);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background:
+    radial-gradient(circle at 15% 8%, rgba(186, 220, 255, 0.05), transparent 20%),
+    radial-gradient(circle at 82% 12%, rgba(255, 255, 255, 0.035), transparent 18%),
+    linear-gradient(180deg, #050505 0%, #000000 40%, #020202 100%);
+  color: rgba(255, 255, 255, 0.96);
+  font-family: "Geist", system-ui, sans-serif;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(120deg, rgba(255, 255, 255, 0.02), transparent 28%),
+    repeating-linear-gradient(
+      115deg,
+      rgba(255, 255, 255, 0.015) 0,
+      rgba(255, 255, 255, 0.015) 1px,
+      transparent 1px,
+      transparent 14px
+    );
+  opacity: 0.18;
+  mix-blend-mode: screen;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: auto 8% 4% auto;
+  width: 360px;
+  height: 360px;
+  border-radius: 999px;
+  background: radial-gradient(circle, var(--fiebatt-glow-strong) 0%, transparent 68%);
+  filter: blur(60px);
+  pointer-events: none;
+  opacity: 0.28;
+}
+
+main {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.015), rgba(255, 255, 255, 0) 12%);
+}
+
+main,
+nav,
+aside,
+header,
+footer {
+  font-family: "Geist", system-ui, sans-serif;
+}
+
+main h1,
+main h2,
+main h3 {
+  color: rgba(255, 255, 255, 0.98);
+  font-family: "Geist", system-ui, sans-serif;
+  font-weight: 300;
+}
+
+main h2 {
+  letter-spacing: -0.045em;
+}
+
+main h3 {
+  letter-spacing: -0.03em;
+}
+
+main p,
+main li {
+  color: var(--fiebatt-text-soft);
+  letter-spacing: 0.01em;
+}
+
+main strong {
+  color: rgba(255, 255, 255, 0.97);
+  font-weight: 500;
+}
+
+main a {
+  color: rgba(255, 255, 255, 0.88);
+  text-decoration-color: rgba(255, 255, 255, 0.22);
+  text-underline-offset: 0.18em;
+}
+
+main a:hover {
+  color: #ffffff;
+  text-decoration-color: rgba(255, 255, 255, 0.55);
+}
+
+main hr {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+main pre,
+main code,
+nav code,
+aside code {
+  border-color: rgba(255, 255, 255, 0.08);
+  font-family: "Geist Mono", "SF Mono", monospace;
+  text-transform: none;
+}
+
+code,
+pre,
+kbd,
+samp {
+  font-family: "Geist Mono", "SF Mono", monospace;
+  text-transform: none;
+}
+
+nav,
+aside {
+  backdrop-filter: blur(16px);
+}
+
+
+.docs-card,
+.docs-stage,
+.docs-hero,
+.docs-metric,
+.docs-flow,
+.docs-slab {
+  position: relative;
+  border: 1px solid var(--fiebatt-edge-soft);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.018));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 24px 80px rgba(0, 0, 0, 0.38),
+    0 0 0 1px rgba(255, 255, 255, 0.015);
+  backdrop-filter: blur(18px);
+}
+
+.docs-hero {
+  padding: 34px 34px 34px;
+  border-radius: 28px;
+  margin: 8px 0 30px;
+}
+
+.docs-hero::before,
+.docs-card::before,
+.docs-stage::before,
+.docs-metric::before,
+.docs-flow::before,
+.docs-slab::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(186, 220, 255, 0.08), transparent 32%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.04), transparent 40%);
+}
+
+.docs-hero__eyebrow,
+.docs-section__eyebrow {
+  font-family: "Geist Mono", "SF Mono", monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--fiebatt-text-dim);
+  margin-bottom: 14px;
+}
+
+.docs-hero h1 {
+  margin: 0;
+  font-size: clamp(3.2rem, 8vw, 6.5rem);
+  line-height: 0.92;
+  letter-spacing: -0.045em;
+  text-wrap: balance;
+  text-shadow: 0 0 26px rgba(255, 255, 255, 0.04);
+}
+
+.docs-hero p {
+  max-width: 760px;
+  margin: 20px 0 0;
+  font-size: 1rem;
+  line-height: 1.8;
+  color: var(--fiebatt-text-soft);
+}
+
+.docs-hero__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(260px, 0.9fr);
+  gap: 22px;
+  align-items: end;
+}
+
+.docs-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.docs-mark img {
+  width: 50px;
+  height: 50px;
+  filter: drop-shadow(0 0 22px rgba(186, 220, 255, 0.18));
+}
+
+.docs-mark__label {
+  font-family: "Geist Mono", "SF Mono", monospace;
+  font-size: 0.74rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--fiebatt-text-dim);
+}
+
+.docs-card-grid,
+.docs-metric-grid,
+.docs-flow-grid {
+  display: grid;
+  gap: 16px;
+  margin: 22px 0 28px;
+}
+
+.docs-card-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.docs-metric-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.docs-flow-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.docs-card,
+.docs-metric,
+.docs-flow {
+  border-radius: 22px;
+  padding: 20px;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.docs-card:hover,
+.docs-metric:hover,
+.docs-flow:hover {
+  transform: translateY(-3px);
+  border-color: rgba(186, 220, 255, 0.26);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 26px 90px rgba(0, 0, 0, 0.42),
+    0 0 0 1px rgba(186, 220, 255, 0.04);
+}
+
+.docs-card h3,
+.docs-flow h3 {
+  margin: 0 0 10px;
+  font-size: 1.08rem;
+  letter-spacing: -0.025em;
+  font-weight: 300;
+}
+
+.docs-card p,
+.docs-flow p,
+.docs-metric p {
+  margin: 0;
+  color: var(--fiebatt-text-soft);
+  line-height: 1.7;
+}
+
+.docs-metric__value {
+  font-size: 1.9rem;
+  letter-spacing: -0.045em;
+  margin-bottom: 8px;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.docs-metric__label {
+  font-family: "Geist Mono", "SF Mono", monospace;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--fiebatt-text-dim);
+}
+
+.docs-stage {
+  border-radius: 28px;
+  padding: 24px 24px 14px;
+  margin: 28px 0;
+}
+
+.docs-section__title {
+  margin: 0 0 10px;
+  font-size: clamp(1.9rem, 4vw, 3rem);
+  letter-spacing: -0.04em;
+}
+
+.docs-section__lead {
+  max-width: 820px;
+  color: var(--fiebatt-text-soft);
+  line-height: 1.8;
+  margin: 0 0 18px;
+}
+
+.docs-slab {
+  border-radius: 22px;
+  padding: 20px 22px;
+  margin: 18px 0;
+}
+
+.docs-slab p:last-child,
+.docs-card p:last-child,
+.docs-flow p:last-child,
+.docs-metric p:last-child {
+  margin-bottom: 0;
+}
+
+.docs-cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.docs-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--fiebatt-edge);
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-family: "Geist Mono", "SF Mono", monospace;
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(244, 250, 255, 0.88);
+  background: rgba(255, 255, 255, 0.03);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.docs-pill::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #f5ff82;
+  box-shadow: 0 0 10px rgba(245, 255, 130, 0.7);
+}
+
+.docs-mini-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.docs-mini-list li {
+  margin: 7px 0;
+  color: var(--fiebatt-text-soft);
+}
+
+.docs-band {
+  margin: 28px 0;
+  padding: 18px 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.76);
+  font-family: "Geist Mono", "SF Mono", monospace;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0));
+}
+
+.docs-band strong {
+  color: rgba(255, 255, 255, 0.98);
+}
+
+@media (max-width: 960px) {
+  .docs-hero__row,
+  .docs-card-grid,
+  .docs-metric-grid,
+  .docs-flow-grid {
+    grid-template-columns: 1fr;
+  }
+}

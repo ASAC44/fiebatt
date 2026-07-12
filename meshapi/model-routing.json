@@ -1,0 +1,24 @@
+{
+  "provider": "meshapi",
+  "base_url": "https://api.meshapi.ai/v1",
+  "default_model": "deepseek/deepseek-v3.2",
+  "routes": {
+    "agent_chat": {
+      "model": "deepseek/deepseek-v3.2",
+      "reason": "Tool selection, prompt rewriting, and project-aware edit planning use an OpenAI-compatible text model gateway."
+    },
+    "prompt_planning": {
+      "model": "deepseek/deepseek-v3.2",
+      "reason": "Structured edit briefs can run through Mesh when the payload is text-only."
+    },
+    "vision_localization": {
+      "model": "qwen3.7-plus",
+      "reason": "Image payloads continue to prefer the existing vision-capable provider unless a multimodal Mesh model is configured."
+    },
+    "video_generation": {
+      "model": "google/veo-3",
+      "switch": "VIDEO_GEN_PROVIDER=meshapi_veo",
+      "reason": "Veo 3-style generation can be routed through Mesh API by changing the video provider switch and model id."
+    }
+  }
+}

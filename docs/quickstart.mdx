@@ -1,0 +1,175 @@
+---
+title: "Quickstart"
+description: "Run fiebatt locally, verify the stack, and make your first localized edit."
+---
+
+# Quickstart
+
+<div className="docs-hero">
+  <div className="docs-hero__row">
+    <div>
+      <div className="docs-hero__eyebrow">run the stack</div>
+      <h1>From clone to first edit</h1>
+      <p>
+        This guide gets fiebatt from repository checkout to a working local editor
+        as quickly as possible, with the minimum environment needed to upload a
+        clip and test a localized edit.
+      </p>
+    </div>
+    <div className="docs-slab">
+      <div className="docs-section__eyebrow">you need</div>
+      <ul className="docs-mini-list">
+        <li>Node.js 20+</li>
+        <li>Python 3.11+</li>
+        <li>FFmpeg and FFprobe</li>
+        <li>A repo-root <code>.env</code></li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<Tip>
+  The happy path is: install web dependencies, start the web app, start the backend, verify health, then upload a clip and test one localized edit.
+</Tip>
+
+<div className="docs-card-grid">
+  <div className="docs-card">
+    <h3>Web app</h3>
+    <p>Next.js app for landing, projects, and the active editing surface.</p>
+  </div>
+  <div className="docs-card">
+    <h3>Backend</h3>
+    <p>FastAPI service for uploads, projects, generation, masking, narration, and export.</p>
+  </div>
+  <div className="docs-card">
+    <h3>Media stack</h3>
+    <p>FFmpeg and FFprobe bridge uploaded video into actual editorial operations.</p>
+  </div>
+</div>
+
+## Know the layout
+
+The repo is split by responsibility:
+
+- `apps/web/` for the Next.js app
+- `apps/backend/` for the FastAPI service and worker orchestration
+- `apps/ai/` for provider adapters and prompts
+- `apps/gpu-worker/` for optional segmentation and vision support
+- `infra/` for Docker Compose and deployment helpers
+
+<div className="docs-stage">
+  <div className="docs-section__eyebrow">boot sequence</div>
+  <h2 className="docs-section__title">Start fiebatt locally</h2>
+  <p className="docs-section__lead">
+    Keep the frontend and backend as separate processes. The frontend renders the
+    editor. The backend handles uploads, jobs, metadata, and AI-heavy routes.
+  </p>
+
+  <Steps>
+  <Step title="Install web dependencies">
+
+```bash
+npm install --prefix apps/web
+```
+
+  </Step>
+  <Step title="Start the web app">
+
+```bash
+npm run dev
+```
+
+The web app runs on `http://localhost:3001`.
+
+  </Step>
+  <Step title="Start the backend">
+
+Run the FastAPI backend with the repo-root environment loaded.
+
+```bash
+cd apps/backend && PYTHONPATH=..:$(pwd) uvicorn app.main:app --reload --port 8000
+```
+
+The backend serves uploads, projects, generation, identify, mask, propagation, narration, and export on `http://localhost:8000`.
+
+  </Step>
+  <Step title="Verify health">
+
+```bash
+curl http://localhost:8000/api/health
+curl http://localhost:8000/api/ai/health
+```
+
+Open `http://localhost:3001` once both checks are green.
+Create an account at `/signup`, then open `/projects` to start a reel.
+
+  </Step>
+  </Steps>
+</div>
+
+<div className="docs-stage">
+  <div className="docs-section__eyebrow">first run</div>
+  <h2 className="docs-section__title">Make one real edit</h2>
+
+1. Open the editor.
+2. Upload a source clip.
+3. Scrub to a moment you want to change.
+4. Draw a box around the subject or region.
+5. Prompt a change.
+6. Review the generated options.
+7. Accept one result and continue editing.
+</div>
+
+<div className="docs-flow-grid">
+  <div className="docs-flow">
+    <h3>Environment</h3>
+    <p>The repo-root <code>.env</code> powers both browser and backend behavior.</p>
+  </div>
+  <div className="docs-flow">
+    <h3>AI mode</h3>
+    <p>Stub mode is enough for local work. Real demo paths want provider keys and reachable workers.</p>
+  </div>
+  <div className="docs-flow">
+    <h3>Verification</h3>
+    <p>Use health endpoints and typecheck commands before debugging the editor itself.</p>
+  </div>
+</div>
+
+<div className="docs-band">
+  <strong>Fastest local path:</strong> frontend on port 3000, backend on port 8000,
+  health checks green, then one upload and one accepted edit.
+</div>
+
+## What the backend needs
+
+The backend is not just an API shell. It depends on real media tooling.
+
+### Required for the local stack
+
+- Python environment and dependencies
+- Environment variables from the repo root
+- FFmpeg and FFprobe for upload probing and media transforms
+
+### Optional but important for the full experience
+
+- Real provider keys instead of stub mode
+- Object storage for durable media URLs
+- GPU worker for segmentation-heavy flows
+
+## Common verification commands
+
+```bash
+npm run lint
+curl http://localhost:8000/api/health
+curl http://localhost:8000/api/ai/health
+```
+
+## Optional: the CLI
+
+fiebatt includes a command-line interface in the `apps/cli/` directory that wraps the backend API. You can use it to list projects, upload clips, and trigger edits from your terminal. It also supports multi-agent video analysis for batch workflows.
+
+## Read next
+
+- [editor workflow](/product/editor-workflow) to understand the full product loop
+- [architecture](/reference/architecture) for a high-level map of the codebase
+- [backend api](/reference/backend-api) for the full route reference

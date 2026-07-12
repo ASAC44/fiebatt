@@ -166,8 +166,8 @@ export default function Home() {
         />
         <div className="flex min-h-screen items-start justify-center px-6 pt-48">
           <div className="relative z-10 isolate px-8 py-7 text-center">
-            <div className="absolute inset-x-[-2rem] inset-y-[-1.5rem] -z-10 bg-black/35 blur-2xl [mask-image:radial-gradient(ellipse_at_center,black_35%,transparent_72%)]" />
-            <div className="absolute inset-x-[-1.5rem] inset-y-[-1rem] -z-10 bg-black/20 backdrop-blur-md [mask-image:radial-gradient(ellipse_at_center,black_42%,transparent_78%)]" />
+            <div className="absolute left-1/2 top-1/2 -z-10 h-[24rem] w-[min(56rem,115vw)] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0.48)_0%,rgba(0,0,0,0.28)_38%,rgba(0,0,0,0.10)_64%,transparent_84%)] blur-3xl" />
+            <div className="absolute left-1/2 top-1/2 -z-10 h-[18rem] w-[min(46rem,105vw)] -translate-x-1/2 -translate-y-1/2 rounded-full bg-black/10 backdrop-blur-xl [mask-image:radial-gradient(ellipse_at_center,black_0%,rgba(0,0,0,0.75)_42%,rgba(0,0,0,0.22)_68%,transparent_88%)]" />
             <h1 className="mb-6 text-6xl font-light tracking-tight text-white drop-shadow-[0_2px_18px_rgba(0,0,0,0.45)] md:text-8xl">
               fiebatt.
             </h1>

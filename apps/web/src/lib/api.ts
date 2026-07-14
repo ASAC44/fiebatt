@@ -65,6 +65,31 @@ export type Me = {
   signed_in: boolean;
 };
 
+export type ProviderStatus = {
+  provider: "gemini" | "dashscope" | "mesh" | "elevenlabs";
+  configured: boolean;
+  key_hint: string;
+  validated_at: string | null;
+};
+
+export function listProviderKeys(): Promise<ProviderStatus[]> {
+  return request<ProviderStatus[]>("/api/providers");
+}
+
+export function saveProviderKey(provider: ProviderStatus["provider"], apiKey: string) {
+  return request<Pick<ProviderStatus, "provider" | "configured" | "key_hint">>(
+    `/api/providers/${provider}`,
+    { method: "PUT", body: JSON.stringify({ api_key: apiKey }) },
+  );
+}
+
+export function deleteProviderKey(provider: ProviderStatus["provider"]) {
+  return request<{ provider: string; configured: boolean; removed: boolean }>(
+    `/api/providers/${provider}`,
+    { method: "DELETE" },
+  );
+}
+
 export type AuthResponse = {
   access_token: string;
   token_type: "bearer";

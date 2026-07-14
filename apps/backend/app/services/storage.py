@@ -91,6 +91,8 @@ def _key_from_url(url: str) -> Optional[str]:
     if parsed.scheme in ("http", "https") and parsed.netloc:
         bucket = settings.vultr_s3_bucket
         path = parsed.path.lstrip("/")
+        if path.startswith("media/"):
+            return path[len("media/") :]
         if path.startswith(f"{bucket}/"):
             return path[len(bucket) + 1 :]
         return path or None
@@ -110,7 +112,11 @@ def _key_from_url(url: str) -> Optional[str]:
 def url_for_key(key: str) -> str:
     """External URL the client will load."""
     if not settings.s3_enabled:
-        return f"/media/{key}"
+        path = f"/media/{key}"
+        public_api_url = settings.public_api_url.rstrip("/")
+        if not public_api_url.startswith(("http://localhost", "http://127.0.0.1")):
+            return f"{public_api_url}{path}"
+        return path
     if settings.media_url_mode == "public":
         host = urlparse(settings.vultr_s3_endpoint).netloc
         return f"https://{host}/{settings.vultr_s3_bucket}/{key}"
@@ -220,6 +226,44 @@ async def _download_to(key: str, dest: Path) -> None:
     assert c is not None
     dest.parent.mkdir(parents=True, exist_ok=True)
     await asyncio.to_thread(c.download_file, settings.vultr_s3_bucket, key, str(dest))
+
+
+def presigned_upload_for_key(
+    key: str,
+    *,
+    content_type: str,
+    expires_in: int,
+) -> str:
+    """Create a short-lived direct upload URL for the private media bucket."""
+    c = _client()
+    if c is None:
+        raise RuntimeError("direct uploads require S3-compatible object storage")
+    return c.generate_presigned_url(
+        "put_object",
+        Params={
+            "Bucket": settings.vultr_s3_bucket,
+            "Key": key,
+            "ContentType": content_type,
+        },
+        ExpiresIn=expires_in,
+    )
+
+
+async def object_metadata(key: str) -> dict:
+    c = _client()
+    if c is None:
+        raise RuntimeError("object metadata requires S3-compatible object storage")
+    return await asyncio.to_thread(
+        c.head_object,
+        Bucket=settings.vultr_s3_bucket,
+        Key=key,
+    )
+
+
+async def download_key(key: str) -> Path:
+    destination = settings.storage_path / key
+    await _download_to(key, destination)
+    return destination
 
 
 async def path_from_url(url: str) -> Path:

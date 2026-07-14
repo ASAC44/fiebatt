@@ -27,6 +27,13 @@ class Settings(BaseSettings):
 
     auth_jwt_secret: str = "change-me"
     auth_jwt_expires_minutes: int = 7 * 24 * 60
+    oauth_access_token_minutes: int = 60
+    oauth_refresh_token_days: int = 30
+    public_api_url: str = "http://localhost:8000"
+    app_url: str = "http://localhost:3001"
+    credential_encryption_key: str = ""
+    upload_intent_expiry_seconds: int = 15 * 60
+    max_upload_bytes: int = 500 * 1024 * 1024
 
     max_video_seconds: int = 120
 
@@ -100,6 +107,10 @@ class Settings(BaseSettings):
             and self.vultr_s3_access_key
             and self.vultr_s3_secret_key
         )
+
+    @property
+    def oauth_issuer(self) -> str:
+        return self.public_api_url.rstrip("/")
 
 
 @lru_cache

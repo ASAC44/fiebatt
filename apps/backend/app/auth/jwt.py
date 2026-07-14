@@ -7,7 +7,7 @@ import hmac
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 import jwt
 
@@ -58,17 +58,30 @@ def verify_password(password: str, password_hash: str) -> bool:
     return hmac.compare_digest(actual, expected)
 
 
-def create_access_token(user: AuthedUser) -> str:
+def create_access_token(
+    user: AuthedUser,
+    *,
+    scopes: list[str] | None = None,
+    audience: str | None = None,
+    expires_minutes: int | None = None,
+) -> str:
     settings = get_settings()
     now = datetime.now(timezone.utc)
-    exp = now + timedelta(minutes=settings.auth_jwt_expires_minutes)
+    exp = now + timedelta(
+        minutes=expires_minutes or settings.auth_jwt_expires_minutes
+    )
+    claims: dict[str, Any] = {
+        "sub": user.id,
+        "email": user.email,
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+    }
+    if scopes:
+        claims["scope"] = " ".join(scopes)
+    if audience:
+        claims["aud"] = audience
     return jwt.encode(
-        {
-            "sub": user.id,
-            "email": user.email,
-            "iat": int(now.timestamp()),
-            "exp": int(exp.timestamp()),
-        },
+        claims,
         settings.auth_jwt_secret,
         algorithm="HS256",
     )
@@ -83,6 +96,7 @@ def verify_access_token(token: str) -> Optional[AuthedUser]:
             token,
             get_settings().auth_jwt_secret,
             algorithms=["HS256"],
+            options={"verify_aud": False},
         )
     except jwt.InvalidTokenError:
         return None
@@ -92,6 +106,23 @@ def verify_access_token(token: str) -> Optional[AuthedUser]:
     if not sub or not email:
         return None
     return AuthedUser(id=str(sub), email=str(email))
+
+
+def decode_access_token(token: str) -> dict[str, Any] | None:
+    if not token:
+        return None
+    try:
+        claims = jwt.decode(
+            token,
+            get_settings().auth_jwt_secret,
+            algorithms=["HS256"],
+            options={"verify_aud": False},
+        )
+    except jwt.InvalidTokenError:
+        return None
+    if not claims.get("sub") or not claims.get("email"):
+        return None
+    return dict(claims)
 
 
 def extract_bearer(authorization_header: Optional[str]) -> Optional[str]:

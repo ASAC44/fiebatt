@@ -4,6 +4,7 @@ Keeps the mode switch and provider credentials in one place so the stub/real
 boundary stays explicit.
 """
 
+from contextvars import ContextVar
 from functools import lru_cache
 
 from pydantic import Field
@@ -75,5 +76,26 @@ class Settings(BaseSettings):
 
 
 @lru_cache
-def get_settings() -> Settings:
+def _base_settings() -> Settings:
     return Settings()
+
+
+_settings_overrides: ContextVar[dict[str, str]] = ContextVar(
+    "fiebatt_ai_settings_overrides",
+    default={},
+)
+
+
+def set_settings_overrides(values: dict[str, str]) -> None:
+    """Apply request/job-scoped provider credentials to the current task."""
+    _settings_overrides.set(dict(values))
+
+
+def clear_settings_overrides() -> None:
+    _settings_overrides.set({})
+
+
+def get_settings() -> Settings:
+    base = _base_settings()
+    overrides = _settings_overrides.get()
+    return base.model_copy(update=overrides) if overrides else base

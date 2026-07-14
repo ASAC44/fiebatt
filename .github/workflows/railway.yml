@@ -21,7 +21,7 @@ jobs:
         run: npm install -g @railway/cli
 
       - name: Deploy backend
-        run: railway up --service backend --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --detach -y --message "deploy backend from github"
+        run: railway up --service backend --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --ci --message "deploy backend from github"
 
       - name: Deploy frontend
-        run: railway up apps/web --path-as-root --service frontend --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --detach -y --message "deploy frontend from github"
+        run: railway up apps/web --path-as-root --service frontend --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --ci --message "deploy frontend from github"

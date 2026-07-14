@@ -7,6 +7,13 @@ from app.models.job import Job, Variant
 from app.models.entity import Entity, EntityAppearance
 from app.models.propagation import PropagationJob, PropagationResult
 from app.models.conversation import Conversation, ChatMessage
+from app.models.integration import (
+    OAuthAuthorizationCode,
+    OAuthClient,
+    OAuthRefreshToken,
+    ProviderCredential,
+    UploadIntent,
+)
 
 __all__ = [
     "Session",
@@ -22,4 +29,9 @@ __all__ = [
     "PropagationResult",
     "Conversation",
     "ChatMessage",
+    "ProviderCredential",
+    "OAuthClient",
+    "OAuthAuthorizationCode",
+    "OAuthRefreshToken",
+    "UploadIntent",
 ]

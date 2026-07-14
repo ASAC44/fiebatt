@@ -1,0 +1,4 @@
+interface:
+  display_name: "Fiebatt Video Editor"
+  short_description: "Edit videos with the hosted Fiebatt service"
+  default_prompt: "Use $fiebatt-edit to analyze and edit my video."

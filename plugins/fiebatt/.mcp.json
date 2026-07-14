@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "fiebatt": {
+      "url": "https://backend-production-40c1.up.railway.app/mcp"
+    }
+  }
+}

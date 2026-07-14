@@ -1,0 +1,20 @@
+{
+  "name": "fiebatt",
+  "interface": {
+    "displayName": "Fiebatt"
+  },
+  "plugins": [
+    {
+      "name": "fiebatt",
+      "source": {
+        "source": "local",
+        "path": "./plugins/fiebatt"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Creative"
+    }
+  ]
+}

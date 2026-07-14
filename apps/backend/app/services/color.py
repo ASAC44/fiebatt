@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -138,26 +137,30 @@ async def _measure_visual_stats(path: Path) -> dict[str, float]:
         return await _signalstats_for_input(path)
 
     ts = max(probe_data["duration"] / 2.0, 0.0)
-    with tempfile.TemporaryDirectory(prefix="fiebatt-color-") as tmp_dir:
-        frame_path = Path(tmp_dir) / "sample.jpg"
-        await ffmpeg.extract_frame(path, ts, frame_path)
-        return await _signalstats_for_input(frame_path)
+    # Measure the midpoint directly. Extracting a JPEG into a temporary
+    # directory introduced a cleanup race during background exports: ffmpeg's
+    # second process could occasionally see the directory after it vanished.
+    return await _signalstats_for_input(path, ts=ts)
 
 
-async def _signalstats_for_input(path: Path) -> dict[str, float]:
+async def _signalstats_for_input(
+    path: Path,
+    *,
+    ts: float | None = None,
+) -> dict[str, float]:
     cmd = [
         "ffmpeg",
         "-y",
-        "-i",
-        str(path),
-        "-vf",
-        "signalstats,metadata=mode=print",
-        "-frames:v",
-        "1",
-        "-f",
-        "null",
-        "-",
     ]
+    if ts is not None:
+        cmd.extend(["-ss", f"{ts:.3f}"])
+    cmd.extend([
+        "-i", str(path),
+        "-vf", "signalstats,metadata=mode=print",
+        "-frames:v", "1",
+        "-f", "null",
+        "-",
+    ])
     _, stderr = await _run(cmd)
     stderr_text = stderr.decode(errors="replace")
 

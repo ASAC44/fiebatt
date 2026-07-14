@@ -49,6 +49,7 @@ async def probe(path: str | Path) -> dict:
     )
     if video_stream is None:
         raise FfmpegError(cmd, "no video stream found", 0)
+    has_audio = any(s.get("codec_type") == "audio" for s in data.get("streams", []))
 
     fps = _parse_fps(video_stream.get("avg_frame_rate") or video_stream.get("r_frame_rate") or "0/1")
     width = int(video_stream.get("width") or 0)
@@ -59,6 +60,7 @@ async def probe(path: str | Path) -> dict:
         "fps": fps,
         "width": width,
         "height": height,
+        "has_audio": has_audio,
     }
 
 
@@ -171,6 +173,58 @@ async def render_clip_span(
     if volume < 0.999:
         cmd.extend(["-af", f"volume={max(0.0, min(1.0, volume)):.3f}"])
     cmd.append(str(out))
+    await _run(cmd)
+    return out
+
+
+async def conform_generated_edit(
+    generated: str | Path,
+    source: str | Path,
+    duration: float,
+    out: str | Path,
+) -> Path:
+    """Trim generated video to the edit window and restore source audio."""
+    generated_meta = await probe(generated)
+    source_meta = await probe(source)
+    if generated_meta["duration"] + 0.1 < duration:
+        raise ValueError(
+            f"generated clip is too short ({generated_meta['duration']:.2f}s for {duration:.2f}s edit)"
+        )
+
+    out = Path(out)
+    vf = (
+        f"trim=duration={duration:.3f},setpts=PTS-STARTPTS,"
+        f"scale={source_meta['width']}:{source_meta['height']}:force_original_aspect_ratio=decrease,"
+        f"pad={source_meta['width']}:{source_meta['height']}:(ow-iw)/2:(oh-ih)/2:color=black,"
+        f"fps={source_meta['fps']:.4f}"
+    )
+    cmd = ["ffmpeg", "-y", "-i", str(generated), "-i", str(source)]
+    if source_meta["has_audio"]:
+        filter_complex = (
+            f"[0:v]{vf}[v];"
+            f"[1:a]atrim=duration={duration:.3f},asetpts=PTS-STARTPTS[a]"
+        )
+        audio_map = "[a]"
+    else:
+        cmd.extend([
+            "-f", "lavfi", "-t", f"{duration:.3f}",
+            "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+        ])
+        filter_complex = f"[0:v]{vf}[v]"
+        audio_map = "2:a:0"
+
+    cmd.extend([
+        "-filter_complex", filter_complex,
+        "-map", "[v]",
+        "-map", audio_map,
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-t", f"{duration:.3f}",
+        "-movflags", "+faststart",
+        str(out),
+    ])
     await _run(cmd)
     return out
 
@@ -438,7 +492,7 @@ async def _probe_duration(src: str | Path) -> float:
     return float(data["duration"])
 
 
-_SAFE_END_EPSILON = 0.05  # keep at least 50ms away from the end
+_MIN_SAFE_END_EPSILON = 0.1
 
 
 async def extract_frame(src: str | Path, ts: float, out: str | Path) -> Path:
@@ -448,8 +502,15 @@ async def extract_frame(src: str | Path, ts: float, out: str | Path) -> Path:
     ffmpeg encoder failures on the final partial GOP.
     """
     out = Path(out)
-    duration = await _probe_duration(src)
-    safe_ts = min(max(ts, 0.0), duration - _SAFE_END_EPSILON)
+    metadata = await probe(src)
+    duration = float(metadata["duration"])
+    fps = float(metadata.get("fps") or 0.0)
+    # Container duration can extend beyond the final decodable video frame.
+    # Leave at least three frame intervals (and never less than 100 ms) so a
+    # request at the timeline end still lands on a real frame for VFR/29.97
+    # fps inputs.
+    end_guard = max(_MIN_SAFE_END_EPSILON, 3.0 / fps if fps > 0 else 0.0)
+    safe_ts = min(max(ts, 0.0), max(0.0, duration - end_guard))
 
     cmd = [
         "ffmpeg", "-y",
@@ -457,9 +518,12 @@ async def extract_frame(src: str | Path, ts: float, out: str | Path) -> Path:
         "-i", str(src),
         "-frames:v", "1",
         "-q:v", "2",
+        "-pix_fmt", "yuvj420p",
         str(out),
     ]
     await _run(cmd)
+    if not out.is_file() or out.stat().st_size == 0:
+        raise FfmpegError(cmd, "ffmpeg completed without producing a frame", 0)
     return out
 
 

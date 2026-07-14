@@ -131,6 +131,9 @@ export type JobResp = {
   /** authoritative edit window accepted by the backend */
   start_ts: number | null;
   end_ts: number | null;
+  provider?: string | null;
+  model?: string | null;
+  warnings?: string[];
 };
 
 export type JobResponse = JobResp;
@@ -243,6 +246,7 @@ export type TimelineSaveResp = {
 
 export type MaskResp = {
   contour: [number, number][]; // normalized 0-1 points forming the mask outline
+  contours?: [number, number][][]; // disconnected subject components
 };
 
 export type IdentifyResp = {

@@ -1,11 +1,4 @@
-"""Mesh API video generation adapter.
-
-This adapter is intentionally optional and only runs when
-``VIDEO_GEN_PROVIDER=meshapi_veo``. Mesh exposes OpenAI-compatible model
-gateway semantics, but video models can have provider-specific response
-shapes, so the adapter accepts a few common shapes and keeps endpoint/model
-names configurable via env.
-"""
+"""Veo video generation through Mesh API's asynchronous video endpoint."""
 
 from __future__ import annotations
 
@@ -25,7 +18,6 @@ TickCallback = Callable[[dict], Awaitable[None] | None]
 
 DEFAULT_DURATION = 5
 POLL_INTERVAL = 8
-GENERATION_TIMEOUT = 600
 
 
 def _base_url() -> str:
@@ -34,6 +26,12 @@ def _base_url() -> str:
 
 def _endpoint(path: str) -> str:
     return urljoin(_base_url(), path.lstrip("/"))
+
+
+def _generation_endpoint(job_id: str | None = None) -> str:
+    """Return the configured create endpoint or its task-status child URL."""
+    endpoint = _endpoint(get_settings().mesh_video_endpoint).rstrip("/")
+    return f"{endpoint}/{job_id}" if job_id else endpoint
 
 
 def _headers() -> dict[str, str]:
@@ -93,6 +91,11 @@ def _extract_video_url(payload: dict) -> str | None:
         if isinstance(first, dict):
             return _extract_video_url(first)
 
+    # Mesh's succeeded task shape is {"content": {"video_url": "..."}}.
+    content = payload.get("content")
+    if isinstance(content, dict):
+        return _extract_video_url(content)
+
     output = payload.get("output")
     if isinstance(output, dict):
         return _extract_video_url(output)
@@ -104,6 +107,38 @@ def _extract_video_url(payload: dict) -> str | None:
             return first
 
     return None
+
+
+def _build_payload(
+    *,
+    model: str,
+    prompt: str,
+    reference_frame_path: str | None,
+    duration: int,
+    aspect_ratio: str,
+    resolution: str,
+) -> dict:
+    """Build Mesh's multimodal video request body.
+
+    Mesh video generation does not use the chat/image ``prompt`` convention:
+    all inputs are represented as typed entries in ``content``.
+    """
+    content: list[dict] = []
+    if reference_frame_path:
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": _image_data_url(reference_frame_path)},
+        })
+    content.append({"type": "text", "text": prompt})
+
+    return {
+        "model": model,
+        "content": content,
+        "duration": duration,
+        "ratio": aspect_ratio,
+        "resolution": resolution.lower(),
+        "generate_audio": False,
+    }
 
 
 async def _download_video(url: str, *, stem: str | None = None) -> str:
@@ -122,9 +157,10 @@ async def _poll_for_video(
     on_tick: TickCallback | None,
 ) -> str:
     elapsed = 0
-    status_url = _endpoint(f"/videos/generations/{job_id}")
+    timeout = get_settings().video_generation_timeout
+    status_url = _generation_endpoint(job_id)
 
-    while elapsed < GENERATION_TIMEOUT:
+    while elapsed < timeout:
         await asyncio.sleep(POLL_INTERVAL)
         elapsed += POLL_INTERVAL
         resp = await client.get(status_url, headers=_headers())
@@ -142,10 +178,13 @@ async def _poll_for_video(
         video_url = _extract_video_url(payload)
         if video_url and status in {"", "done", "completed", "succeeded", "success"}:
             return video_url
-        if status in {"failed", "error", "cancelled", "canceled"}:
-            raise RuntimeError(f"Mesh API video generation failed: {payload}")
+        if status in {"failed", "error", "expired", "cancelled", "canceled"}:
+            error = payload.get("error")
+            raise RuntimeError(
+                f"Mesh API video generation ended with status {status}: {error or payload}"
+            )
 
-    raise TimeoutError(f"Mesh API video generation timed out after {GENERATION_TIMEOUT}s")
+    raise TimeoutError(f"Mesh API video generation timed out after {timeout}s")
 
 
 async def _submit_generation(
@@ -158,22 +197,20 @@ async def _submit_generation(
     on_tick: TickCallback | None,
 ) -> str:
     settings = get_settings()
-    payload: dict = {
-        "model": settings.mesh_video_model,
-        "prompt": prompt,
-        "duration": duration,
-        "aspect_ratio": aspect_ratio,
-        "resolution": resolution,
-        "generate_audio": False,
-    }
-    if reference_frame_path:
-        payload["reference_image"] = _image_data_url(reference_frame_path)
+    request_payload = _build_payload(
+        model=settings.mesh_video_model,
+        prompt=prompt,
+        reference_frame_path=reference_frame_path,
+        duration=duration,
+        aspect_ratio=aspect_ratio,
+        resolution=resolution,
+    )
 
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(
-            _endpoint(settings.mesh_video_endpoint),
+            _generation_endpoint(),
             headers=_headers(),
-            json=payload,
+            json=request_payload,
         )
         resp.raise_for_status()
         payload = resp.json()

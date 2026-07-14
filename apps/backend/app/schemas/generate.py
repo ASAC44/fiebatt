@@ -12,7 +12,7 @@ class GenerateRequest(BaseModel):
     bbox: BBox
     prompt: str = Field(min_length=1, max_length=2000)
     reference_frame_ts: float = Field(ge=0.0)
-    video_gen_provider: Literal["wan", "happyhorse", "veo", "meshapi_veo"] | None = None
+    video_gen_provider: Literal["auto", "wan", "happyhorse", "veo", "meshapi_veo"] | None = None
 
 
 class GenerateResponse(BaseModel):

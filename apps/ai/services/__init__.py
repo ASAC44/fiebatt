@@ -73,6 +73,11 @@ def _rewrite_motion_prompt(prompt_text: str) -> tuple[bool, bool, str]:
     if not motion_edit:
         return False, False, prompt_text
     if sequenced_motion:
+        count_instruction = (
+            "Interpret 'a few times' as exactly three distinct repetitions. "
+            if re.search(r"\ba few times?\b", lowered)
+            else ""
+        )
         return (
             True,
             True,
@@ -82,7 +87,9 @@ def _rewrite_motion_prompt(prompt_text: str) -> tuple[bool, bool, str]:
             "When the prompt asks the subject to resume normal motion, blend "
             "smoothly back into the original gait and forward momentum without "
             "a stop, freeze, or hard reset. Keep the subject identity, scene, "
-            "camera, lighting, and background consistent.\n\n"
+            "camera, lighting, and background consistent. "
+            + count_instruction
+            + "\n\n"
             + prompt_text,
         )
     return (
@@ -211,7 +218,10 @@ else:
         plan: dict,
         style_ref: str | None = None,
         frame_path: str | None = None,
+        last_frame_path: str | None = None,
         source_video_url: str | None = None,
+        mask_image_url: str | None = None,
+        mask_frame_id: int = 1,
         on_tick=None,
         duration: int = 5,
         resolution: str = "720P",
@@ -225,15 +235,12 @@ else:
         )
         provider = str(plan.get("_video_gen_provider") or _real_settings.normalized_video_gen_provider)
         conditioning = frame_path or style_ref
-        motion_edit, sequenced_motion, prompt_text = _rewrite_motion_prompt(prompt_text)
+        motion_edit, _, prompt_text = _rewrite_motion_prompt(prompt_text)
         effective_source_video_url = source_video_url
         if motion_edit:
-            # Plain motion substitutions tend to get copied straight from the
-            # source clip when video-edit sees the original footage. For
-            # sequence-sensitive prompts ("jump a few times, then walk again"),
-            # Wan benefits from keeping the source clip so it can preserve the
-            # gait and transition timing after the action finishes.
-            if not (provider == "wan" and sequenced_motion):
+            # Source-edit-capable providers need the original temporal context;
+            # image-conditioned providers intentionally fall back to the frame.
+            if provider not in {"wan", "happyhorse"}:
                 effective_source_video_url = None
 
         if provider == "wan":
@@ -244,6 +251,16 @@ else:
                     reference_frame_path=frame_path,
                     duration=duration,
                     resolution=resolution,
+                )
+            elif effective_source_video_url and mask_image_url and duration <= 5.001:
+                # Wan 2.7 has no mask field. VACE is the native local-edit path:
+                # it tracks the SAM target while preserving pixels outside it.
+                out_path = await _wan.generate_local_edit_variant(
+                    prompt=prompt_text,
+                    source_video_url=effective_source_video_url,
+                    mask_image_url=mask_image_url,
+                    mask_frame_id=mask_frame_id,
+                    on_tick=on_tick,
                 )
             elif effective_source_video_url:
                 # Wan's video-edit model receives the real source clip. This keeps
@@ -277,6 +294,7 @@ else:
                 out_path = await _veo.generate_variant(
                     prompt=prompt_text,
                     reference_frame_path=conditioning,
+                    last_frame_path=last_frame_path,
                     on_tick=on_tick,
                     duration=duration,
                     resolution=resolution,
@@ -309,9 +327,14 @@ else:
                 )
             else:
                 if effective_source_video_url:
+                    target = (
+                        "the exact subject isolated in the reference image"
+                        if conditioning
+                        else "the subject named in the request"
+                    )
                     prompt_text = (
                         "Edit the supplied video directly. Apply the requested change "
-                        "ONLY to the named subject; preserve the camera, framing, "
+                        f"ONLY to {target}; preserve the camera, framing, "
                         "background, lighting, shadows, clothing, and every other "
                         "person or object exactly as in the source. Respect the "
                         "requested timing relative to the start of this video. "
@@ -329,6 +352,7 @@ else:
         published_url = await storage.publish(Path(out_path), content_type="video/mp4")
         return {
             "url": published_url,
+            "path": str(out_path),
             "description": plan.get("description", ""),
         }
 

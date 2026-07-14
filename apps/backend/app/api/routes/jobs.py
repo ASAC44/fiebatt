@@ -44,6 +44,9 @@ async def get_job(
         error=job.error,
         start_ts=job.start_ts,
         end_ts=job.end_ts,
+        provider=(job.payload or {}).get("selected_provider"),
+        model=(job.payload or {}).get("selected_model"),
+        warnings=(job.payload or {}).get("warnings") or [],
         variants=[
             VariantOut(
                 id=v.id,

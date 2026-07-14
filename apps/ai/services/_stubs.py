@@ -127,7 +127,10 @@ async def _runway_generate(
     plan: EditPlan,
     style_ref: str | None = None,
     frame_path: str | None = None,  # noqa: ARG001 — mirrors real adapter signature
+    last_frame_path: str | None = None,  # noqa: ARG001
     source_video_url: str | None = None,  # noqa: ARG001
+    mask_image_url: str | None = None,  # noqa: ARG001
+    mask_frame_id: int = 1,  # noqa: ARG001
     on_tick=None,  # noqa: ARG001 — mirrors real adapter signature
     duration: int = 5,  # noqa: ARG001 — mirrors real adapter signature
     resolution: str = "720P",  # noqa: ARG001 — mirrors real adapter signature

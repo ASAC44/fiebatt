@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.common import JobStatus
 
@@ -23,3 +23,6 @@ class JobOut(BaseModel):
     # authoritative edit window used when accepting a generated replacement.
     start_ts: float | None = None
     end_ts: float | None = None
+    provider: str | None = None
+    model: str | None = None
+    warnings: list[str] = Field(default_factory=list)

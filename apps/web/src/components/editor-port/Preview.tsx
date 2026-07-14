@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps, react-hooks/set-state-in-effect */
 import { useEffect, useRef, useState, useCallback } from "react";
 import { clipAtTime, duration, sourceTimeFor, totalDuration, timelineSpans, useEDL } from "@/stores/edl";
-import { identifyRegion } from "@/lib/api";
+import { getMask, identifyRegion } from "@/lib/api";
 import BoundingBox from "./BoundingBox";
 import { PreviewControls } from "./PreviewControls";
 
@@ -23,6 +23,7 @@ export function Preview() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const currentClipIdRef = useRef<string | null>(null);
+  const transitioningRef = useRef(false);
   const rafRef = useRef<number | null>(null);
   const [videoSize, setVideoSize] = useState({ width: 1920, height: 1080 });
 
@@ -31,8 +32,8 @@ export function Preview() {
   const total = totalDuration(state.clips);
   const frameTs = hit ? sourceTimeFor(hit.clip, hit.offsetInClip) : null;
 
-  // Drawing a bounding box kicks off Gemini identification + SAM mask
-  // refinement. This has to live here (not inside the Inspector's AiTab)
+  // Drawing a bounding box kicks off Gemini identification and SAM mask
+  // refinement independently. This has to live here (not inside the Inspector's AiTab)
   // because the bbox overlay itself lives on the preview and the user
   // might not be looking at the AI tab when they draw one. The effect
   // keys off bbox + projectId so it fires once per region, not per frame.
@@ -55,15 +56,39 @@ export function Preview() {
           },
           loading: false,
         });
-        dispatch({
-          type: "set_mask",
-          mask: resp.mask?.contour?.length ? { contour: resp.mask.contour } : null,
-        });
       })
       .catch((err) => {
         if (cancelled) return;
         if (err instanceof DOMException && err.name === "AbortError") return;
         dispatch({ type: "set_identified", entity: null, loading: false });
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [bbox, projectId, activeClip?.id, frameTs, state.playing, dispatch]);
+
+  // Do not make the fast SAM result wait for the much slower vision-language
+  // identification request. Keeping separate abort controllers also means a
+  // slow entity description can never suppress a valid mask contour.
+  useEffect(() => {
+    if (!bbox || !projectId || frameTs == null || state.playing) return;
+    const controller = new AbortController();
+    let cancelled = false;
+    dispatch({ type: "set_mask", mask: null });
+    getMask(projectId, frameTs, bbox, controller.signal)
+      .then((resp) => {
+        if (cancelled) return;
+        dispatch({
+          type: "set_mask",
+          mask: resp.contour.length
+            ? { contour: resp.contour, contours: resp.contours }
+            : null,
+        });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        if (err instanceof DOMException && err.name === "AbortError") return;
         dispatch({ type: "set_mask", mask: null });
       });
     return () => {
@@ -106,6 +131,7 @@ export function Preview() {
     const clipChanged = currentClipIdRef.current !== activeClip.id;
 
     if (clipChanged) {
+      transitioningRef.current = false;
       currentClipIdRef.current = activeClip.id;
       // Capture last frame before src swap — shown as a freeze overlay to
       // prevent the black-flash flicker during browser decode.
@@ -157,17 +183,63 @@ export function Preview() {
     else v.pause();
   }, [state.playing, dispatch]);
 
+  // Advance by clip id rather than by the playhead. At a media boundary the
+  // playhead can already round into the following clip, which made an `ended`
+  // handler occasionally identify the wrong item and stop. The guard also
+  // makes the native event and the rAF boundary check safe to use together.
+  const advanceFromClip = useCallback((clipId: string) => {
+    if (transitioningRef.current) return;
+
+    const endedIdx = state.clips.findIndex((clip) => clip.id === clipId);
+    if (endedIdx < 0) {
+      dispatch({ type: "set_playing", playing: false });
+      return;
+    }
+    transitioningRef.current = true;
+
+    const nextIdx = endedIdx + 1;
+    if (nextIdx < state.clips.length) {
+      const nextStart = state.clips
+        .slice(0, nextIdx)
+        .reduce((sum, clip) => sum + duration(clip), 0);
+      dispatch({ type: "set_playhead", t: nextStart });
+      dispatch({ type: "select", id: state.clips[nextIdx].id });
+      return;
+    }
+
+    dispatch({ type: "set_playing", playing: false });
+    dispatch({ type: "set_playhead", t: totalDuration(state.clips) });
+  }, [state.clips, dispatch]);
+
+  const handleEnded = useCallback(() => {
+    const clipId = currentClipIdRef.current;
+    if (clipId) advanceFromClip(clipId);
+  }, [advanceFromClip]);
+
+  useEffect(() => {
+    if (!state.playing) transitioningRef.current = false;
+  }, [state.playing]);
+
   // rAF loop while playing — advance timeline playhead, jump clips at boundaries
   useEffect(() => {
     function tick() {
       rafRef.current = requestAnimationFrame(tick);
       const v = videoRef.current;
-      if (!v || !state.playing || v.paused) return;
+      if (!v || !state.playing) return;
 
       // find which clip the playhead is currently in
       const hit2 = clipAtTime(state.clips, state.playhead);
       if (!hit2) return;
       const { clip, startInTimeline } = hit2;
+
+      // `ended` implies `paused`, so process it before the regular paused
+      // guard. This is a fallback for browsers that deliver the native ended
+      // event after the animation frame in which playback halted.
+      if (v.ended) {
+        advanceFromClip(clip.id);
+        return;
+      }
+      if (v.paused) return;
 
       // compute offset within the clip using video element's current time
       // relative to the clip's source range (not timeline position)
@@ -183,11 +255,8 @@ export function Preview() {
         const nextIdx = hit2.index + 1;
         if (nextIdx < state.clips.length) {
           // advance to the next clip — pause first, let the source-swap effect handle it
-          const nextStart = startInTimeline + clipDur;
           v.pause();
-          dispatch({ type: "set_playhead", t: nextStart });
-          // selection follows playback
-          dispatch({ type: "select", id: state.clips[nextIdx].id });
+          advanceFromClip(clip.id);
         } else {
           // end of timeline
           dispatch({ type: "set_playing", playing: false });
@@ -206,7 +275,7 @@ export function Preview() {
     return () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     };
-  }, [state.playing, state.clips, state.playhead, dispatch]);
+  }, [state.playing, state.clips, state.playhead, dispatch, advanceFromClip]);
 
   return (
     <div className="grid h-full min-h-0 min-w-0 flex-1 grid-rows-[minmax(0,1fr)_auto] overflow-hidden pb-2">
@@ -227,6 +296,7 @@ export function Preview() {
                   height: videoHeight || 1080,
                 });
               }}
+              onEnded={handleEnded}
             />
             {/* Freeze-frame canvas: synchronously painted before src swap to
                 suppress the black-flash. Starts hidden (opacity:0); captureFreeze
@@ -246,7 +316,7 @@ export function Preview() {
               onBoxDrawn={(bbox) => dispatch({ type: "set_bbox", bbox })}
               onClear={() => dispatch({ type: "set_bbox", bbox: null })}
               bbox={state.bbox}
-              mask={state.mask}
+              mask={state.playing ? null : state.mask}
             />
           </>
         ) : (

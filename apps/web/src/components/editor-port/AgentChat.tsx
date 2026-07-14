@@ -29,7 +29,13 @@ interface AgentChatProps {
 // ─── component ────────────────────────────────────────────────────────
 
 export function AgentChat({ demoMode = false, projectId }: AgentChatProps) {
-  const { messages: liveMessages, streaming: liveStreaming, sendMessage } = useAgentStream(demoMode ? null : projectId);
+  const {
+    messages: liveMessages,
+    streaming: liveStreaming,
+    activity,
+    sendMessage,
+    stopStream,
+  } = useAgentStream(demoMode ? null : projectId);
   const { state: edlState } = useEDL();
   const { state: agentState, dispatch: agentDispatch } = useAgent();
   const [demoBusy, setDemoBusy] = useState(false);
@@ -44,6 +50,12 @@ export function AgentChat({ demoMode = false, projectId }: AgentChatProps) {
     demoTimersRef.current.forEach((timer) => window.clearTimeout(timer));
     demoTimersRef.current = [];
   }, []);
+
+  const stopDemo = useCallback(() => {
+    clearDemoTimers();
+    setDemoBusy(false);
+    agentDispatch({ type: "end_stream" });
+  }, [agentDispatch, clearDemoTimers]);
 
   useEffect(() => clearDemoTimers, [clearDemoTimers]);
 
@@ -123,9 +135,9 @@ export function AgentChat({ demoMode = false, projectId }: AgentChatProps) {
           timeline_tracks: ["V1", "A1"],
         },
         {
-          source_clip: edlState.clips[0]?.label ?? "man_walking",
-          fps: 30,
-          frames_indexed: 358,
+          source_clip: edlState.clips[0]?.label ?? "london_bus",
+          fps: 25,
+          frames_indexed: 464,
           audio_present: true,
         },
         9000,
@@ -137,14 +149,14 @@ export function AgentChat({ demoMode = false, projectId }: AgentChatProps) {
         "scene",
         "analyze_video",
         {
-          sample_window_s: [0, 11.93],
+          sample_window_s: [0, 18.56],
           stride_frames: 12,
           detect_camera_motion: true,
         },
         {
           scene_count: 3,
-          subject: "walking subject",
-          camera: "locked-off wide shot",
+          subject: "red double-decker bus",
+          camera: "locked-off street view",
           confidence: 0.94,
         },
         15000,
@@ -157,11 +169,11 @@ export function AgentChat({ demoMode = false, projectId }: AgentChatProps) {
         "clip_retrieval",
         {
           query: text,
-          candidates: ["person", "legs", "ground contact", "city plaza"],
+          candidates: ["double-decker bus", "route display", "front panel", "city street"],
           embedding_space: "visual-text",
         },
         {
-          best_match: "walking subject lower body",
+          best_match: "red double-decker bus front panel",
           semantic_score: 0.91,
           keyframes: ["00:03.18", "00:04.22", "00:05.08"],
         },
@@ -179,7 +191,7 @@ export function AgentChat({ demoMode = false, projectId }: AgentChatProps) {
           feather_px: 8,
         },
         {
-          mask_track: "subject_mask_v1",
+          mask_track: "bus_mask_v1",
           occlusion_recovery: true,
           average_iou: 0.88,
         },
@@ -213,7 +225,7 @@ export function AgentChat({ demoMode = false, projectId }: AgentChatProps) {
         {
           prompt: text,
           model_route: "video_generation",
-          region_lock: "subject_mask_v1",
+          region_lock: "bus_mask_v1",
           variants: 3,
           compare_ready: true,
         },
@@ -406,6 +418,7 @@ export function AgentChat({ demoMode = false, projectId }: AgentChatProps) {
           overflow-y: auto;
           padding: 12px 18px;
           scrollbar-gutter: stable;
+          min-width: 0;
         }
         .agent-chat__empty {
           display: flex;
@@ -446,6 +459,8 @@ export function AgentChat({ demoMode = false, projectId }: AgentChatProps) {
         .msg--tool {
           align-self: stretch;
           max-width: 100%;
+          min-width: 0;
+          overflow-wrap: anywhere;
         }
         .msg--suggestion {
           align-self: stretch;
@@ -557,8 +572,9 @@ export function AgentChat({ demoMode = false, projectId }: AgentChatProps) {
         }
         .variant-preview__grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+          grid-template-columns: minmax(0, 1fr);
           gap: 12px;
+          min-width: 0;
         }
         .variant-preview__thumb {
           aspect-ratio: 16 / 9;
@@ -569,6 +585,7 @@ export function AgentChat({ demoMode = false, projectId }: AgentChatProps) {
           display: flex;
           align-items: center;
           justify-content: center;
+          max-width: 100%;
         }
         .variant-preview__thumb video {
           width: 100%;
@@ -685,6 +702,8 @@ export function AgentChat({ demoMode = false, projectId }: AgentChatProps) {
           onSend={handleSend}
           disabled={!demoMode && !projectId}
           streaming={streaming}
+          activity={activity}
+          onStop={demoMode ? stopDemo : stopStream}
         />
       </div>
     </>
@@ -736,6 +755,7 @@ function MessageRenderer({
             tool={message.tool}
             args={message.args}
             status={message.status}
+            progress={message.progress}
             result={message.result}
           />
         </div>

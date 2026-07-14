@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef } from "react";
 import {
   createConversation,
   deleteConversation,
+  getJob,
   getConversationMessages,
   getSessionId,
   listConversations,
@@ -40,11 +41,30 @@ interface SendMessageOptions {
   bbox?: { x: number; y: number; w: number; h: number } | null;
 }
 
+/**
+ * Next rewrites are fine for normal JSON requests, but they can buffer a
+ * long-lived SSE response in dev. Use the browser-reachable backend directly
+ * for local development so tokens and tool events arrive incrementally.
+ */
+function agentChatUrl(): string {
+  const configured = process.env.NEXT_PUBLIC_BACKEND_URL?.replace(/\/$/, "");
+  if (configured && !configured.includes("://backend:")) {
+    return `${configured}/api/agent/chat`;
+  }
+  if (typeof window !== "undefined" &&
+      (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")) {
+    return `http://${window.location.hostname}:8000/api/agent/chat`;
+  }
+  return "/api/agent/chat";
+}
+
 // ─── hook ─────────────────────────────────────────────────────────────
 
 export function useAgentStream(projectId?: string | null) {
   const { state, dispatch } = useAgent();
   const abortRef = useRef<AbortController | null>(null);
+  const inFlightRef = useRef(false);
+  const generationWatchRef = useRef<AbortController | null>(null);
   const loadedRef = useRef<string | null>(null);
   const conversationIdRef = useRef(state.conversationId);
   conversationIdRef.current = state.conversationId;
@@ -111,10 +131,65 @@ export function useAgentStream(projectId?: string | null) {
       duration,
       bbox,
     }: SendMessageOptions) => {
-      // Abort any existing stream before starting a new one
-      abortRef.current?.abort();
+      // Do not create duplicate backend jobs while one turn is active.
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
       const controller = new AbortController();
       abortRef.current = controller;
+      let timedOut = false;
+      let sawDone = false;
+      const timeout = window.setTimeout(() => {
+        timedOut = true;
+        dispatch({
+          type: "add_error",
+          message: "The backend agent timed out after 7 minutes. The video provider may still be rendering; check the project timeline before retrying.",
+        });
+        controller.abort();
+      }, 7 * 60 * 1000);
+
+      const watchGeneration = async (jobId: string) => {
+        generationWatchRef.current?.abort();
+        const watch = new AbortController();
+        generationWatchRef.current = watch;
+        dispatch({ type: "set_activity", activity: "video job queued…" });
+        try {
+          while (!watch.signal.aborted) {
+            const job = await getJob(jobId);
+            if (watch.signal.aborted) return;
+            const ready = job.variants.filter((variant) => variant.url);
+            const failed = job.variants.filter((variant) => variant.status === "error");
+            if (job.status === "done" || job.status === "error") {
+              if (ready.length > 0) {
+                dispatch({ type: "add_variant_preview", jobId, variants: ready });
+                dispatch({ type: "set_activity", activity: "preview ready — choose a variant" });
+              } else {
+                dispatch({
+                  type: "add_error",
+                  message: job.error || failed[0]?.error || "Video generation failed without a usable preview.",
+                });
+              }
+              return;
+            }
+            dispatch({
+              type: "set_activity",
+              activity: `${job.status === "processing" ? "rendering" : "queued"} · ${ready.length}/${job.variants.length || 1} previews ready…`,
+            });
+            await new Promise((resolve) => window.setTimeout(resolve, 1500));
+          }
+        } catch (error) {
+          if (!watch.signal.aborted) {
+            dispatch({
+              type: "add_error",
+              message: `Could not read generation status: ${error instanceof Error ? error.message : String(error)}`,
+            });
+          }
+        } finally {
+          if (generationWatchRef.current === watch) {
+            generationWatchRef.current = null;
+            dispatch({ type: "end_stream" });
+          }
+        }
+      };
 
       // Optimistic UI: show the user message immediately
       dispatch({ type: "add_user_message", text: message });
@@ -144,7 +219,7 @@ export function useAgentStream(projectId?: string | null) {
             text: (m as { text: string }).text,
           }));
 
-        const response = await fetch("/api/agent/chat", {
+        const response = await fetch(agentChatUrl(), {
           method: "POST",
           headers,
           signal: controller.signal,
@@ -174,6 +249,7 @@ export function useAgentStream(projectId?: string | null) {
 
         // ── SSE stream parser ─────────────────────────────────────
         console.log(`[agent stream] OPEN project=${projectId} msg=${message.slice(0, 80)}`);
+        dispatch({ type: "set_activity", activity: "connected — agent is thinking…" });
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
@@ -204,7 +280,12 @@ export function useAgentStream(projectId?: string | null) {
               try {
                 const data = JSON.parse(dataStr) as Record<string, unknown>;
                 eventCount++;
+                if (currentEvent === "done") sawDone = true;
                 handleSSEEvent(dispatch, currentEvent, data);
+                if (currentEvent === "suggestion") {
+                  const edit = data.edit as { job_id?: string } | undefined;
+                  if (edit?.job_id) void watchGeneration(edit.job_id);
+                }
               } catch (err) {
                 console.warn(
                   "[agent stream] malformed JSON in SSE data line (skipping)",
@@ -218,6 +299,12 @@ export function useAgentStream(projectId?: string | null) {
             // currentEvent on data consumption above, which is sufficient.
           }
         }
+        if (!sawDone && !controller.signal.aborted) {
+          dispatch({
+            type: "add_error",
+            message: "The backend stream ended before it reported completion. Nothing was applied to the timeline.",
+          });
+        }
         console.log(
           `[agent stream] CLOSE chunks=${chunkCount} events=${eventCount}`,
         );
@@ -227,15 +314,19 @@ export function useAgentStream(projectId?: string | null) {
           `[agent stream] ${isAbort ? "ABORTED" : "ERRORED"}:`,
           err,
         );
-        if (!isAbort) {
+        if (!isAbort && !timedOut) {
           dispatch({
             type: "add_error",
             message: err instanceof Error ? err.message : String(err),
           });
         }
       } finally {
-        dispatch({ type: "end_stream" });
+        window.clearTimeout(timeout);
+        // Keep the input/status card alive while the detached generation
+        // watcher is polling for a preview after the chat stream ends.
+        if (!generationWatchRef.current) dispatch({ type: "end_stream" });
         abortRef.current = null;
+        inFlightRef.current = false;
       }
     },
     [state.messages, state.conversationId, dispatch],
@@ -243,6 +334,8 @@ export function useAgentStream(projectId?: string | null) {
 
   const stopStream = useCallback(() => {
     abortRef.current?.abort();
+    generationWatchRef.current?.abort();
+    inFlightRef.current = false;
     dispatch({ type: "end_stream" });
   }, [dispatch]);
 
@@ -271,6 +364,7 @@ export function useAgentStream(projectId?: string | null) {
     messages: state.messages,
     streaming: state.streaming,
     analysis: state.analysis,
+    activity: state.activity,
     conversationId: state.conversationId,
     sendMessage,
     stopStream,
@@ -362,6 +456,7 @@ function handleSSEEvent(
 
   switch (event) {
     case "token":
+      dispatch({ type: "set_activity", activity: "agent is thinking…" });
       dispatch({ type: "append_token", text: data.text as string });
       break;
 
@@ -369,6 +464,7 @@ function handleSSEEvent(
       const id = data.id as string;
       const tool = data.tool as string;
       _toolsById.set(id, tool);
+      dispatch({ type: "set_activity", activity: `${tool.replace(/_/g, " ")}…` });
       dispatch({
         type: "tool_call_start",
         id,
@@ -403,6 +499,7 @@ function handleSSEEvent(
         result: data.result,
         status,
       });
+      dispatch({ type: "set_activity", activity: status === "done" ? "continuing…" : "tool failed" });
 
       // Mutating tools need the frontend EDL to re-hydrate from the
       // server. Broadcast a window event so the Studio shell can
@@ -464,6 +561,7 @@ function handleSSEEvent(
     case "prompt_plan_started": {
       const jobId = (data.job_id as string | undefined) ?? "";
       if (!jobId) break;
+      dispatch({ type: "set_activity", activity: "rewriting your prompt…" });
       dispatch({
         type: "prompt_plan_started",
         jobId,
@@ -483,7 +581,9 @@ function handleSSEEvent(
     case "gen_dispatch": {
       const jobId = (data.job_id as string | undefined) ?? "";
       if (!jobId) break;
-      dispatch({ type: "prompt_plan_dispatched", jobId, vendor: "wan" });
+      const strategy = (data.strategy as string | undefined) ?? "video model";
+      dispatch({ type: "set_activity", activity: `rendering with ${strategy}…` });
+      dispatch({ type: "prompt_plan_dispatched", jobId, vendor: strategy });
       break;
     }
 
@@ -494,6 +594,7 @@ function handleSSEEvent(
         ? "generation is rate-limited right now. try again in a minute or swap to the stub ai provider."
         : `generation failed: ${rawErr}`;
       dispatch({ type: "add_error", message: niceErr });
+      dispatch({ type: "set_activity", activity: "generation failed" });
       break;
     }
 

@@ -81,6 +81,17 @@ be swapped to whatever Veo 3 route is enabled in the Mesh dashboard.
 
 See [`meshapi/`](meshapi/) for the small routing manifest and setup notes.
 
+### Video provider routing
+
+`VIDEO_GEN_PROVIDER=auto` is the default. It routes edits of uploaded footage
+to Wan so the model receives the source clip and retains temporal context.
+HappyHorse remains available as an explicit source-edit fallback. Google Veo
+is available for explicit short image-conditioned generation and accepts only
+4, 6, or 8 second requests; first/last-frame and reference-image requests must
+be 8 seconds. Set `VEO_MODEL=veo-3.1-fast-generate-preview` for interactive
+previews or select the standard Veo model when quality is more important than
+latency.
+
 ### Vision and localization
 
 The vision path can use:
@@ -227,7 +238,7 @@ Important environment groups:
 - media storage: `VULTR_S3_*` or local media fallback
 - AI mode: `USE_AI_STUBS`
 - Mesh API gateway: `MESH_API_KEY`, `MESH_API_BASE_URL`, `MESH_MODEL`, `MESH_VIDEO_MODEL`, `MESH_VIDEO_ENDPOINT`
-- generation provider: `VIDEO_GEN_PROVIDER`
+- generation provider: `VIDEO_GEN_PROVIDER`, `VEO_MODEL`, `VIDEO_GENERATION_TIMEOUT`
 
 The web app uses first-party email/password auth. Create an account at
 `/signup`, then log in at `/login`; the browser stores a JWT and sends it to

@@ -521,6 +521,12 @@ async def _generate_edit(
         raise ValueError(f"segment length must be {MIN_SEG_LEN}-{MAX_SEG_LEN}s (got {length:.2f}s)")
     if end_ts > proj.duration + 1e-3:
         raise ValueError("end_ts past project duration")
+    if video_gen_provider and video_gen_provider != "auto":
+        from ai.services.provider_capabilities import validate_provider_duration
+
+        provider_error = validate_provider_duration(video_gen_provider, length)
+        if provider_error:
+            raise ValueError(provider_error)
     if bbox.get("x", 0) + bbox.get("w", 0) > 1.0001 or bbox.get("y", 0) + bbox.get("h", 0) > 1.0001:
         raise ValueError("bbox extends outside the frame")
 
@@ -533,7 +539,7 @@ async def _generate_edit(
         bbox_json=bbox,
         prompt=prompt,
         reference_frame_ts=reference_frame_ts,
-        payload={"video_gen_provider": video_gen_provider} if video_gen_provider else None,
+        payload={"video_gen_provider": video_gen_provider or "auto"},
     )
     db.add(job)
     await db.commit()

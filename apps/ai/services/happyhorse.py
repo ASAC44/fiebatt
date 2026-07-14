@@ -31,7 +31,8 @@ MIN_DURATION = 3
 MAX_DURATION = 15
 DEFAULT_DURATION = 5
 POLL_INTERVAL = 2  # seconds between poll ticks
-GENERATION_TIMEOUT = 360  # 6 minutes max
+GENERATION_TIMEOUT = get_settings().video_generation_timeout
+DOWNLOAD_ATTEMPTS = 3
 
 DEFAULT_T2V_MODEL = "happyhorse-1.1-t2v"
 DEFAULT_I2V_MODEL = "happyhorse-1.1-i2v"
@@ -176,11 +177,34 @@ def _output_path(stem: str | None = None) -> Path:
 
 
 async def _download_video(url: str, output_path: Path) -> Path:
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        output_path.write_bytes(resp.content)
-    return output_path
+    last_error: Exception | None = None
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        try:
+            timeout = httpx.Timeout(180.0, connect=30.0)
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                if not resp.content:
+                    raise RuntimeError("provider returned an empty video file")
+                output_path.write_bytes(resp.content)
+                return output_path
+        except (httpx.TransportError, httpx.HTTPStatusError, RuntimeError) as exc:
+            last_error = exc
+            retryable_status = (
+                isinstance(exc, httpx.HTTPStatusError)
+                and exc.response.status_code in {408, 425, 429, 500, 502, 503, 504}
+            )
+            retryable = isinstance(exc, (httpx.TransportError, RuntimeError)) or retryable_status
+            if attempt >= DOWNLOAD_ATTEMPTS or not retryable:
+                break
+            await asyncio.sleep(2 ** (attempt - 1))
+
+    detail = str(last_error).strip() if last_error is not None else "unknown error"
+    if not detail and last_error is not None:
+        detail = type(last_error).__name__
+    raise RuntimeError(
+        f"HappyHorse video download failed after {DOWNLOAD_ATTEMPTS} attempts: {detail}"
+    ) from last_error
 
 
 @tracked("happyhorse", "generate_variant")

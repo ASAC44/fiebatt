@@ -285,6 +285,7 @@
 .studio__right {
   position: relative;
   min-height: 0;
+  min-width: 0;
   background: var(--background);
   display: flex;
   flex-direction: column;
@@ -398,7 +399,7 @@
 
 /* 60/40 grid: center (video) | splitter | right (chat) */
 .studio--vibe .studio__body {
-  grid-template-columns: 3fr var(--split-x) 2fr;
+  grid-template-columns: minmax(0, 3fr) var(--split-x) minmax(280px, 2fr);
 }
 
 /* right sidebar is visible in vibe mode (agent chat fills it) */
@@ -411,7 +412,19 @@
 .studio--vibe .agent-chat {
   height: 100%;
   min-height: 0;
+  min-width: 0;
   border-left: 0;
+}
+
+@media (max-width: 900px) {
+  .studio--vibe .studio__body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(260px, 1fr) minmax(300px, 46vh);
+  }
+
+  .studio--vibe .splitter--vertical {
+    display: none !important;
+  }
 }
 
 /* collapse the timeline row */

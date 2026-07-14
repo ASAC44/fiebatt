@@ -31,11 +31,11 @@ contains image payloads, because the default Mesh model above is a text model.
 ## Environment
 
 ```bash
-MESH_API_KEY="mesh_sk_..."
+MESH_API_KEY="rsk_..."
 MESH_API_BASE_URL="https://api.meshapi.ai/v1"
 MESH_MODEL="deepseek/deepseek-v3.2"
 MESH_VIDEO_MODEL="google/veo-3"
-MESH_VIDEO_ENDPOINT="/videos/generations"
+MESH_VIDEO_ENDPOINT="/video/generations"
 USE_AI_STUBS="false"
 ```
 
@@ -47,6 +47,8 @@ To route video generation through Mesh as well:
 VIDEO_GEN_PROVIDER="meshapi_veo"
 ```
 
-The video adapter is intentionally configurable because Mesh model IDs vary by
-dashboard availability. Keep `MESH_VIDEO_MODEL` aligned with the Veo 3 model ID
-shown in your Mesh account.
+The adapter sends Mesh's documented `content` array, polls the returned task at
+`/v1/video/generations/{id}`, and downloads `content.video_url` after the task
+succeeds. The model remains configurable because Mesh model availability can
+vary by account. Keep `MESH_VIDEO_MODEL` aligned with the Veo model ID shown in
+your Mesh dashboard.

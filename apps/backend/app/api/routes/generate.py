@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai.services.provider_capabilities import validate_provider_duration
 from app.db.session import get_db
 from app.deps import get_runner, get_session
 from app.models.job import Job
@@ -35,6 +36,10 @@ async def generate(
         )
     if body.end_ts > proj.duration + 1e-3:
         raise HTTPException(status_code=422, detail="end_ts past project duration")
+    if body.video_gen_provider and body.video_gen_provider != "auto":
+        provider_error = validate_provider_duration(body.video_gen_provider, length)
+        if provider_error:
+            raise HTTPException(status_code=422, detail=provider_error)
     # bbox sanity: x+w and y+h in [0,1]
     if body.bbox.x + body.bbox.w > 1.0001 or body.bbox.y + body.bbox.h > 1.0001:
         raise HTTPException(status_code=422, detail="bbox extends outside the frame")
@@ -48,7 +53,7 @@ async def generate(
         bbox_json=body.bbox.model_dump(),
         prompt=body.prompt,
         reference_frame_ts=body.reference_frame_ts,
-        payload={"video_gen_provider": body.video_gen_provider} if body.video_gen_provider else None,
+        payload={"video_gen_provider": body.video_gen_provider or "auto"},
     )
     db.add(job)
     await db.commit()

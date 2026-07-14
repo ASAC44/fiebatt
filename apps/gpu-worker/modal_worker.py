@@ -76,8 +76,9 @@ class SAM2Worker:
 
         # run SAM2
         self.predictor.set_image(np.array(image))
-        masks, scores, _ = self.predictor.predict(box=box, multimask_output=False)
-        best_mask = masks[0]
+        masks, scores, _ = self.predictor.predict(box=box, multimask_output=True)
+        best_index = int(np.argmax(scores))
+        best_mask = masks[best_index]
 
         # encode mask as base64 PNG
         mask_img = Image.fromarray((best_mask * 255).astype(np.uint8))
@@ -85,7 +86,11 @@ class SAM2Worker:
         mask_img.save(buf, format="PNG")
         mask_b64 = base64.b64encode(buf.getvalue()).decode()
 
-        return {"mask_b64": mask_b64}
+        return {
+            "mask_b64": mask_b64,
+            "score": float(scores[best_index]),
+            "candidate_count": int(len(masks)),
+        }
 
     @modal.fastapi_endpoint(method="GET")
     def health(self):

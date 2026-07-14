@@ -169,8 +169,8 @@ class TestRealAdapters:
             assert "visual_attributes" in result
 
 
-def test_wan_video_edit_payload_preserves_horse_and_source(tmp_path):
-    """Wan edits must receive the source video and explicit preservation rules."""
+def test_wan_video_edit_payload_targets_isolated_reference_and_source(tmp_path):
+    """Wan edits must receive the source video and identify the isolated target."""
     from ai.services.wan import _build_video_edit_payload
 
     frame = tmp_path / "frame.png"
@@ -187,20 +187,43 @@ def test_wan_video_edit_payload_preserves_horse_and_source(tmp_path):
         "url": "https://cdn.example.test/source.mp4",
     }
     assert payload["input"]["media"][1]["type"] == "reference_image"
-    assert "horse" in payload["input"]["prompt"].lower()
-    assert "only to the named man" in payload["input"]["prompt"].lower()
+    assert "exact isolated target subject" in payload["input"]["prompt"].lower()
+    assert "every other person and object" in payload["input"]["prompt"].lower()
     assert "ghosting" in payload["input"]["negative_prompt"]
     assert payload["parameters"]["resolution"] == "720P"
+
+
+def test_wan_local_edit_payload_uses_tracked_sam_mask():
+    from ai.services.wan import _build_local_edit_payload
+
+    payload = _build_local_edit_payload(
+        "Make the selected person jump.",
+        "https://cdn.example.test/source.mp4",
+        "https://cdn.example.test/mask.png",
+        mask_frame_id=42,
+    )
+
+    assert payload["input"] == {
+        "prompt": "Make the selected person jump.",
+        "function": "video_edit",
+        "video_url": "https://cdn.example.test/source.mp4",
+        "mask_image_url": "https://cdn.example.test/mask.png",
+        "mask_frame_id": 42,
+    }
+    assert payload["parameters"]["mask_type"] == "tracking"
+    assert payload["parameters"]["expand_mode"] == "original"
 
 
 def test_video_provider_aliases_normalize_to_runtime_provider():
     from ai.services.config import Settings
 
+    assert Settings(VIDEO_GEN_PROVIDER="auto").normalized_video_gen_provider == "auto"
     assert Settings(VIDEO_GEN_PROVIDER="wan").normalized_video_gen_provider == "wan"
     assert Settings(VIDEO_GEN_PROVIDER="veo").normalized_video_gen_provider == "veo"
     assert Settings(VIDEO_GEN_PROVIDER="happyhorse").normalized_video_gen_provider == "happyhorse"
     assert Settings(VIDEO_GEN_PROVIDER="veo").video_gen_provider_label == "Veo"
     assert Settings(VIDEO_GEN_PROVIDER="happyhorse").video_gen_provider_label == "HappyHorse"
+    assert Settings(VIDEO_GEN_PROVIDER="auto").video_gen_provider_label == "Auto"
 
 
 def test_veo_reference_images_include_style_and_asset(tmp_path):
@@ -232,4 +255,5 @@ def test_motion_prompt_rewrite_preserves_sequence_language():
     assert sequenced is True
     assert "Do not loop, extend, or repeat the action beyond the requested count." in rewritten
     assert "blend smoothly back into the original gait and forward momentum" in rewritten
+    assert "exactly three distinct repetitions" in rewritten
     assert "perform the requested action clearly and repeatedly" not in rewritten

@@ -32,10 +32,11 @@ MIN_DURATION = 2
 MAX_DURATION = 15
 DEFAULT_DURATION = 5
 POLL_INTERVAL = 2
-GENERATION_TIMEOUT = 600
+GENERATION_TIMEOUT = get_settings().video_generation_timeout
 
 DEFAULT_T2V_MODEL = "wan2.7-t2v-2026-04-25"
 DEFAULT_VIDEOEDIT_MODEL = "wan2.7-videoedit"
+DEFAULT_LOCAL_EDIT_MODEL = "wan2.1-vace-plus"
 
 SUPPORTED_RESOLUTIONS = ["720P", "1080P"]
 
@@ -194,12 +195,19 @@ def _build_video_edit_payload(
             "url": _image_to_base64(reference_frame_path),
         })
 
+    target_instruction = (
+        "The reference image contains the exact isolated target subject. Apply the "
+        "requested change only to that subject. "
+        if reference_frame_path
+        else "Apply the requested change only to the subject named in the request. "
+    )
     preserve_prompt = (
-        "Edit the supplied source video directly. Apply the requested action only to "
-        "the named man. Preserve the horse, every other person and object, the exact "
-        "background, camera framing, perspective, lighting, shadows, clothing, and "
-        "original timing. Keep the result natural and temporally continuous with the "
-        "source video. Do not regenerate the scene.\n\n"
+        "Edit the supplied source video directly. "
+        + target_instruction
+        + "Preserve every other person and object, the exact background, camera "
+        "framing, perspective, lighting, shadows, clothing, and original timing. "
+        "Keep the result natural and temporally continuous with the source video. "
+        "Do not regenerate the scene.\n\n"
         + prompt
     )
     return {
@@ -211,6 +219,31 @@ def _build_video_edit_payload(
         "parameters": {
             "resolution": _resolve_resolution(resolution),
             "prompt_extend": True,
+            "watermark": False,
+        },
+    }
+
+
+def _build_local_edit_payload(
+    prompt: str,
+    source_video_url: str,
+    mask_image_url: str,
+    mask_frame_id: int = 1,
+) -> dict:
+    """Build Wan VACE's native tracked-mask local-edit request."""
+    return {
+        "input": {
+            "prompt": prompt,
+            "function": "video_edit",
+            "video_url": source_video_url,
+            "mask_image_url": mask_image_url,
+            "mask_frame_id": max(1, int(mask_frame_id)),
+        },
+        "parameters": {
+            "mask_type": "tracking",
+            "expand_ratio": 0.08,
+            "expand_mode": "original",
+            "prompt_extend": False,
             "watermark": False,
         },
     }
@@ -309,6 +342,48 @@ async def generate_edit_variant(
                 "model": DEFAULT_VIDEOEDIT_MODEL,
                 "conditioned": True,
                 "source_video": True,
+            }))
+        video_url = await _poll_task(client, api_key, task_id, on_tick=on_tick)
+
+    output_path = _output_path(task_id)
+    await _download_video(video_url, output_path)
+    return str(output_path)
+
+
+@tracked("wan", "generate_local_edit_variant")
+async def generate_local_edit_variant(
+    prompt: str,
+    source_video_url: str,
+    mask_image_url: str,
+    mask_frame_id: int = 1,
+    on_tick: TickCallback | None = None,
+) -> str:
+    """Run a native mask-tracked local edit for a source clip up to five seconds."""
+    settings = get_settings()
+    api_key = settings.dashscope_api_key
+    if not api_key:
+        raise RuntimeError("DASHSCOPE_API_KEY not configured — required for Wan local editing")
+    if not source_video_url.startswith(("http://", "https://")):
+        raise ValueError("Wan local editing requires a public http(s) source_video_url")
+    if not mask_image_url.startswith(("http://", "https://")):
+        raise ValueError("Wan local editing requires a public http(s) mask_image_url")
+
+    payload = _build_local_edit_payload(
+        prompt=prompt,
+        source_video_url=source_video_url,
+        mask_image_url=mask_image_url,
+        mask_frame_id=mask_frame_id,
+    )
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        task_id = await _submit_task(client, api_key, DEFAULT_LOCAL_EDIT_MODEL, payload)
+        if on_tick is not None:
+            _maybe_await(on_tick({
+                "kind": "gen.submit",
+                "task_id": task_id,
+                "model": DEFAULT_LOCAL_EDIT_MODEL,
+                "conditioned": True,
+                "source_video": True,
+                "mask_tracking": True,
             }))
         video_url = await _poll_task(client, api_key, task_id, on_tick=on_tick)
 

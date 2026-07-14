@@ -2,8 +2,8 @@
 
 Extracts a frame from the project video at a given timestamp, crops the
 bounding box region, and sends it to Gemini for entity identification.
-Optionally refines the bbox into a precise SAM mask when the GPU worker
-is available.
+Mask refinement is served separately by ``POST /api/mask`` so a slow entity
+description cannot delay or suppress the SAM result.
 """
 
 import logging
@@ -13,52 +13,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai.services import gemini
-from ai.services.sam import bbox_to_mask, is_available as sam_available
 from app.services import ffmpeg as async_ffmpeg
 from app.config.settings import get_settings
 from app.db.session import get_db
 from app.deps import get_session
 from app.models.project import Project
 from app.models.session import Session as SessionModel
-from app.schemas.identify import IdentifyRequest, IdentifyResponse, MaskOut
+from app.schemas.identify import IdentifyRequest, IdentifyResponse
 
 log = logging.getLogger("fiebatt.identify")
 router = APIRouter(tags=["identify"])
-
-
-def _mask_png_to_contour(mask_path: str) -> list[list[float]] | None:
-    """Extract the largest contour from a SAM mask PNG.
-
-    Uses OpenCV if available; returns ``None`` when cv2 is missing or no
-    contour is found so the caller can gracefully degrade.
-    """
-    try:
-        import cv2  # type: ignore[import-untyped]
-        import numpy as np  # type: ignore[import-untyped]
-
-        mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-        if mask is None:
-            return None
-
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
-            return None
-
-        # Pick the largest contour by area
-        largest = max(contours, key=cv2.contourArea)
-
-        h, w = mask.shape[:2]
-        # Normalize to 0-1 and flatten to [[x, y], ...]
-        return [
-            [round(float(pt[0][0]) / w, 4), round(float(pt[0][1]) / h, 4)]
-            for pt in largest
-        ]
-    except ImportError:
-        log.debug("cv2 not available — skipping mask contour extraction")
-        return None
-    except Exception:
-        log.exception("failed to extract contour from mask")
-        return None
 
 
 @router.post("/identify", response_model=IdentifyResponse)
@@ -99,25 +63,9 @@ async def identify(
         log.exception("bbox crop failed for project %s", proj.id)
         raise HTTPException(status_code=500, detail=f"bbox crop failed: {exc}") from exc
 
-    # ---- identify entity + SAM mask concurrently ----
-    import asyncio
-
-    async def _identify() -> dict:
-        return await gemini.identify_entity(crop_path)
-
-    async def _sam_mask() -> MaskOut | None:
-        try:
-            if not await sam_available():
-                return None
-            mask_path = await bbox_to_mask(frame_path, bbox_dict)
-            contour = _mask_png_to_contour(mask_path)
-            return MaskOut(contour=contour) if contour else None
-        except Exception:
-            log.warning("SAM mask generation failed — continuing without mask", exc_info=True)
-            return None
-
+    # ---- identify entity ----
     try:
-        entity, mask_out = await asyncio.gather(_identify(), _sam_mask())
+        entity = await gemini.identify_entity(crop_path)
     except Exception as exc:
         log.exception("entity identification failed for project %s", proj.id)
         raise HTTPException(status_code=500, detail=f"entity identification failed: {exc}") from exc
@@ -138,5 +86,5 @@ async def identify(
         description=entity.get("description", ""),
         category=entity.get("category", ""),
         attributes=raw_attrs,
-        mask=mask_out,
+        mask=None,
     )

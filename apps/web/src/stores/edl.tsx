@@ -67,7 +67,10 @@ export type Clip = {
 export type BBox = { x: number; y: number; w: number; h: number };
 
 /** SAM-refined outline of the subject inside the bbox. Points are normalized 0-1. */
-export type Mask = { contour: [number, number][] };
+export type Mask = {
+  contour: [number, number][];
+  contours?: [number, number][][];
+};
 
 /** Gemini's description of whatever's inside the current bbox. */
 export type IdentifiedEntity = {

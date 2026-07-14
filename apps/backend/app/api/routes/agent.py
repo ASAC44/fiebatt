@@ -59,7 +59,7 @@ class AgentChatRequest(BaseModel):
     playhead_ts: float | None = None
     duration: float | None = None
     bbox: BBoxParam | None = None
-    video_gen_provider: Literal["wan", "happyhorse", "veo", "meshapi_veo"] | None = None
+    video_gen_provider: Literal["auto", "wan", "happyhorse", "veo", "meshapi_veo"] | None = None
 
 
 # ---- system prompt ----
@@ -73,13 +73,10 @@ Preferred workflow:
 1. Understand the current reel state with get_timeline, preview_frame, and preview_strip.
 2. Use analyze_video only when broader scene/entity context would genuinely help.
 3. Use identify_region when the user points at a subject or bounding box.
-4. Use generate_edit for localized edits, then IMMEDIATELY call wait_for_job
-   with the returned job_id so the variants are in hand before you reply.
-   Only use get_job_status when you need a non-blocking peek.
-   When wait_for_job returns, inspect result.variants_ready: if it's 0,
-    the render failed (often rate-limiting / quota). TELL THE USER
-   EXACTLY what went wrong using result.variant_errors or result.error,
-   suggest they retry in a minute, and DO NOT call accept_variant.
+4. Use generate_edit for localized edits and then stop the generation turn.
+   The UI polls the returned job_id and shows variants as soon as they are
+   ready. Do not call wait_for_job automatically; use get_job_status only
+   when the user explicitly asks for a status update.
 5. Before destructive timeline moves, use snapshot_timeline so reverts stay cheap.
 6. Use score_variant, score_continuity, remix_variant, split_segment, trim_segment, delete_segment, and color_grade when they clearly improve the edit.
 7. NEVER call accept_variant on your own. Acceptance is a human decision —
@@ -920,6 +917,7 @@ async def _agent_stream(
     # Agentic loop: keep calling the model until it stops issuing function calls
     max_turns = 10
     turn = 0
+    generation_started = False
 
     while turn < max_turns:
         turn += 1
@@ -1050,6 +1048,12 @@ async def _agent_stream(
                     })
                     async for evt in _bridge_plan_events(result["job_id"], timeout_s=25.0):
                         yield evt
+                    # Generation is a detached backend job. End this agent
+                    # turn after queueing it so the model cannot follow up
+                    # with wait_for_job and pin the chat SSE connection for
+                    # the provider's entire render window. The browser owns
+                    # job polling from the suggestion event above.
+                    generation_started = True
 
                 if tool_name in ("get_job_status", "wait_for_job"):
                     job_status = result.get("status")
@@ -1087,6 +1091,9 @@ async def _agent_stream(
                     "content": json.dumps(result),
                 })
 
+                if generation_started:
+                    break
+
             except Exception as exc:
                 log.exception("Tool execution failed: %s", tool_name)
                 error_result = {"error": str(exc)}
@@ -1101,6 +1108,9 @@ async def _agent_stream(
                     "tool_call_id": tool_call_id,
                     "content": json.dumps(error_result),
                 })
+
+        if generation_started:
+            break
 
     # ── persist agent response ──
     try:

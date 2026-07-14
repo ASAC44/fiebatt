@@ -1,6 +1,6 @@
 "use client";
 
-export type VideoProvider = "wan" | "happyhorse" | "veo" | "meshapi_veo";
+export type VideoProvider = "auto" | "wan" | "happyhorse" | "veo" | "meshapi_veo";
 
 export type FiebattSettings = {
   demoMode: boolean;
@@ -9,11 +9,18 @@ export type FiebattSettings = {
 
 const SETTINGS_KEY = "fiebatt.settings";
 
+let cachedSettings: FiebattSettings | null = null;
+
 export const VIDEO_PROVIDERS: Array<{
   value: VideoProvider;
   label: string;
   description: string;
 }> = [
+  {
+    value: "auto",
+    label: "Auto",
+    description: "Wan for source-video edits; Veo for generated shots.",
+  },
   {
     value: "wan",
     label: "Wan",
@@ -38,7 +45,7 @@ export const VIDEO_PROVIDERS: Array<{
 
 const DEFAULT_SETTINGS: FiebattSettings = {
   demoMode: true,
-  videoProvider: "wan",
+  videoProvider: "auto",
 };
 
 function isVideoProvider(value: unknown): value is VideoProvider {
@@ -47,23 +54,31 @@ function isVideoProvider(value: unknown): value is VideoProvider {
 
 export function getSettings(): FiebattSettings {
   if (typeof window === "undefined") return DEFAULT_SETTINGS;
+  if (cachedSettings) return cachedSettings;
+
   const raw = localStorage.getItem(SETTINGS_KEY);
-  if (!raw) return DEFAULT_SETTINGS;
+  if (!raw) {
+    cachedSettings = DEFAULT_SETTINGS;
+    return cachedSettings;
+  }
 
   try {
     const parsed = JSON.parse(raw) as Partial<FiebattSettings>;
-    return {
+    cachedSettings = {
       demoMode: typeof parsed.demoMode === "boolean" ? parsed.demoMode : DEFAULT_SETTINGS.demoMode,
       videoProvider: isVideoProvider(parsed.videoProvider)
         ? parsed.videoProvider
         : DEFAULT_SETTINGS.videoProvider,
     };
+    return cachedSettings;
   } catch {
-    return DEFAULT_SETTINGS;
+    cachedSettings = DEFAULT_SETTINGS;
+    return cachedSettings;
   }
 }
 
 export function saveSettings(next: FiebattSettings): void {
+  cachedSettings = next;
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
   window.dispatchEvent(new CustomEvent("fiebatt:settings-change", { detail: next }));
 }

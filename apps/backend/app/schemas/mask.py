@@ -11,3 +11,4 @@ class MaskRequest(BaseModel):
 
 class MaskResponse(BaseModel):
     contour: list[list[float]]
+    contours: list[list[list[float]]] = Field(default_factory=list)

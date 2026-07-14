@@ -18,7 +18,8 @@
     "video_generation": {
       "model": "google/veo-3",
       "switch": "VIDEO_GEN_PROVIDER=meshapi_veo",
-      "reason": "Veo 3-style generation can be routed through Mesh API by changing the video provider switch and model id."
+      "endpoint": "/video/generations",
+      "reason": "Veo generation can be routed through Mesh API by changing the video provider switch and model id."
     }
   }
 }

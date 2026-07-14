@@ -78,6 +78,7 @@ export type AgentMessage =
       tool: string;
       args: unknown;
       status: "pending" | "running" | "done" | "error";
+      progress?: string;
       result?: unknown;
       ts: number;
     }
@@ -106,6 +107,7 @@ export interface AgentState {
   messages: AgentMessage[];
   conversationId: string;
   streaming: boolean;
+  activity: string | null;
   analysis: VideoAnalysis | null;
 }
 
@@ -114,6 +116,7 @@ export interface AgentState {
 export type AgentAction =
   | { type: "add_user_message"; text: string }
   | { type: "start_stream" }
+  | { type: "set_activity"; activity: string | null }
   | { type: "append_token"; text: string }
   | { type: "end_stream" }
   | { type: "tool_call_start"; id: string; tool: string; args: unknown }
@@ -176,11 +179,15 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
       return {
         ...state,
         streaming: true,
+        activity: "connecting to backend…",
         messages: [
           ...state.messages,
           { type: "agent", text: "", ts: now, streaming: true },
         ],
       };
+
+    case "set_activity":
+      return { ...state, activity: action.activity };
 
     case "append_token": {
       const msgs = [...state.messages];
@@ -199,7 +206,7 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
       const filtered = msgs.filter(
         (m) => !(m.type === "agent" && m.text === ""),
       );
-      return { ...state, streaming: false, messages: filtered };
+      return { ...state, streaming: false, activity: null, messages: filtered };
     }
 
     case "tool_call_start":
@@ -219,8 +226,15 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
       };
 
     case "tool_call_progress": {
-      // Progress updates are informational — no state mutation needed yet.
-      return state;
+      return {
+        ...state,
+        activity: action.progress,
+        messages: state.messages.map((m) =>
+          m.type === "tool_call" && m.id === action.id
+            ? { ...m, progress: action.progress }
+            : m,
+        ),
+      };
     }
 
     case "tool_call_end": {
@@ -346,6 +360,7 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
       return {
         ...state,
         streaming: false,
+        activity: null,
         messages: [
           ...state.messages,
           { type: "error", message: action.message, ts: now },
@@ -372,6 +387,7 @@ const initialState: AgentState = {
   messages: [],
   conversationId: crypto.randomUUID(),
   streaming: false,
+  activity: null,
   analysis: null,
 };
 

@@ -104,10 +104,18 @@ async def sam_segment(data: dict):
 
     predictor = get_sam()
     predictor.set_image(np.array(image))
-    masks, scores, _ = predictor.predict(box=box, multimask_output=False)
-
-    best_mask = masks[0]  # shape: (H, W), bool
-    return {"mask_b64": mask_to_b64(best_mask)}
+    # A box can legitimately contain several plausible targets (for example a
+    # person, their shadow, and the ground behind them).  Ask SAM for all three
+    # candidates and keep the model's highest-confidence result instead of
+    # accepting the single-mask shortcut unconditionally.
+    masks, scores, _ = predictor.predict(box=box, multimask_output=True)
+    best_index = int(np.argmax(scores))
+    best_mask = masks[best_index]  # shape: (H, W), bool
+    return {
+        "mask_b64": mask_to_b64(best_mask),
+        "score": float(scores[best_index]),
+        "candidate_count": int(len(masks)),
+    }
 
 
 @app.post("/clip/embed")

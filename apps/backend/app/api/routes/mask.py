@@ -60,7 +60,7 @@ async def mask(
         raise HTTPException(status_code=500, detail=f"SAM segmentation failed: {e}")
 
     # Convert mask image to contour points normalized to [0, 1]
-    contour = _mask_to_contour(mask_path)
+    contours = _mask_to_contours(mask_path)
 
     # Clean up temporary mask file
     try:
@@ -68,11 +68,11 @@ async def mask(
     except Exception:
         pass
 
-    return MaskResponse(contour=contour)
+    return MaskResponse(contour=contours[0] if contours else [], contours=contours)
 
 
-def _mask_to_contour(mask_path: str) -> list[list[float]]:
-    """Read a binary mask PNG and return the largest contour as normalized [x, y] points."""
+def _mask_to_contours(mask_path: str) -> list[list[list[float]]]:
+    """Return meaningful disconnected SAM components as normalized contours."""
     import cv2  # type: ignore[import-untyped]
 
     img = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
@@ -88,15 +88,27 @@ def _mask_to_contour(mask_path: str) -> list[list[float]]:
     if not contours:
         return []
 
-    # Take the largest contour by area
-    largest = max(contours, key=cv2.contourArea)
+    ordered = sorted(contours, key=cv2.contourArea, reverse=True)
+    largest_area = cv2.contourArea(ordered[0])
+    minimum_area = max(12.0, largest_area * 0.002)
+    result: list[list[list[float]]] = []
+    for component in ordered:
+        if cv2.contourArea(component) < minimum_area:
+            continue
+        # A smaller epsilon retains hands, feet, and clothing edges while still
+        # keeping the browser payload compact.
+        epsilon = 0.0025 * cv2.arcLength(component, True)
+        approx = cv2.approxPolyDP(component, epsilon, True)
+        if len(approx) < 3:
+            continue
+        result.append([
+            [round(float(pt[0][0]) / w, 4), round(float(pt[0][1]) / h, 4)]
+            for pt in approx
+        ])
+    return result
 
-    # Simplify the contour to reduce point count
-    epsilon = 0.005 * cv2.arcLength(largest, True)
-    approx = cv2.approxPolyDP(largest, epsilon, True)
 
-    # Normalize to [0, 1] and return as [[x, y], ...]
-    return [
-        [round(float(pt[0][0]) / w, 4), round(float(pt[0][1]) / h, 4)]
-        for pt in approx
-    ]
+def _mask_to_contour(mask_path: str) -> list[list[float]]:
+    """Backward-compatible largest-contour helper."""
+    contours = _mask_to_contours(mask_path)
+    return contours[0] if contours else []

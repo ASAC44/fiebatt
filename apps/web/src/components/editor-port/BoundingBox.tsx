@@ -10,7 +10,7 @@ interface BoundingBoxProps {
   disabled?: boolean;
   bbox?: { x: number; y: number; w: number; h: number } | null;
   /** SAM-refined contour that snaps to the subject. Points are normalized 0-1. */
-  mask?: { contour: [number, number][] } | null;
+  mask?: { contour: [number, number][]; contours?: [number, number][][] } | null;
 }
 
 interface Box {
@@ -33,8 +33,14 @@ function BoundingBox({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawingRef = useRef(false);
   const startRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const activeBoxRef = useRef<Box | null>(null);
   const [box, setBox] = useState<Box | null>(null);
   const [activeBox, setActiveBox] = useState<Box | null>(null);
+
+  const updateActiveBox = useCallback((next: Box | null) => {
+    activeBoxRef.current = next;
+    setActiveBox(next);
+  }, []);
 
   /** Resize canvas to match the actual displayed video rect inside the stage. */
   const syncSize = useCallback(() => {
@@ -102,7 +108,12 @@ function BoundingBox({
     // While the user is still dragging, show the raw rectangle. Once a SAM
     // mask arrives, the rectangle fades back and the contour becomes primary.
     const renderBox = activeBox ?? box;
-    const hasMask = !!(mask && mask.contour.length > 2);
+    const maskContours = mask?.contours?.length
+      ? mask.contours
+      : mask?.contour?.length
+        ? [mask.contour]
+        : [];
+    const hasMask = maskContours.some((contour) => contour.length > 2);
     const isDragging = activeBox !== null;
 
     if (renderBox) {
@@ -130,13 +141,16 @@ function BoundingBox({
     // SAM contour — solid glowing outline that snaps to the subject.
     if (hasMask) {
       ctx.beginPath();
-      const [firstX, firstY] = mask!.contour[0];
-      ctx.moveTo(firstX * cw, firstY * ch);
-      for (let i = 1; i < mask!.contour.length; i++) {
-        const [mx, my] = mask!.contour[i];
-        ctx.lineTo(mx * cw, my * ch);
+      for (const contour of maskContours) {
+        if (contour.length < 3) continue;
+        const [firstX, firstY] = contour[0];
+        ctx.moveTo(firstX * cw, firstY * ch);
+        for (let i = 1; i < contour.length; i++) {
+          const [mx, my] = contour[i];
+          ctx.lineTo(mx * cw, my * ch);
+        }
+        ctx.closePath();
       }
-      ctx.closePath();
 
       ctx.fillStyle = "rgba(225, 29, 72, 0.22)";
       ctx.fill();
@@ -173,8 +187,8 @@ function BoundingBox({
 
   useEffect(() => {
     setBox(bbox);
-    if (!bbox) setActiveBox(null);
-  }, [bbox]);
+    if (!bbox) updateActiveBox(null);
+  }, [bbox, updateActiveBox]);
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -184,9 +198,9 @@ function BoundingBox({
       const pos = toNormalized(e);
       drawingRef.current = true;
       startRef.current = pos;
-      setActiveBox({ x: pos.x, y: pos.y, w: 0, h: 0 });
+      updateActiveBox({ x: pos.x, y: pos.y, w: 0, h: 0 });
     },
-    [disabled, toNormalized],
+    [disabled, toNormalized, updateActiveBox],
   );
 
   const handleMouseMove = useCallback(
@@ -203,51 +217,52 @@ function BoundingBox({
       const w = Math.abs(pos.x - sx);
       const h = Math.abs(pos.y - sy);
 
-      setActiveBox({ x, y, w, h });
+      updateActiveBox({ x, y, w, h });
     },
-    [disabled, toNormalized],
+    [disabled, toNormalized, updateActiveBox],
   );
 
   const handleMouseUp = useCallback(() => {
     if (!drawingRef.current || disabled) return;
     drawingRef.current = false;
 
-    if (activeBox && activeBox.w > 0.005 && activeBox.h > 0.005) {
-      console.log('[BoundingBox] box drawn', activeBox);
-      setBox(activeBox);
-      onBoxDrawn(activeBox);
+    const completedBox = activeBoxRef.current;
+    if (completedBox && completedBox.w > 0.005 && completedBox.h > 0.005) {
+      console.log('[BoundingBox] box drawn', completedBox);
+      setBox(completedBox);
+      onBoxDrawn(completedBox);
     } else {
-      console.log('[BoundingBox] box too small, ignored', activeBox);
+      console.log('[BoundingBox] box too small, ignored', completedBox);
     }
 
-    setActiveBox(null);
-  }, [disabled, activeBox, onBoxDrawn]);
+    updateActiveBox(null);
+  }, [disabled, onBoxDrawn, updateActiveBox]);
 
   const handleDoubleClick = useCallback(() => {
     if (disabled) return;
     setBox(null);
-    setActiveBox(null);
+    updateActiveBox(null);
     onClear();
-  }, [disabled, onClear]);
+  }, [disabled, onClear, updateActiveBox]);
 
   /** Catch mouseup outside the canvas so a drag isn't stuck. */
   useEffect(() => {
     const onGlobalMouseUp = () => {
       if (drawingRef.current) {
         drawingRef.current = false;
-        setActiveBox((prev) => {
-          if (prev && prev.w > 0.005 && prev.h > 0.005) {
-            setBox(prev);
-            onBoxDrawn(prev);
-          }
-          return null;
-        });
+        const completedBox = activeBoxRef.current;
+        updateActiveBox(null);
+
+        if (completedBox && completedBox.w > 0.005 && completedBox.h > 0.005) {
+          setBox(completedBox);
+          onBoxDrawn(completedBox);
+        }
       }
     };
 
     window.addEventListener("mouseup", onGlobalMouseUp);
     return () => window.removeEventListener("mouseup", onGlobalMouseUp);
-  }, [onBoxDrawn]);
+  }, [onBoxDrawn, updateActiveBox]);
 
   return (
     <canvas

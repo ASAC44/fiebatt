@@ -13,6 +13,7 @@ interface ToolCallCardProps {
   tool: string;
   args: unknown;
   status: "pending" | "running" | "done" | "error";
+  progress?: string;
   result?: unknown;
 }
 
@@ -46,7 +47,7 @@ const STATUS_CLASSES: Record<ToolCallCardProps["status"], string> = {
   error: "tool-status__state--error",
 };
 
-export function ToolCallCard({ tool, args, status, result }: ToolCallCardProps) {
+export function ToolCallCard({ tool, args, status, progress, result }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
   const displayName = TOOL_LABELS[tool] ?? tool.replace(/_/g, " ");
 
@@ -187,6 +188,9 @@ export function ToolCallCard({ tool, args, status, result }: ToolCallCardProps) 
               </div>
             )}
           </div>
+        )}
+        {status === "running" && progress && (
+          <div className="tool-status__body">{progress}</div>
         )}
       </div>
     </>

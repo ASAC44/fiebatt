@@ -24,24 +24,28 @@ from ai.services.logger import tracked
 
 TickCallback = Callable[[dict], Awaitable[None] | None]
 
-DEFAULT_MODEL = "veo-3.1-generate-preview"
-MIN_DURATION = 3
-MAX_DURATION = 8
-DEFAULT_DURATION = 5
+DEFAULT_MODEL = "veo-3.1-fast-generate-preview"
+ALLOWED_DURATIONS = (4, 6, 8)
+DEFAULT_DURATION = 4
 POLL_INTERVAL = 10
-GENERATION_TIMEOUT = 600
-SUPPORTED_RESOLUTIONS = {"720P", "1080P"}
+GENERATION_TIMEOUT = get_settings().video_generation_timeout
+SUPPORTED_RESOLUTIONS = {"720P": "720p", "1080P": "1080p"}
 
 
 def _resolve_duration(duration: int) -> int:
-    return max(MIN_DURATION, min(duration, MAX_DURATION))
+    if duration not in ALLOWED_DURATIONS:
+        allowed = ", ".join(str(item) for item in ALLOWED_DURATIONS)
+        raise ValueError(f"Veo duration must be one of {allowed} seconds, got {duration}")
+    return duration
 
 
 def _resolve_resolution(resolution: str) -> str:
     res = resolution.strip().upper()
-    if res in SUPPORTED_RESOLUTIONS:
-        return res
-    return "720P"
+    return SUPPORTED_RESOLUTIONS.get(res, "720p")
+
+
+def _model() -> str:
+    return get_settings().veo_model.strip() or DEFAULT_MODEL
 
 
 def _client() -> genai.Client:
@@ -78,16 +82,26 @@ def _build_config(
     aspect_ratio: str,
     resolution: str,
     reference_images: list[types.VideoGenerationReferenceImage] | None = None,
+    last_frame: types.Image | None = None,
 ) -> types.GenerateVideosConfig:
+    resolved_duration = _resolve_duration(duration)
+    resolved_resolution = _resolve_resolution(resolution)
+    if reference_images and resolved_duration != 8:
+        raise ValueError("Veo reference-image generation requires an 8-second duration")
+    if last_frame is not None and resolved_duration != 8:
+        raise ValueError("Veo first/last-frame interpolation requires an 8-second duration")
+    if resolved_resolution == "1080p" and resolved_duration != 8:
+        raise ValueError("Veo 1080p generation requires an 8-second duration")
     kwargs: dict = {
         "aspect_ratio": aspect_ratio,
-        "duration_seconds": _resolve_duration(duration),
+        "duration_seconds": resolved_duration,
         "number_of_videos": 1,
-        "resolution": _resolve_resolution(resolution),
-        "generate_audio": False,
+        "resolution": resolved_resolution,
     }
     if reference_images:
         kwargs["reference_images"] = reference_images
+    if last_frame is not None:
+        kwargs["last_frame"] = last_frame
     return types.GenerateVideosConfig(**kwargs)
 
 
@@ -122,9 +136,10 @@ async def _generate_and_download(
     on_tick: TickCallback | None = None,
 ) -> str:
     client = _client()
+    model = _model()
     operation = await asyncio.to_thread(
         client.models.generate_videos,
-        model=DEFAULT_MODEL,
+        model=model,
         prompt=prompt,
         image=image,
         config=config,
@@ -135,7 +150,7 @@ async def _generate_and_download(
         _maybe_await(on_tick({
             "kind": "gen.submit",
             "task_id": task_name,
-            "model": DEFAULT_MODEL,
+            "model": model,
             "conditioned": image is not None,
         }))
 
@@ -173,16 +188,20 @@ async def _generate_and_download(
 async def generate_variant(
     prompt: str,
     reference_frame_path: str | None = None,
+    last_frame_path: str | None = None,
     duration: int = DEFAULT_DURATION,
     aspect_ratio: str = "16:9",
     resolution: str = "720P",
     on_tick: TickCallback | None = None,
 ) -> str:
     image = _image_from_path(reference_frame_path) if reference_frame_path else None
+    if last_frame_path and image is None:
+        raise ValueError("Veo last-frame conditioning requires a first reference frame")
     config = _build_config(
         duration=duration,
         aspect_ratio=aspect_ratio,
         resolution=resolution,
+        last_frame=_image_from_path(last_frame_path) if last_frame_path else None,
     )
     return await _generate_and_download(
         prompt=prompt,

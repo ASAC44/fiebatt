@@ -170,6 +170,36 @@ From the repository root:
 
 The backend runs on port `8000` by default.
 
+## Codex plugin
+
+Fiebatt is distributed as a public Codex marketplace plugin backed by the
+hosted Fiebatt service. Users do not need to install the Python CLI or run the
+backend locally.
+
+```bash
+codex plugin marketplace add ASAC44/fiebatt
+codex plugin add fiebatt@fiebatt
+```
+
+Start a new Codex thread after installation, then ask to edit a video or invoke
+`$fiebatt-edit` explicitly. Codex opens the Fiebatt browser sign-in flow when
+authentication is required. Configure personal model-provider credentials only
+through the HTTPS Fiebatt settings page; never paste credentials into chat.
+
+To refresh an existing installation:
+
+```bash
+codex plugin marketplace upgrade fiebatt
+codex plugin add fiebatt@fiebatt
+```
+
+To remove it:
+
+```bash
+codex plugin remove fiebatt
+codex plugin marketplace remove fiebatt
+```
+
 ### Run with Docker Compose
 
 ```bash

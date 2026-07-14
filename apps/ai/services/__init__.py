@@ -104,12 +104,6 @@ if _USE_AI_STUBS:
 
 else:
     _real_settings = _get_ai_settings()
-    if not _real_settings.real_ai_ready:
-        raise RuntimeError(
-            "USE_AI_STUBS=false requires provider credentials for the live gemini/video path. "
-            "set GEMINI_API_KEY for Veo, DASHSCOPE_API_KEY for Wan/HappyHorse, "
-            "or leave USE_AI_STUBS=true for local stub mode."
-        )
 
     from app.services import storage
     from ai.services import qwen as _gemini_real

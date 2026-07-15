@@ -1,31 +1,12 @@
-# fiebatt pitch
-
-## Run of show
-
-1. Landing hero: introduce the problem and product.
-2. Landing platform/CLI section: explain why this is more than a prompt UI.
-3. Editor: send the live prompt.
-4. Landing technical diagram: explain the full pipeline while processing runs.
-5. Editor chat: show the generated response and variant.
-6. Compare view: switch original, edited, and side-by-side.
-7. Editor timeline/export: accept the result and close.
+# veoterm pitch
 
 ## Script
 
 [Screen: landing page hero. Keep the fiebatt headline and main navigation visible.]
 
-Hey everyone, this is **fiebatt**.
+Hey, this is **veoterm**.
 
-The easiest way to explain it is this:
-
-Most AI video tools are like, “Give me a prompt, I’ll make you a new video.”
-
-That’s cool, but it breaks down fast when you already have footage and you only
-want to change one specific thing.
-
-fiebatt is built for that moment.
-
-It’s a **surgical AI video editor**.
+It’s a AI video editor to make surgical edits from the terminal.
 
 Not “generate a random new clip.”
 Not “replace my whole scene.”

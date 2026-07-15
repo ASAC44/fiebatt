@@ -7,6 +7,7 @@ Everything in this folder is yours. FastAPI + Python.
 - Pydantic request/response schemas (app/schemas/)
 - Database models + migrations (app/models/)
 - Async job queue + workers (app/workers/)
+- AI provider adapters, prompts, and vision-worker clients (app/ai/)
 - Video upload, validation (reject > 2 min), storage
 - ffmpeg clip extraction, segment stitching, crossfade, fps normalization
 - Export pipeline (ffmpeg concat, async job)
@@ -29,9 +30,9 @@ Everything in this folder is yours. FastAPI + Python.
 | /api/export/{id} | GET | Poll export status |
 
 ## Key interactions
-- You import services from `apps/ai/` (Person 3) — gemini, runway, elevenlabs, entity tracker
+- Routes and workers import backend-owned integrations from `app.ai.services`
 - Web app (Person 1) consumes your API — coordinate on schema changes
 - Audio: replaced segments = muted, originals = passthrough
 
 ## Don't touch
-- `apps/web/`, `ai/services/`, `infra/`
+- `apps/frontend/`, `apps/vision-worker/`

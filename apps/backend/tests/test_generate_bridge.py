@@ -2,8 +2,8 @@ import os
 
 os.environ["USE_AI_STUBS"] = "true"
 
-from ai import services as ai  # noqa: E402
-from ai.services.provider_capabilities import (  # noqa: E402
+from app.ai import services as ai  # noqa: E402
+from app.ai.services.provider_capabilities import (  # noqa: E402
     select_video_provider,
     validate_provider_duration,
 )

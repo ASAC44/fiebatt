@@ -9,13 +9,14 @@ import json
 import sys
 import os
 
-# add project root to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add the backend package root to the import path.
+repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(repo_root, "apps", "backend"))
 
 from dotenv import load_dotenv
 load_dotenv()
 
-from ai.services.gemini import create_edit_plan, generate_narration_script
+from app.ai.services.qwen import create_edit_plan, generate_narration_script
 
 
 async def main():

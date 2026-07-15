@@ -12,7 +12,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from ai import services as ai
+from app.ai import services as ai
 from app.db.session import AsyncSessionLocal
 from app.models.entity import Entity, EntityAppearance
 from app.models.project import Project

@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ai.services.config import set_settings_overrides
+from app.ai.services.config import set_settings_overrides
 from app.api.routes.agent import OPENAI_TOOLS
 from app.auth.jwt import decode_access_token, extract_bearer
 from app.config.settings import get_settings

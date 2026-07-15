@@ -63,7 +63,7 @@ def test_concat_clips_xfade_outputs_blended_frames(tmp_path):
     )
     env = {
         **os.environ,
-        "PYTHONPATH": f"{Path.cwd() / 'apps'}:{Path.cwd() / 'apps/backend'}",
+        "PYTHONPATH": str(Path.cwd() / "apps/backend"),
     }
     subprocess.run([sys.executable, "-c", script], check=True, env=env, timeout=10)
 

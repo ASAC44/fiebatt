@@ -5,16 +5,15 @@ description: "A high-level map of the fiebatt codebase and the responsibilities 
 
 # Architecture
 
-fiebatt is organized as a multi-surface application with a Next.js editor, a backend API, AI adapters, and an optional GPU worker.
+fiebatt is organized as a multi-surface application with a Next.js editor, a backend API with internal AI adapters, and an optional vision worker.
 
 ## Repository map
 
-- `apps/web/`: Next.js route surfaces, editor UI, project browsing, landing pages, continuity UI
-- `apps/backend/`: FastAPI routes, database models, workers, media-processing pipeline
-- `apps/ai/`: provider adapters, prompts, AI-side configuration and tests
+- `apps/frontend/`: Next.js route surfaces, editor UI, project browsing, landing pages, continuity UI
+- `apps/backend/`: FastAPI routes, models, workers, media processing, and AI integrations under `app/ai/`
 - `apps/cli/`: command-line interface wrapping the backend API, includes multi-agent video analysis
-- `apps/gpu-worker/`: optional segmentation and vision-heavy worker
-- `infra/`: local and deploy infrastructure helpers
+- `apps/vision-worker/`: optional SAM2 segmentation and CLIP embedding service
+- `compose.yaml`: local and self-hosted service orchestration
 
 ## Web responsibilities
 

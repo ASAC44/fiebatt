@@ -65,7 +65,7 @@ else
   fi
 fi
 
-# backend imports both `app.*` (from apps/backend) and `ai.*` (from apps)
-export PYTHONPATH="$REPO_ROOT/apps:$REPO_ROOT/apps/backend${PYTHONPATH:+:$PYTHONPATH}"
+# The backend and its AI integrations share the `app.*` package.
+export PYTHONPATH="$REPO_ROOT/apps/backend${PYTHONPATH:+:$PYTHONPATH}"
 
 exec uvicorn app.main:app --reload --host 0.0.0.0 --port 8000

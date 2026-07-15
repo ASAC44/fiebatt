@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from ai.services.ffmpeg import sample_frames_from_clip
+from app.ai.services.ffmpeg import sample_frames_from_clip
 from app.db.session import get_db
 from app.deps import get_session
 from app.models.job import Job, Variant

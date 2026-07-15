@@ -15,11 +15,11 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: apps/web/package-lock.json
+          cache-dependency-path: apps/frontend/package-lock.json
       - run: npm ci
-        working-directory: apps/web
+        working-directory: apps/frontend
       - run: npm run build
-        working-directory: apps/web
+        working-directory: apps/frontend
 
   cli-tests:
     runs-on: ubuntu-latest
@@ -82,7 +82,7 @@ jobs:
           print("Codex plugin package is internally consistent")
           PY
 
-  backend-plugin-tests:
+  backend-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -92,4 +92,4 @@ jobs:
           cache: "pip"
           cache-dependency-path: apps/backend/requirements.txt
       - run: pip install -r apps/backend/requirements.txt
-      - run: PYTHONPATH=apps/backend:apps python -m pytest apps/backend/tests/test_plugin_api.py -q
+      - run: PYTHONPATH=apps/backend python -m pytest apps/backend/tests/ai apps/backend/tests/test_plugin_api.py -q

@@ -28,9 +28,9 @@ from urllib.parse import urlparse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ai import services as ai
-from ai.services import sam as sam_service
-from ai.services.provider_capabilities import (
+from app.ai import services as ai
+from app.ai.services import sam as sam_service
+from app.ai.services.provider_capabilities import (
     normalize_video_provider,
     select_video_provider,
 )
@@ -43,7 +43,7 @@ from app.services import ffmpeg, job_events, storage
 
 log = logging.getLogger("fiebatt.jobs.generate")
 
-from ai.services.config import get_settings as _get_ai_settings
+from app.ai.services.config import get_settings as _get_ai_settings
 _SETTINGS = _get_ai_settings()
 _PROVIDER = _SETTINGS.normalized_video_gen_provider
 _PROVIDER_LABEL = _SETTINGS.video_gen_provider_label
@@ -301,7 +301,7 @@ async def run(job_id: str) -> None:
 
         owner_session = await db.get(SessionModel, proj.session_id)
         if owner_session is not None and owner_session.user_id:
-            from ai.services.config import set_settings_overrides
+            from app.ai.services.config import set_settings_overrides
 
             set_settings_overrides(
                 await provider_overrides(db, owner_session.user_id)

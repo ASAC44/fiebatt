@@ -446,7 +446,7 @@ async def _identify_region(
 
     Mirrors the logic of POST /api/identify.
     """
-    from ai.services import gemini
+    from app.ai.services import gemini
     from app.config.settings import get_settings
 
     project_id: str = args["project_id"]
@@ -522,7 +522,7 @@ async def _generate_edit(
     if end_ts > proj.duration + 1e-3:
         raise ValueError("end_ts past project duration")
     if video_gen_provider and video_gen_provider != "auto":
-        from ai.services.provider_capabilities import validate_provider_duration
+        from app.ai.services.provider_capabilities import validate_provider_duration
 
         provider_error = validate_provider_duration(video_gen_provider, length)
         if provider_error:

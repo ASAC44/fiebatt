@@ -10,12 +10,10 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY apps/backend/requirements.txt /app/requirements.txt
+COPY requirements.txt /app/requirements.txt
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# backend code + the ai package (workers import ai.services)
-COPY apps/backend/app /app/app
-COPY apps/ai /app/ai
+COPY app /app/app
 
 RUN mkdir -p /app/storage
 

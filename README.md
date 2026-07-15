@@ -24,7 +24,7 @@ The full pipeline is captured as an Excalidraw diagram:
 
 ![fiebatt technical flow](docs/images/fiebatt-technical-flow.svg)
 
-[Open the fiebatt technical flow diagram](apps/web/public/fiebatt-technical-flow.excalidraw)
+[Open the fiebatt technical flow diagram](apps/frontend/public/fiebatt-technical-flow.excalidraw)
 
 The diagram covers the end-to-end path from editor or CLI input through project context, qwen planning, CLIP retrieval, SAM2 masking, frame inspection, localized generation, scoring, variant storage, compare, timeline refresh, continuity, and export.
 
@@ -129,11 +129,10 @@ The CLI wraps the same backend API that powers the web editor. That means an age
 
 ```text
 apps/
-  web/          Next.js app: landing page, project library, editor UI
-  backend/      FastAPI app: routes, database models, workers, export pipeline
-  ai/           AI service adapters, prompts, tests, vision/generation helpers
-  cli/          Command-line interface for scripting and agent workflows
-  gpu-worker/   Optional GPU service for SAM2 / vision helpers
+  frontend/      Next.js app: landing page, project library, editor UI
+  backend/       FastAPI app, AI adapters, prompts, workers, and tests
+  cli/           Command-line interface for scripting and agent workflows
+  vision-worker/ Optional SAM2 and CLIP inference service
 
 docs/
   demo-clips/   Demo source clips
@@ -141,9 +140,9 @@ docs/
   product/      Product docs
   reference/    API and architecture docs
 
-infra/          Docker, compose, and deployment helpers
-scripts/        Local development and smoke-test scripts
-storage/        Local development media storage
+compose.yaml     Local and self-hosted service orchestration
+scripts/         Development, deployment, and smoke-test scripts
+storage/         Local development media storage
 ```
 
 ## Local development
@@ -158,14 +157,14 @@ storage/        Local development media storage
 ### Install web dependencies
 
 ```bash
-cd apps/web
+cd apps/frontend
 npm install
 ```
 
 ### Run the web app
 
 ```bash
-cd apps/web
+cd apps/frontend
 npm run dev
 ```
 
@@ -214,13 +213,13 @@ codex plugin marketplace remove fiebatt
 ### Run with Docker Compose
 
 ```bash
-docker compose -f infra/docker-compose.yml up --build backend db
+docker compose up --build backend db
 ```
 
-If you want the optional GPU worker profile:
+If you want the optional vision-worker profile:
 
 ```bash
-docker compose -f infra/docker-compose.yml --profile gpu up --build gpu-worker
+docker compose --profile gpu up --build vision-worker
 ```
 
 ## Environment configuration
@@ -243,7 +242,7 @@ Important environment groups:
 The web app uses first-party email/password auth. Create an account at
 `/signup`, then log in at `/login`; the browser stores a JWT and sends it to
 the backend as `Authorization: Bearer <token>`.
-- GPU worker: `GPU_WORKER_URL`
+- vision worker: `VISION_WORKER_URL` (`GPU_WORKER_URL` remains a compatibility fallback)
 - provider keys: Mesh API / qwen / Gemini / DashScope / ElevenLabs keys depending on the path being tested
 
 For quick local development, `USE_AI_STUBS=true` keeps the pipeline testable without paid providers. For real generation, use `USE_AI_STUBS=false` and configure the required provider keys. If `MESH_API_KEY` is present, the agent chat loop prefers Mesh API for text planning and tool calls.
@@ -294,14 +293,14 @@ events.onmessage = (event) => console.log(JSON.parse(event.data));
 Web build:
 
 ```bash
-cd apps/web
+cd apps/frontend
 npm run build
 ```
 
-AI tests:
+Backend and AI tests:
 
 ```bash
-pytest apps/ai/tests -q
+PYTHONPATH=apps/backend pytest apps/backend/tests -q
 ```
 
 Smoke flow:
@@ -322,7 +321,7 @@ These are useful for local testing, docs, and repeatable demos.
 
 ## Notes for contributors
 
-- Keep the web app in `apps/web`; this is the only supported frontend.
+- Keep the web app in `apps/frontend`; this is the only supported frontend.
 - Prefer backend API changes that preserve the same editor and CLI flow.
 - Keep generated media, debug frames, and scratch files out of the repository unless they are intentional documentation assets.
 - If you add a new backend capability, update the Excalidraw flow diagram and this README so the product story stays accurate.

@@ -5,7 +5,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ai import services as ai
+from app.ai import services as ai
 from app.db.session import get_db
 from app.deps import get_session
 from app.models.project import Project

@@ -22,14 +22,11 @@ venv/
 *.db
 *.db-journal
 storage/
-apps/gpu-worker/checkpoints/
+apps/vision-worker/checkpoints/
 
 # typescript
 *.tsbuildinfo
 
 # personal notes (not tracked)
 iris.md
-apps/frontend/node_modules/
-apps/frontend/dist/
-apps/frontend/.vite/
 .npm-cache/

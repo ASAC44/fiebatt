@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ai.services.provider_capabilities import validate_provider_duration
+from app.ai.services.provider_capabilities import validate_provider_duration
 from app.db.session import get_db
 from app.deps import get_runner, get_session
 from app.models.job import Job

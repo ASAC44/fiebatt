@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ai.services import gemini
+from app.ai.services import gemini
 from app.services import ffmpeg as async_ffmpeg
 from app.config.settings import get_settings
 from app.db.session import get_db

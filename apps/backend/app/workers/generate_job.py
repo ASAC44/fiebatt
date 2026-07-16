@@ -5,7 +5,7 @@ Single-edit mode: one generation per prompt.
 Flow per submitted job:
   1. flip job to 'processing'
   2. extract source clip via ffmpeg
-  3. grab the reference frame + crop the bbox (image-conditioning slot)
+  3. extract a subject reference separately from full-frame boundary anchors
   4. ask Gemini for a structured edit plan (we use plan[0])
    5. run one generation (Wan or HappyHorse, per provider config), write the resulting Variant row
   6. score the result with Gemini (best-effort)
@@ -30,6 +30,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai import services as ai
 from app.ai.services import sam as sam_service
+from app.ai.services.conditioning import (
+    GenerationConditioning,
+    boundary_anchor_timestamps,
+)
 from app.ai.services.provider_capabilities import (
     normalize_video_provider,
     select_video_provider,
@@ -118,13 +122,10 @@ async def _run_variant(
     clip_path: Path,
     clip_url: str,
     plan: dict,
-    frame_path: str | None,
-    last_frame_path: str | None = None,
+    conditioning: GenerationConditioning,
     duration: float = 5,
     resolution: str = "720P",
     source_video_url: str | None = None,
-    mask_image_url: str | None = None,
-    mask_frame_id: int = 1,
 ) -> bool:
     provider = _normalize_provider(str(plan.get("_video_gen_provider") or ""))
     provider_label = _provider_label(provider)
@@ -150,10 +151,12 @@ async def _run_variant(
             )
 
     log.info(
-        "[gen.variant] START job=%s variant=%s frame=%s plan_keys=%s",
+        "[gen.variant] START job=%s variant=%s subject=%s anchors=%s/%s plan_keys=%s",
         job_id,
         variant_id,
-        "yes" if frame_path else "none (text-only)",
+        "yes" if conditioning.subject_reference_path else "no",
+        "yes" if conditioning.start_anchor_path else "no",
+        "yes" if conditioning.end_anchor_path else "no",
         sorted(plan.keys()) if isinstance(plan, dict) else "?",
     )
 
@@ -163,11 +166,12 @@ async def _run_variant(
         result = await ai.runway.generate(
             str(clip_path),
             plan,
-            frame_path=frame_path,
-            last_frame_path=last_frame_path,
+            subject_reference_path=conditioning.subject_reference_path,
+            start_anchor_path=conditioning.start_anchor_path,
+            end_anchor_path=conditioning.end_anchor_path,
             source_video_url=source_video_url,
-            mask_image_url=mask_image_url,
-            mask_frame_id=mask_frame_id,
+            mask_image_url=conditioning.mask_image_url,
+            mask_frame_id=conditioning.mask_frame_id,
             on_tick=tick,
             duration=round(duration),
             resolution=resolution,
@@ -325,6 +329,12 @@ async def run(job_id: str) -> None:
         _, sequenced_motion, _ = ai._rewrite_motion_prompt(prompt)  # type: ignore[attr-defined]
         requested_end_ts = end_ts
         clip_end_ts = requested_end_ts
+        project_fps = float(proj.fps or 1.0)
+        start_anchor_ts, end_anchor_ts = boundary_anchor_timestamps(
+            start_ts,
+            clip_end_ts,
+            project_fps,
+        )
         payload.update({
             "requested_provider": requested_provider,
             "selected_provider": video_provider,
@@ -354,6 +364,8 @@ async def run(job_id: str) -> None:
         bbox_is_full_frame=bbox_is_full_frame,
         prompt=prompt,
         reference_frame_ts=reference_frame_ts,
+        start_anchor_ts=start_anchor_ts,
+        end_anchor_ts=end_anchor_ts,
     )
 
     if bbox_is_full_frame:
@@ -367,7 +379,8 @@ async def run(job_id: str) -> None:
 
     # ---- parallel prep: extract clip + extract frame concurrently ----
     clip_tmp_path, _ = storage.new_path("clips", "mp4")
-    frame_path, _ = storage.new_path("keyframes", "jpg")
+    subject_frame_path, _ = storage.new_path("keyframes", "jpg")
+    start_anchor_path, _ = storage.new_path("keyframes", "jpg")
     end_frame_path, _ = storage.new_path("keyframes", "jpg")
 
     await _emit(
@@ -383,43 +396,73 @@ async def run(job_id: str) -> None:
         clip_url = await storage.publish(clip_tmp_path, content_type="video/mp4")
         return clip_tmp_path, clip_url
 
-    async def _do_extract_frame() -> tuple[Path, bool]:
+    async def _do_extract_subject_frame() -> tuple[Path, bool]:
         try:
-            await ffmpeg.extract_frame(proj.video_path, reference_frame_ts, frame_path)
-            await storage.publish(frame_path, content_type="image/jpeg")
-            return frame_path, True
+            await ffmpeg.extract_frame(
+                proj.video_path,
+                reference_frame_ts,
+                subject_frame_path,
+            )
+            await storage.publish(subject_frame_path, content_type="image/jpeg")
+            return subject_frame_path, True
         except Exception as e:
-            log.exception("frame extract failed (continuing without frame)")
-            await _emit(job_id, "extract_frame_error", f"couldn't grab reference frame: {e}")
-            return frame_path, False
+            log.exception("subject frame extract failed (continuing without subject reference)")
+            await _emit(
+                job_id,
+                "extract_frame_error",
+                f"couldn't grab subject reference frame: {e}",
+            )
+            return subject_frame_path, False
+
+    async def _do_extract_start_anchor() -> tuple[Path, bool]:
+        try:
+            await ffmpeg.extract_frame(
+                proj.video_path,
+                start_anchor_ts,
+                start_anchor_path,
+            )
+            await storage.publish(start_anchor_path, content_type="image/jpeg")
+            return start_anchor_path, True
+        except Exception as e:
+            log.exception("start anchor extract failed")
+            await _emit(
+                job_id,
+                "extract_start_anchor_error",
+                f"couldn't grab full-frame start anchor: {e}",
+            )
+            return start_anchor_path, False
 
     async def _do_extract_end_frame() -> tuple[Path, bool]:
-        if video_provider != "veo" or round(requested_end_ts - start_ts) != 8:
-            return end_frame_path, False
         try:
-            await ffmpeg.extract_frame(proj.video_path, requested_end_ts - 0.05, end_frame_path)
+            await ffmpeg.extract_frame(proj.video_path, end_anchor_ts, end_frame_path)
             await storage.publish(end_frame_path, content_type="image/jpeg")
             return end_frame_path, True
         except Exception as e:
-            log.exception("end frame extract failed (continuing with first frame only)")
-            await _emit(job_id, "extract_end_frame_error", f"couldn't grab end frame: {e}")
+            log.exception("end anchor extract failed")
+            await _emit(
+                job_id,
+                "extract_end_frame_error",
+                f"couldn't grab full-frame end anchor: {e}",
+            )
             return end_frame_path, False
 
     clip_task = asyncio.create_task(_do_extract_clip())
-    frame_task = asyncio.create_task(_do_extract_frame())
+    subject_frame_task = asyncio.create_task(_do_extract_subject_frame())
+    start_anchor_task = asyncio.create_task(_do_extract_start_anchor())
     end_frame_task = asyncio.create_task(_do_extract_end_frame())
 
-    # frame is needed for plan_variants — wait for it first
-    frame_path, frame_ok = await frame_task
+    # Subject frame is needed for plan_variants; anchors remain full-frame.
+    subject_frame_path, subject_frame_ok = await subject_frame_task
+    start_anchor_path, start_anchor_ok = await start_anchor_task
     end_frame_path, end_frame_ok = await end_frame_task
-    conditioning_frame = str(frame_path) if frame_ok else None
-    conditioning_end_frame = str(end_frame_path) if end_frame_ok else None
+    conditioning_start_anchor = str(start_anchor_path) if start_anchor_ok else None
+    conditioning_end_anchor = str(end_frame_path) if end_frame_ok else None
 
     # crop the bbox for Gemini reference while plan runs
     crop_path: Path | None = None
-    if frame_ok and bbox and not bbox_is_full_frame:
+    if subject_frame_ok and bbox and not bbox_is_full_frame:
         try:
-            crop_path = await ffmpeg.crop_bbox_from_frame(frame_path, bbox)
+            crop_path = await ffmpeg.crop_bbox_from_frame(subject_frame_path, bbox)
             await storage.publish(crop_path, content_type="image/png")
             await _emit(
                 job_id,
@@ -448,13 +491,16 @@ async def run(job_id: str) -> None:
     mask_path: str | None = None
     mask_image_url: str | None = None
     subject_reference_path: str | None = None
-    if frame_ok and bbox and not bbox_is_full_frame:
+    if subject_frame_ok and bbox and not bbox_is_full_frame:
         try:
             if await sam_service.is_available():
-                mask_path = await sam_service.bbox_to_mask(str(frame_path), bbox)
+                mask_path = await sam_service.bbox_to_mask(
+                    str(subject_frame_path),
+                    bbox,
+                )
                 mask_image_url = await storage.publish(Path(mask_path), content_type="image/png")
                 subject_reference_path = sam_service.create_subject_reference(
-                    str(frame_path),
+                    str(subject_frame_path),
                     mask_path,
                 )
                 await storage.publish(Path(subject_reference_path), content_type="image/png")
@@ -480,7 +526,14 @@ async def run(job_id: str) -> None:
     )
 
     # start Gemini plan while clip finishes in background
-    plan_task = asyncio.create_task(ai.gemini.plan_variants(prompt, bbox, str(frame_path)))
+    planning_frame_path = (
+        str(subject_frame_path)
+        if subject_frame_ok
+        else (conditioning_start_anchor or "")
+    )
+    plan_task = asyncio.create_task(
+        ai.gemini.plan_variants(prompt, bbox, planning_frame_path)
+    )
     clip_path, clip_url = await clip_task  # should be done by now
     try:
         plans = await plan_task
@@ -501,13 +554,16 @@ async def run(job_id: str) -> None:
     plan["_video_gen_provider"] = video_provider
 
     intent = str(plan.get("intent") or "").lower()
-    strategy = "first_frame"
-
-    conditioning_frame_effective: str | None = (
+    subject_reference_effective: str | None = (
         subject_reference_path
         or (str(crop_path) if crop_path is not None else None)
-        or conditioning_frame
     )
+    if video_provider in {"wan", "happyhorse"}:
+        strategy = "source_video_with_subject_reference"
+    elif video_provider == "veo" and abs(edit_duration - 8.0) <= 0.05:
+        strategy = "first_last_boundary_frames"
+    else:
+        strategy = "start_boundary_frame"
 
     safe_plan = {
         "description": plan.get("description"),
@@ -534,22 +590,34 @@ async def run(job_id: str) -> None:
         variant_id = v.id
         await db.commit()
 
-    if subject_reference_path:
-        conditioned_on = "SAM-isolated subject reference"
-    elif crop_path is not None:
-        conditioned_on = "bbox crop fallback"
-    elif conditioning_frame_effective:
-        conditioned_on = "full frame"
-    else:
-        conditioned_on = "text_only (scene regenerated from prose)"
-
     source_video_url = _public_url_or_none(clip_url)
     mask_public_url = _public_url_or_none(mask_image_url or "")
-    project_fps = float(proj.fps or 1.0)
     mask_frame_id = min(
         round(edit_duration * project_fps) + 1,
         max(1, round(max(0.0, reference_frame_ts - start_ts) * project_fps) + 1),
     )
+    generation_conditioning = GenerationConditioning(
+        subject_reference_path=subject_reference_effective,
+        subject_reference_timestamp=(
+            reference_frame_ts if subject_reference_effective else None
+        ),
+        mask_image_url=(
+            mask_public_url
+            if video_provider == "wan" and edit_duration <= 5.001
+            else None
+        ),
+        mask_frame_id=mask_frame_id,
+        start_anchor_path=conditioning_start_anchor,
+        start_anchor_timestamp=(start_anchor_ts if conditioning_start_anchor else None),
+        end_anchor_path=conditioning_end_anchor,
+        end_anchor_timestamp=(end_anchor_ts if conditioning_end_anchor else None),
+    )
+    conditioned_on = {
+        "subject_reference": subject_reference_effective is not None,
+        "source_video": source_video_url is not None,
+        "start_anchor": conditioning_start_anchor is not None,
+        "end_anchor": conditioning_end_anchor is not None,
+    }
     warnings: list[str] = []
     if video_provider in {"wan", "happyhorse"} and source_video_url is None:
         warnings.append(
@@ -563,11 +631,16 @@ async def run(job_id: str) -> None:
         warnings.append(
             "SAM mask is not provider-accessible; using the isolated SAM subject reference"
         )
+    if video_provider in {"veo", "meshapi_veo"} and conditioning_start_anchor is None:
+        warnings.append(
+            f"{video_provider} start boundary anchor is unavailable; using text-only generation"
+        )
     async with AsyncSessionLocal() as db:
         current_job = await db.get(Job, job_id)
         if current_job is not None:
             current_payload = dict(current_job.payload or {})
             current_payload["warnings"] = warnings
+            current_payload["conditioning"] = generation_conditioning.metadata()
             current_job.payload = current_payload
             await db.commit()
 
@@ -589,13 +662,10 @@ async def run(job_id: str) -> None:
         clip_path=clip_path,
         clip_url=clip_url,
         plan={**plan, "_edit_prompt": prompt},
-        frame_path=conditioning_frame_effective,
-        last_frame_path=conditioning_end_frame,
+        conditioning=generation_conditioning,
         duration=edit_duration,
         resolution=generation_resolution,
         source_video_url=source_video_url,
-        mask_image_url=mask_public_url if edit_duration <= 5.001 else None,
-        mask_frame_id=mask_frame_id,
     )
 
     # collect outcome
@@ -660,13 +730,10 @@ async def run(job_id: str) -> None:
             clip_path=clip_path,
             clip_url=clip_url,
             plan={**plan, "_edit_prompt": prompt + correction},
-            frame_path=conditioning_frame_effective,
-            last_frame_path=conditioning_end_frame,
+            conditioning=generation_conditioning,
             duration=edit_duration,
             resolution=generation_resolution,
             source_video_url=source_video_url,
-            mask_image_url=mask_public_url if edit_duration <= 5.001 else None,
-            mask_frame_id=mask_frame_id,
         )
         async with AsyncSessionLocal() as db:
             retried = await db.get(Variant, variant_id)

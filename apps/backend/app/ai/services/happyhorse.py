@@ -207,6 +207,54 @@ async def _download_video(url: str, output_path: Path) -> Path:
     ) from last_error
 
 
+def _build_generation_payload(
+    prompt: str,
+    reference_frame_path: str | None = None,
+    source_video_url: str | None = None,
+    duration: int = DEFAULT_DURATION,
+    aspect_ratio: str = "16:9",
+    resolution: str = "720P",
+) -> tuple[str, dict, int]:
+    """Build a request with semantic reference or first-frame media."""
+    duration_sec = _resolve_duration(duration)
+    res = _resolve_resolution(resolution)
+    params = {"resolution": res, "watermark": False, "audio_setting": "origin"}
+    if source_video_url:
+        model = DEFAULT_VIDEO_EDIT_MODEL
+        media = [{"type": "video", "url": source_video_url}]
+        if reference_frame_path:
+            media.append(
+                {
+                    "type": "reference_image",
+                    "url": _image_to_base64(reference_frame_path),
+                }
+            )
+        payload = {
+            "input": {"prompt": prompt, "media": media},
+            "parameters": params,
+        }
+    else:
+        params.update({"ratio": aspect_ratio, "duration": duration_sec})
+        if reference_frame_path:
+            model = DEFAULT_I2V_MODEL
+            payload = {
+                "input": {
+                    "prompt": prompt,
+                    "media": [
+                        {
+                            "type": "first_frame",
+                            "url": _image_to_base64(reference_frame_path),
+                        },
+                    ],
+                },
+                "parameters": params,
+            }
+        else:
+            model = DEFAULT_T2V_MODEL
+            payload = {"input": {"prompt": prompt}, "parameters": params}
+    return model, payload, duration_sec
+
+
 @tracked("happyhorse", "generate_variant")
 async def generate_variant(
     prompt: str,
@@ -221,8 +269,8 @@ async def generate_variant(
 
     Args:
         prompt: Structured prompt from the edit plan
-        reference_frame_path: Optional path to reference frame (image conditioning).
-            For bbox spatial grounding, pass the cropped bbox region.
+        reference_frame_path: Isolated subject reference for source-video edits,
+            or full-frame start boundary for image-to-video generation.
         duration: Duration in seconds (3-15)
         aspect_ratio: "16:9", "9:16", "1:1", etc.
         resolution: "720P" or "480P" — 480P is ~2x faster for previews
@@ -235,38 +283,14 @@ async def generate_variant(
     if not api_key:
         raise RuntimeError("DASHSCOPE_API_KEY not configured — required for HappyHorse video generation")
 
-    duration_sec = _resolve_duration(duration)
-    res = _resolve_resolution(resolution)
-
-    params = {"resolution": res, "watermark": False, "audio_setting": "origin"}
-    if source_video_url:
-        # Video-edit keeps the original motion/camera path and edits within
-        # the supplied window. This is substantially more temporally stable
-        # than regenerating the same window from one still first frame.
-        model = DEFAULT_VIDEO_EDIT_MODEL
-        media = [{"type": "video", "url": source_video_url}]
-        if reference_frame_path:
-            media.append({"type": "reference_image", "url": _image_to_base64(reference_frame_path)})
-        payload = {
-            "input": {"prompt": prompt, "media": media},
-            "parameters": params,
-        }
-    else:
-        params.update({"ratio": aspect_ratio, "duration": duration_sec})
-        if reference_frame_path:
-            model = DEFAULT_I2V_MODEL
-            payload = {
-                "input": {
-                    "prompt": prompt,
-                    "media": [
-                        {"type": "first_frame", "url": _image_to_base64(reference_frame_path)},
-                    ],
-                },
-                "parameters": params,
-            }
-        else:
-            model = DEFAULT_T2V_MODEL
-            payload = {"input": {"prompt": prompt}, "parameters": params}
+    model, payload, duration_sec = _build_generation_payload(
+        prompt=prompt,
+        reference_frame_path=reference_frame_path,
+        source_video_url=source_video_url,
+        duration=duration,
+        aspect_ratio=aspect_ratio,
+        resolution=resolution,
+    )
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         task_id = await _submit_task(client, api_key, model, payload)

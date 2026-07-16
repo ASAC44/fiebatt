@@ -128,6 +128,9 @@ async def _runway_generate(
     style_ref: str | None = None,
     frame_path: str | None = None,  # noqa: ARG001 — mirrors real adapter signature
     last_frame_path: str | None = None,  # noqa: ARG001
+    subject_reference_path: str | None = None,  # noqa: ARG001
+    start_anchor_path: str | None = None,  # noqa: ARG001
+    end_anchor_path: str | None = None,  # noqa: ARG001
     source_video_url: str | None = None,  # noqa: ARG001
     mask_image_url: str | None = None,  # noqa: ARG001
     mask_frame_id: int = 1,  # noqa: ARG001

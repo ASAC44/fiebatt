@@ -34,6 +34,10 @@ from pathlib import Path
 
 from app.ai.services import _stubs
 from app.ai.services import sam
+from app.ai.services.conditioning import (
+    GenerationConditioning,
+    route_provider_conditioning,
+)
 from app.ai.services.config import get_settings as _get_ai_settings
 
 
@@ -220,6 +224,9 @@ else:
         style_ref: str | None = None,
         frame_path: str | None = None,
         last_frame_path: str | None = None,
+        subject_reference_path: str | None = None,
+        start_anchor_path: str | None = None,
+        end_anchor_path: str | None = None,
         source_video_url: str | None = None,
         mask_image_url: str | None = None,
         mask_frame_id: int = 1,
@@ -235,7 +242,6 @@ else:
             or plan.get("description", "")
         )
         provider = str(plan.get("_video_gen_provider") or _real_settings.normalized_video_gen_provider)
-        conditioning = frame_path or style_ref
         motion_edit, _, prompt_text = _rewrite_motion_prompt(prompt_text)
         effective_source_video_url = source_video_url
         if motion_edit:
@@ -244,12 +250,33 @@ else:
             if provider not in {"wan", "happyhorse"}:
                 effective_source_video_url = None
 
+        # ``frame_path``/``last_frame_path`` remain compatibility aliases for
+        # older callers. New callers must use semantic subject/boundary names.
+        subject_path = subject_reference_path
+        first_path = start_anchor_path
+        if frame_path and subject_path is None and first_path is None:
+            if provider in {"veo", "meshapi_veo"} or not effective_source_video_url:
+                first_path = frame_path
+            else:
+                subject_path = frame_path
+        conditioning = GenerationConditioning(
+            subject_reference_path=subject_path,
+            start_anchor_path=first_path,
+            end_anchor_path=end_anchor_path or last_frame_path,
+        )
+        routed = route_provider_conditioning(
+            provider,
+            conditioning,
+            source_video=effective_source_video_url is not None,
+            duration=duration,
+        )
+
         if provider == "wan":
             if style_ref:
                 out_path = await _wan.generate_propagation_variant(
                     prompt=prompt_text,
                     style_reference_path=style_ref,
-                    reference_frame_path=frame_path,
+                    reference_frame_path=conditioning.subject_reference_path,
                     duration=duration,
                     resolution=resolution,
                 )
@@ -270,14 +297,14 @@ else:
                 out_path = await _wan.generate_edit_variant(
                     prompt=prompt_text,
                     source_video_url=effective_source_video_url,
-                    reference_frame_path=conditioning,
+                    reference_frame_path=routed.subject_reference_path,
                     on_tick=on_tick,
                     resolution=resolution,
                 )
             else:
                 out_path = await _wan.generate_variant(
                     prompt=prompt_text,
-                    reference_frame_path=conditioning,
+                    reference_frame_path=routed.first_frame_path,
                     on_tick=on_tick,
                     duration=duration,
                     resolution=resolution,
@@ -287,15 +314,15 @@ else:
                 out_path = await _veo.generate_propagation_variant(
                     prompt=prompt_text,
                     style_reference_path=style_ref,
-                    reference_frame_path=frame_path,
+                    reference_frame_path=conditioning.subject_reference_path,
                     duration=duration,
                     resolution=resolution,
                 )
             else:
                 out_path = await _veo.generate_variant(
                     prompt=prompt_text,
-                    reference_frame_path=conditioning,
-                    last_frame_path=last_frame_path,
+                    reference_frame_path=routed.first_frame_path,
+                    last_frame_path=routed.last_frame_path,
                     on_tick=on_tick,
                     duration=duration,
                     resolution=resolution,
@@ -305,14 +332,14 @@ else:
                 out_path = await _meshapi_veo.generate_propagation_variant(
                     prompt=prompt_text,
                     style_reference_path=style_ref,
-                    reference_frame_path=frame_path,
+                    reference_frame_path=conditioning.subject_reference_path,
                     duration=duration,
                     resolution=resolution,
                 )
             else:
                 out_path = await _meshapi_veo.generate_variant(
                     prompt=prompt_text,
-                    reference_frame_path=conditioning,
+                    reference_frame_path=routed.first_frame_path,
                     on_tick=on_tick,
                     duration=duration,
                     resolution=resolution,
@@ -322,7 +349,7 @@ else:
                 out_path = await _happyhorse.generate_propagation_variant(
                     prompt=prompt_text,
                     style_reference_path=style_ref,
-                    reference_frame_path=frame_path,
+                    reference_frame_path=conditioning.subject_reference_path,
                     duration=duration,
                     resolution=resolution,
                 )
@@ -330,7 +357,7 @@ else:
                 if effective_source_video_url:
                     target = (
                         "the exact subject isolated in the reference image"
-                        if conditioning
+                        if routed.subject_reference_path
                         else "the subject named in the request"
                     )
                     prompt_text = (
@@ -344,7 +371,9 @@ else:
                     )
                 out_path = await _happyhorse.generate_variant(
                     prompt=prompt_text,
-                    reference_frame_path=conditioning,
+                    reference_frame_path=(
+                        routed.subject_reference_path or routed.first_frame_path
+                    ),
                     source_video_url=effective_source_video_url,
                     on_tick=on_tick,
                     duration=duration,

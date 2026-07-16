@@ -52,3 +52,6 @@ class Project(Base):
     selection_artifacts: Mapped[list["SelectionArtifact"]] = relationship(  # noqa: F821
         back_populates="project", cascade="all, delete-orphan"
     )
+    edit_plans: Mapped[list["EditPlanRecord"]] = relationship(  # noqa: F821
+        back_populates="project", cascade="all, delete-orphan"
+    )

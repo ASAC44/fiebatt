@@ -9,13 +9,22 @@ from app.deps import get_session
 from app.models.entity import Entity, EntityAppearance
 from app.models.job import Job, Variant
 from app.models.project import Project
-from app.models.propagation import GlobalEditPlan
+from app.models.propagation import (
+    GlobalEditPlan,
+    GlobalGenerationChunk,
+    GlobalOccurrencePlan,
+)
 from app.models.segment import Segment
 from app.models.session import Session as SessionModel
 from app.schemas.propagate import (
     GlobalEditPlanOut,
     GlobalEditPlanRequest,
+    PlannedChunkOut,
     PlannedOccurrenceOut,
+)
+from app.services.global_chunk_planner import (
+    plan_occurrence_chunks,
+    split_evidence_from_track_frames,
 )
 
 
@@ -26,6 +35,17 @@ async def _plan_response(
     db: AsyncSession,
     plan: GlobalEditPlan,
 ) -> GlobalEditPlanOut:
+    plan = (
+        await db.execute(
+            select(GlobalEditPlan)
+            .where(GlobalEditPlan.id == plan.id)
+            .options(
+                selectinload(GlobalEditPlan.occurrence_plans).selectinload(
+                    GlobalOccurrencePlan.chunks
+                )
+            )
+        )
+    ).scalar_one()
     appearances = (
         await db.execute(
             select(EntityAppearance)
@@ -33,21 +53,37 @@ async def _plan_response(
             .order_by(EntityAppearance.start_ts)
         )
     ).scalars().all()
+    appearance_by_id = {appearance.id: appearance for appearance in appearances}
     return GlobalEditPlanOut(
         plan_id=plan.id,
         project_id=plan.project_id,
         entity_id=plan.entity_id,
         reference_segment_id=plan.reference_segment_id,
         scope=plan.scope,
+        requested_provider=plan.requested_provider,
         prompt=plan.prompt,
         occurrences=[
             PlannedOccurrenceOut(
-                appearance_id=appearance.id,
-                start_ts=appearance.start_ts,
-                end_ts=appearance.end_ts,
-                confidence=appearance.confidence,
+                appearance_id=occurrence_plan.appearance_id,
+                start_ts=appearance_by_id[occurrence_plan.appearance_id].start_ts,
+                end_ts=appearance_by_id[occurrence_plan.appearance_id].end_ts,
+                confidence=appearance_by_id[occurrence_plan.appearance_id].confidence,
+                chunks=[
+                    PlannedChunkOut(
+                        chunk_id=chunk.id,
+                        index=chunk.index,
+                        edit_start=chunk.edit_start,
+                        edit_end=chunk.edit_end,
+                        context_start=chunk.context_start,
+                        context_end=chunk.context_end,
+                        provider=chunk.provider,
+                        split_reason=chunk.split_reason,
+                        status=chunk.status,
+                    )
+                    for chunk in occurrence_plan.chunks
+                ],
             )
-            for appearance in appearances
+            for occurrence_plan in plan.occurrence_plans
         ],
         estimate=plan.estimate_json,
         status=plan.status,
@@ -91,9 +127,12 @@ async def create_global_edit_plan(
     source_job = await db.get(Job, variant.job_id) if variant is not None else None
     if variant is None or not variant.url or source_job is None or not source_job.prompt:
         raise HTTPException(status_code=422, detail="accepted reference variant is unavailable")
-    if not entity.occurrence_tracks or not any(
-        track.status == "confirmed" for track in entity.occurrence_tracks
-    ):
+    current_tracks = [
+        track
+        for track in entity.occurrence_tracks
+        if track.status == "confirmed" and track.source_revision == project.video_url
+    ]
+    if not current_tracks:
         raise HTTPException(status_code=422, detail="entity has no confirmed occurrence tracks")
 
     appearance_by_id = {appearance.id: appearance for appearance in entity.appearances}
@@ -109,31 +148,106 @@ async def create_global_edit_plan(
     if not selected:
         raise HTTPException(status_code=422, detail="entity has no confirmed occurrences")
 
-    total_seconds = sum(
-        max(0.0, appearance.end_ts - appearance.start_ts) for appearance in selected
-    )
-    estimate = {
-        "occurrence_count": len(selected),
-        "expected_generation_calls": len(selected),
-        "expected_generated_seconds": round(total_seconds, 3),
-        "mean_track_confidence": round(
-            sum(appearance.confidence for appearance in selected) / len(selected), 3
-        ),
-        "reference_accepted": True,
-    }
     plan = GlobalEditPlan(
         project_id=project.id,
         entity_id=entity.id,
         reference_segment_id=segment.id,
         reference_variant_id=variant.id,
         scope=body.scope,
+        requested_provider=body.video_gen_provider,
         occurrence_ids_json=[appearance.id for appearance in selected],
-        estimate_json=estimate,
+        estimate_json={},
         prompt=source_job.prompt,
         source_revision=project.video_url,
         status="ready",
     )
     db.add(plan)
+    await db.flush()
+
+    generation_calls = 0
+    generated_seconds = 0.0
+    for index, appearance in enumerate(sorted(selected, key=lambda item: item.start_ts)):
+        matching_tracks = [
+            track
+            for track in current_tracks
+            if track.end_ts > appearance.start_ts and track.start_ts < appearance.end_ts
+        ]
+        if not matching_tracks:
+            raise HTTPException(
+                status_code=422,
+                detail=f"occurrence {appearance.id} has no current confirmed track",
+            )
+        track_frames = sorted(
+            (
+                frame
+                for track in matching_tracks
+                for frame in (track.frames_json or [])
+            ),
+            key=lambda frame: float(frame.get("timestamp") or 0.0),
+        )
+        try:
+            chunks = plan_occurrence_chunks(
+                occurrence_start=appearance.start_ts,
+                occurrence_end=appearance.end_ts,
+                project_duration=project.duration,
+                requested_provider=body.video_gen_provider,
+                split_evidence=split_evidence_from_track_frames(track_frames),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        occurrence_plan = GlobalOccurrencePlan(
+            global_plan_id=plan.id,
+            appearance_id=appearance.id,
+            index=index,
+            edit_start=appearance.start_ts,
+            edit_end=appearance.end_ts,
+            estimate_json={
+                "generation_calls": len(chunks),
+                "generated_seconds": round(
+                    sum(chunk.context_duration for chunk in chunks), 3
+                ),
+            },
+            status="planned",
+        )
+        db.add(occurrence_plan)
+        await db.flush()
+        for chunk in chunks:
+            chunk_frames = [
+                frame
+                for frame in track_frames
+                if chunk.context_start
+                <= float(frame.get("timestamp") or 0.0)
+                <= chunk.context_end
+            ]
+            db.add(
+                GlobalGenerationChunk(
+                    occurrence_plan_id=occurrence_plan.id,
+                    index=chunk.index,
+                    edit_start=chunk.edit_start,
+                    edit_end=chunk.edit_end,
+                    context_start=chunk.context_start,
+                    context_end=chunk.context_end,
+                    provider=chunk.provider,
+                    split_reason=chunk.split_reason,
+                    payload_json={
+                        "track_ids": [track.id for track in matching_tracks],
+                        "track_frames": chunk_frames,
+                    },
+                    status="planned",
+                )
+            )
+        generation_calls += len(chunks)
+        generated_seconds += sum(chunk.context_duration for chunk in chunks)
+
+    plan.estimate_json = {
+        "occurrence_count": len(selected),
+        "expected_generation_calls": generation_calls,
+        "expected_generated_seconds": round(generated_seconds, 3),
+        "mean_track_confidence": round(
+            sum(appearance.confidence for appearance in selected) / len(selected), 3
+        ),
+        "reference_accepted": True,
+    }
     await db.commit()
     await db.refresh(plan)
     return await _plan_response(db, plan)

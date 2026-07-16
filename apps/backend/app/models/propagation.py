@@ -1,7 +1,18 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, JSON, Text, func
+from sqlalchemy import (
+    Float,
+    Integer,
+    String,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    JSON,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -84,6 +95,7 @@ class GlobalEditPlan(Base):
         unique=True,
     )
     scope: Mapped[str] = mapped_column(String)
+    requested_provider: Mapped[str] = mapped_column(String, default="auto")
     occurrence_ids_json: Mapped[list[str]] = mapped_column(JSON)
     estimate_json: Mapped[dict] = mapped_column(JSON)
     prompt: Mapped[str] = mapped_column(Text)
@@ -91,4 +103,74 @@ class GlobalEditPlan(Base):
     status: Mapped[str] = mapped_column(String, default="ready")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+    occurrence_plans: Mapped[list["GlobalOccurrencePlan"]] = relationship(
+        back_populates="global_plan",
+        cascade="all, delete-orphan",
+        order_by="GlobalOccurrencePlan.index",
+    )
+
+
+class GlobalOccurrencePlan(Base):
+    __tablename__ = "global_occurrence_plans"
+    __table_args__ = (
+        UniqueConstraint(
+            "global_plan_id",
+            "appearance_id",
+            name="uq_global_plan_appearance",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    global_plan_id: Mapped[str] = mapped_column(
+        String, ForeignKey("global_edit_plans.id", ondelete="CASCADE"), index=True
+    )
+    appearance_id: Mapped[str] = mapped_column(
+        String, ForeignKey("entity_appearances.id", ondelete="CASCADE")
+    )
+    index: Mapped[int] = mapped_column(Integer)
+    edit_start: Mapped[float] = mapped_column(Float)
+    edit_end: Mapped[float] = mapped_column(Float)
+    estimate_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String, default="planned")
+
+    global_plan: Mapped["GlobalEditPlan"] = relationship(
+        back_populates="occurrence_plans"
+    )
+    chunks: Mapped[list["GlobalGenerationChunk"]] = relationship(
+        back_populates="occurrence_plan",
+        cascade="all, delete-orphan",
+        order_by="GlobalGenerationChunk.index",
+    )
+
+
+class GlobalGenerationChunk(Base):
+    __tablename__ = "global_generation_chunks"
+    __table_args__ = (
+        UniqueConstraint(
+            "occurrence_plan_id",
+            "index",
+            name="uq_global_occurrence_chunk_index",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    occurrence_plan_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("global_occurrence_plans.id", ondelete="CASCADE"),
+        index=True,
+    )
+    index: Mapped[int] = mapped_column(Integer)
+    edit_start: Mapped[float] = mapped_column(Float)
+    edit_end: Mapped[float] = mapped_column(Float)
+    context_start: Mapped[float] = mapped_column(Float)
+    context_end: Mapped[float] = mapped_column(Float)
+    provider: Mapped[str] = mapped_column(String)
+    split_reason: Mapped[str] = mapped_column(String, default="provider_limit")
+    payload_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String, default="planned")
+
+    occurrence_plan: Mapped["GlobalOccurrencePlan"] = relationship(
+        back_populates="chunks"
     )

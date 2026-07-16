@@ -12,7 +12,12 @@ from app.main import app
 from app.models.entity import Entity, EntityAppearance, OccurrenceCandidate, OccurrenceTrack
 from app.models.job import Job, Variant
 from app.models.project import Project
-from app.models.propagation import GlobalEditPlan, PropagationResult
+from app.models.propagation import (
+    GlobalEditPlan,
+    GlobalGenerationChunk,
+    GlobalOccurrencePlan,
+    PropagationResult,
+)
 from app.models.segment import Segment
 
 
@@ -146,7 +151,7 @@ async def global_api(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_global_plan_is_non_generating_and_estimates_selected_work(global_api):
-    client, _, runner, context = global_api
+    client, sessions, runner, context = global_api
     response = await client.post(
         "/api/global-edit-plans",
         headers={"X-Session-Id": "global-owner"},
@@ -165,9 +170,24 @@ async def test_global_plan_is_non_generating_and_estimates_selected_work(global_
         context["appearance_ids"][1]
     ]
     assert body["estimate"]["occurrence_count"] == 1
-    assert body["estimate"]["expected_generated_seconds"] == 4.0
+    assert body["estimate"]["expected_generation_calls"] == 1
+    assert body["estimate"]["expected_generated_seconds"] == 5.5
     assert body["estimate"]["reference_accepted"] is True
+    assert body["requested_provider"] == "auto"
+    assert len(body["occurrences"][0]["chunks"]) == 1
+    chunk = body["occurrences"][0]["chunks"][0]
+    assert chunk["provider"] == "wan"
+    assert chunk["edit_start"] == 18.0
+    assert chunk["edit_end"] == 22.0
     assert runner.submissions == []
+
+    async with sessions() as db:
+        occurrence_plans = (
+            await db.execute(select(GlobalOccurrencePlan))
+        ).scalars().all()
+        chunks = (await db.execute(select(GlobalGenerationChunk))).scalars().all()
+        assert len(occurrence_plans) == 1
+        assert len(chunks) == 1
 
 
 @pytest.mark.asyncio
@@ -186,6 +206,26 @@ async def test_global_plan_rejects_foreign_occurrence(global_api):
 
     assert response.status_code == 422
     assert "does not belong" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_global_plan_rejects_image_conditioned_provider(global_api):
+    client, _, runner, context = global_api
+    response = await client.post(
+        "/api/global-edit-plans",
+        headers={"X-Session-Id": "global-owner"},
+        json={
+            "entity_id": context["entity_id"],
+            "reference_segment_id": context["segment_id"],
+            "scope": "selected_occurrences",
+            "occurrence_ids": [context["appearance_ids"][0]],
+            "video_gen_provider": "veo",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "cannot preserve source-video motion" in response.json()["detail"]
+    assert runner.submissions == []
 
 
 @pytest.mark.asyncio

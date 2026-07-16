@@ -39,6 +39,21 @@ class GlobalEditPlanRequest(BaseModel):
     reference_segment_id: str
     scope: Literal["selected_occurrences", "all_occurrences"] = "all_occurrences"
     occurrence_ids: list[str] = Field(default_factory=list)
+    video_gen_provider: Literal[
+        "auto", "wan", "happyhorse", "veo", "meshapi_veo"
+    ] = "auto"
+
+
+class PlannedChunkOut(BaseModel):
+    chunk_id: str
+    index: int
+    edit_start: float
+    edit_end: float
+    context_start: float
+    context_end: float
+    provider: str
+    split_reason: str
+    status: str
 
 
 class PlannedOccurrenceOut(BaseModel):
@@ -46,6 +61,7 @@ class PlannedOccurrenceOut(BaseModel):
     start_ts: float
     end_ts: float
     confidence: float
+    chunks: list[PlannedChunkOut] = Field(default_factory=list)
 
 
 class GlobalEditPlanOut(BaseModel):
@@ -54,6 +70,7 @@ class GlobalEditPlanOut(BaseModel):
     entity_id: str
     reference_segment_id: str
     scope: str
+    requested_provider: str
     prompt: str
     occurrences: list[PlannedOccurrenceOut]
     estimate: dict

@@ -36,6 +36,7 @@ export type RevealSession = {
   canGenerate: boolean;
   logs: GenerationLogEntry[];
   runLabel?: string;
+  notice?: string | null;
   run: () => Promise<boolean>;
   acceptVariant: (idx: number) => Promise<boolean>;
   clearSession: () => void;
@@ -64,6 +65,7 @@ export function GenerationReveal({
     canGenerate,
     logs,
     runLabel,
+    notice,
     run,
     acceptVariant,
     clearSession,
@@ -225,6 +227,7 @@ export function GenerationReveal({
             </button>
           )}
         </div>
+        {notice ? <p className="reveal__notice mono">{notice}</p> : null}
       </div>
 
       {err && (

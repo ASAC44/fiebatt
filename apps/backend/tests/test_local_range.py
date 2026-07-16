@@ -98,3 +98,41 @@ async def test_resolver_inspects_local_frames_and_reuses_cache(tmp_path):
     assert max(extracted) - min(extracted) <= 7.01
     assert len(extracted) < project.duration * 4
     assert tracker_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_resolver_falls_back_when_video_tracker_is_unavailable(tmp_path):
+    clear_local_range_cache()
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"unused")
+    project = SimpleNamespace(video_path=str(source), video_url="", duration=20.0)
+    selection = SimpleNamespace(
+        id="selection-fallback",
+        source_revision="revision-fallback",
+        frame_ts=10.0,
+        bbox_json={"x": 0.2, "y": 0.1, "w": 0.3, "h": 0.7},
+        mask_url=None,
+    )
+    intent = EditIntent(
+        raw_prompt="make this person jump",
+        change_type="motion",
+        estimated_action_seconds=3.5,
+    )
+
+    async def fake_extract(_source, _timestamp, output):
+        cv2.imwrite(str(output), np.full((36, 64, 3), 80, dtype=np.uint8))
+        return output
+
+    async def unavailable_tracker(*args, **kwargs):
+        raise ConnectionError("vision worker offline")
+
+    result = await resolve_local_range(
+        project,
+        selection,
+        intent,
+        extract_frame=fake_extract,
+        track_frames=unavailable_tracker,
+    )
+
+    assert result.edit_core.duration == pytest.approx(3.5)
+    assert any("bbox fallback used" in warning for warning in result.warnings)

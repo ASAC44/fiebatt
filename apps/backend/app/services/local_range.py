@@ -214,15 +214,31 @@ async def resolve_local_range(
             await extract_frame(source, timestamp, path)
             frame_paths.append(str(path))
         shot_start, shot_end = detect_shot_span(frame_paths, timestamps, seed_index)
-        track = await track_frames(
-            frame_paths,
-            seed_frame_index=seed_index,
-            bbox=selection.bbox_json,
-            seed_mask_path=seed_mask_path,
-            max_frames=len(frame_paths),
-            max_seconds=PERSISTENT_TRACK_BUDGET_SECONDS,
-            include_masks=False,
-        )
+        try:
+            track = await track_frames(
+                frame_paths,
+                seed_frame_index=seed_index,
+                bbox=selection.bbox_json,
+                seed_mask_path=seed_mask_path,
+                max_frames=len(frame_paths),
+                max_seconds=PERSISTENT_TRACK_BUDGET_SECONDS,
+                include_masks=False,
+            )
+        except Exception as exc:
+            track = sam.TrackResult(
+                tracker="bbox_fallback",
+                frames=[
+                    {
+                        "frame_index": index,
+                        "state": "tracked",
+                        "confidence": 0.0,
+                    }
+                    for index in range(len(frame_paths))
+                ],
+                processed_start_index=0,
+                processed_end_index=len(frame_paths) - 1,
+                warning=f"video tracking unavailable; bbox fallback used ({type(exc).__name__})",
+            )
 
     track_start, track_end = tracked_span(track.frames, timestamps, seed_index)
     resolution = resolve_window_from_evidence(

@@ -53,6 +53,7 @@ export function useGenerationSession({
   const [prompt, setPrompt] = useState("");
   const [plan, setPlan] = useState<EditPlanResp | null>(null);
   const [planning, setPlanning] = useState(false);
+  const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [variants, setVariants] = useState<Variant[]>([]);
@@ -71,12 +72,12 @@ export function useGenerationSession({
     clip.kind === "source" &&
     !!clip.projectId &&
     !!prompt.trim() &&
-    (!bbox || !!selectionId) &&
     !planning &&
     !busy;
 
   function updatePrompt(value: string) {
     setPrompt(value);
+    setFallbackNotice(null);
     if (plan && plan.intent.raw_prompt !== value.trim()) setPlan(null);
   }
 
@@ -98,6 +99,7 @@ export function useGenerationSession({
     actualStartTsRef.current = null;
     setPlan(null);
     setPlanning(false);
+    setFallbackNotice(null);
     if (!keepPrompt) setPrompt("");
   }
 
@@ -111,8 +113,15 @@ export function useGenerationSession({
 
   async function run(): Promise<boolean> {
     if (!canGenerate || !clip || !clip.projectId) return false;
-    if (bbox && selectionId && !plan) {
-      return preparePlan();
+    if (bbox && !plan) {
+      if (selectionId) {
+        const planned = await preparePlan(undefined, true);
+        if (planned) return true;
+      } else {
+        setFallbackNotice(
+          "Precise selection unavailable. Rendering with legacy fixed window.",
+        );
+      }
     }
     const baseClip = sourceClip ?? clip;
     closeStream();
@@ -188,6 +197,7 @@ export function useGenerationSession({
 
   async function preparePlan(
     explicitRange?: { start: number; end: number },
+    allowLegacyFallback = false,
   ): Promise<boolean> {
     if (!clip?.projectId || !selectionId || !prompt.trim()) return false;
     setPlanning(true);
@@ -202,9 +212,16 @@ export function useGenerationSession({
         explicit_end_ts: explicitRange?.end,
       });
       setPlan(next);
+      setFallbackNotice(null);
       return true;
     } catch (error) {
-      setErr(String(error));
+      if (allowLegacyFallback) {
+        setFallbackNotice(
+          "Adaptive planning unavailable. Rendering with legacy fixed window.",
+        );
+      } else {
+        setErr(String(error));
+      }
       return false;
     } finally {
       setPlanning(false);
@@ -272,6 +289,7 @@ export function useGenerationSession({
     setPrompt: updatePrompt,
     plan,
     planning,
+    fallbackNotice,
     busy,
     status,
     variants,

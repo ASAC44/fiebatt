@@ -128,6 +128,7 @@ function AiTab({
     setPrompt,
     plan,
     planning,
+    fallbackNotice,
     busy,
     status,
     variants,
@@ -235,6 +236,7 @@ function AiTab({
               : bbox
                 ? "preview adaptive plan"
                 : "generate variants",
+            notice: fallbackNotice,
             run: runReveal,
             acceptVariant: acceptReveal,
             clearSession: clearReveal,

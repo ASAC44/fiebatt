@@ -11,7 +11,12 @@
  */
 import { useEffect, useRef } from "react";
 
-import { getTimeline, type TimelineSegment } from "@/lib/api";
+import {
+  getTimeline,
+  type PersistedAsset,
+  type PersistedClip,
+  type TimelineSegment,
+} from "@/lib/api";
 import { useAgent, type AgentMessage } from "@/stores/agent";
 import {
   useEDL,
@@ -61,6 +66,14 @@ export function useAgentEdlBridge(
     // re-fetch timeline from backend and rebuild EDL clips
     getTimeline(projectId)
       .then((tl) => {
+        if (tl.edl && tl.edl.clips.length > 0) {
+          edlDispatch({
+            type: "hydrate",
+            sources: tl.edl.sources.map(assetFromPersisted),
+            clips: tl.edl.clips.map(clipFromPersisted),
+          });
+          return;
+        }
         const sourceUrl =
           tl.segments.find((s) => s.source === "original")?.url ??
           project.videoUrl;
@@ -104,7 +117,7 @@ export function useAgentEdlBridge(
           genAssets.push(
             newMediaAsset({
               url: seg.url,
-              duration: span,
+              duration: seg.media_duration ?? span,
               fps: project.fps,
               projectId,
               label: `ai edit ${genAssets.length + 1}`,
@@ -133,13 +146,15 @@ function segmentToClip(
 ): Clip {
   const span = Math.max(0.01, seg.end_ts - seg.start_ts);
   if (seg.source === "generated") {
+    const mediaStart = seg.media_start_ts ?? 0;
+    const mediaEnd = seg.media_end_ts ?? mediaStart + span;
     return {
       id: crypto.randomUUID(),
       kind: "generated",
       url: seg.url,
-      sourceStart: 0,
-      sourceEnd: span,
-      mediaDuration: span,
+      sourceStart: mediaStart,
+      sourceEnd: mediaEnd,
+      mediaDuration: seg.media_duration ?? mediaEnd,
       volume: seg.audio ? 1 : 0,
       projectId,
       label: "ai edit",
@@ -156,5 +171,33 @@ function segmentToClip(
     projectId,
     sourceAssetId: sourceAsset.id,
     label: sourceAsset.label,
+  };
+}
+
+function clipFromPersisted(clip: PersistedClip): Clip {
+  return {
+    id: clip.id,
+    kind: clip.kind,
+    url: clip.url,
+    sourceStart: clip.source_start,
+    sourceEnd: clip.source_end,
+    mediaDuration: clip.media_duration,
+    volume: clip.volume,
+    label: clip.label ?? undefined,
+    projectId: clip.project_id ?? undefined,
+    sourceAssetId: clip.source_asset_id ?? undefined,
+    generatedFromClipId: clip.generated_from_clip_id ?? undefined,
+  };
+}
+
+function assetFromPersisted(asset: PersistedAsset): MediaAsset {
+  return {
+    id: asset.id,
+    kind: asset.kind,
+    url: asset.url,
+    duration: asset.duration,
+    fps: asset.fps,
+    projectId: asset.project_id,
+    label: asset.label,
   };
 }

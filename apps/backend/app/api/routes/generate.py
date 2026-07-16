@@ -12,6 +12,7 @@ from app.models.selection import SelectionArtifact
 from app.models.session import Session as SessionModel
 from app.schemas.edit_plan import LocalRangeResolution
 from app.schemas.generate import GenerateRequest, GenerateResponse
+from app.services.accepted_generation import resolve_committed_timeline_range
 from app.workers import generate_job
 
 router = APIRouter(tags=["generate"])
@@ -33,6 +34,7 @@ async def generate(
         raise HTTPException(status_code=404, detail="project not found")
 
     plan: EditPlanRecord | None = None
+    resolution: LocalRangeResolution | None = None
     if body.plan_id:
         plan = await db.get(EditPlanRecord, body.plan_id)
         if plan is None or plan.project_id != proj.id:
@@ -82,13 +84,35 @@ async def generate(
         )
     if end_ts > proj.duration + 1e-3:
         raise HTTPException(status_code=422, detail="end_ts past project duration")
+    generation_length = (
+        resolution.generation_context.duration
+        if use_plan_range and resolution is not None
+        else length
+    )
+    if generation_length > MAX_SEG_LEN:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "generation context must be at most "
+                f"{MAX_SEG_LEN}s (got {generation_length:.2f}s)"
+            ),
+        )
     if video_gen_provider != "auto":
-        provider_error = validate_provider_duration(video_gen_provider, length)
+        provider_error = validate_provider_duration(video_gen_provider, generation_length)
         if provider_error:
             raise HTTPException(status_code=422, detail=provider_error)
     # bbox sanity: x+w and y+h in [0,1]
     if bbox["x"] + bbox["w"] > 1.0001 or bbox["y"] + bbox["h"] > 1.0001:
         raise HTTPException(status_code=422, detail="bbox extends outside the frame")
+    try:
+        committed_start, committed_end = resolve_committed_timeline_range(
+            proj.timeline_edl,
+            target_clip_id=body.target_clip_id,
+            source_start=start_ts,
+            source_end=end_ts,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     job = Job(
         project_id=proj.id,
@@ -103,6 +127,28 @@ async def generate(
             "video_gen_provider": video_gen_provider,
             "plan_id": plan.id if plan else None,
             "planned_context": plan.range_json if plan else None,
+            "adaptive_context_enabled": use_plan_range,
+            "target_clip_id": body.target_clip_id,
+            "plan_scope": plan.scope if plan else "legacy",
+            "analysis_duration_ms": (
+                (plan.estimate_json or {}).get("analysis_duration_ms", 0.0)
+                if plan
+                else 0.0
+            ),
+            "analysis_frames": (
+                (plan.estimate_json or {}).get("frames_inspected", 0)
+                if plan
+                else 0
+            ),
+            "fixed_window_baseline_seconds": (
+                float(body.end_ts) - float(body.start_ts)
+                if body.start_ts is not None and body.end_ts is not None
+                else (float(proj.duration) if proj.duration <= 5.0 else 3.0)
+            ),
+            "committed_timeline_range": {
+                "start": committed_start,
+                "end": committed_end,
+            },
         },
     )
     db.add(job)

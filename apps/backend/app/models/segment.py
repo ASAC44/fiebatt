@@ -29,3 +29,4 @@ class Segment(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     project: Mapped["Project"] = relationship(back_populates="segments")  # noqa: F821
+    variant: Mapped["Variant | None"] = relationship()  # noqa: F821

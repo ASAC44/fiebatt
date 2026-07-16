@@ -17,6 +17,9 @@ class TimelineSegment(BaseModel):
     url: str
     audio: bool
     segment_id: str | None = None
+    media_start_ts: float = Field(ge=0)
+    media_end_ts: float = Field(ge=0)
+    media_duration: float = Field(ge=0)
 
 
 # ─── persisted EDL (edit decision list) ─────────────────────────────────

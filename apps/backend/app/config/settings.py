@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     use_ai_stubs: bool = True
     # Plans can be previewed before PR2 changes generation semantics.
     adaptive_edit_planning: bool = False
+    # Emergency operator escape hatch; request must also explicitly opt in.
+    allow_hard_failed_acceptance: bool = False
 
     # ── vultr object storage ────────────────────────────────────────
     # S3-compatible. empty values disable the integration and storage

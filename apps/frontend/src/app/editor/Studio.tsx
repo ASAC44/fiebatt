@@ -35,6 +35,7 @@ import {
   type PersistedAsset,
   type PersistedClip,
   type TimelineSegment,
+  type TimelineResp,
 } from "@/lib/api";
 import { ContinuityStatusBadge } from "@/features/continuity/ContinuityStatusBadge";
 import { useContinuityDashboard } from "@/features/continuity/useContinuityDashboard";
@@ -72,13 +73,15 @@ function buildTimelineClip(
 ): Clip {
   const span = Math.max(0.01, segment.end_ts - segment.start_ts);
   if (segment.source === "generated") {
+    const mediaStart = segment.media_start_ts ?? 0;
+    const mediaEnd = segment.media_end_ts ?? mediaStart + span;
     return {
       id: crypto.randomUUID(),
       kind: "generated",
       url: segment.url,
-      sourceStart: 0,
-      sourceEnd: span,
-      mediaDuration: span,
+      sourceStart: mediaStart,
+      sourceEnd: mediaEnd,
+      mediaDuration: segment.media_duration ?? mediaEnd,
       volume: segment.audio ? 1 : 0,
       projectId: project.projectId,
       label: "ai edit",
@@ -183,7 +186,7 @@ function buildGeneratedAssets(project: StudioInitialProject, segments: TimelineS
     const span = Math.max(0.01, segment.end_ts - segment.start_ts);
     assets.push(newMediaAsset({
       url: segment.url,
-      duration: span,
+      duration: segment.media_duration ?? span,
       fps: project.fps,
       projectId: project.projectId,
       label: `ai edit ${assets.length + 1}`,
@@ -372,12 +375,8 @@ function StudioInner({
 
   // ─── silent re-hydrate on agent-driven timeline mutations ─────────
   //
-  // When the agent accepts a variant (or splits / deletes / reverts)
-  // the DB gets a new Segment row but the saved EDL doesn't — so
-  // preferring tl.edl here would hand us back the stale pre-accept
-  // timeline. Rebuild from `tl.segments` instead, which timeline_builder
-  // already splits around generated regions for us, then let the normal
-  // auto-save persist the new EDL on top.
+  // Mutation responses now carry the backend-spliced authoritative EDL.
+  // Legacy mutations without one still rebuild from flat segments.
   useEffect(() => {
     if (!effectiveProjectId) {
       console.warn("[studio] timeline-refresh listener NOT attached: no projectId");
@@ -394,7 +393,10 @@ function StudioInner({
         (ev as CustomEvent).detail,
       );
       try {
-        const tl = await getTimeline(pid);
+        const eventTimeline = (
+          ev as CustomEvent<{ timeline?: TimelineResp }>
+        ).detail?.timeline;
+        const tl = eventTimeline ?? await getTimeline(pid);
 
         // Prefer the saved initialProject snapshot (from ?reopen=), but
         // fall back to constructing one from the live EDL source asset —
@@ -430,6 +432,15 @@ function StudioInner({
           );
           return;
         }
+        if (tl.edl && tl.edl.clips.length > 0) {
+          const clips = tl.edl.clips.map(clipFromPersisted);
+          const sources = tl.edl.sources.map(assetFromPersisted);
+          lastSavedAtRef.current = tl.edl.updated_at ?? Date.now() / 1000;
+          lastSavedSigRef.current = edlSignature(clips, sources);
+          dispatch({ type: "hydrate", sources, clips });
+          return;
+        }
+
         const sourceUrl =
           tl.segments.find((seg) => seg.source === "original")?.url
           ?? project.videoUrl;

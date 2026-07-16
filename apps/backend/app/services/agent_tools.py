@@ -577,6 +577,8 @@ async def _generate_edit(
 
     proj = await _get_project_or_error(db, project_id, session_id)
     plan: EditPlanRecord | None = None
+    resolution: LocalRangeResolution | None = None
+    use_plan_range = False
     if plan_id:
         plan = await db.get(EditPlanRecord, plan_id)
         if plan is None or plan.project_id != proj.id:
@@ -586,7 +588,8 @@ async def _generate_edit(
         selection = await db.get(SelectionArtifact, plan.selection_id)
         if selection is None or selection.project_id != proj.id:
             raise ValueError("edit plan selection is unavailable")
-        if _get_backend_settings().adaptive_edit_planning:
+        use_plan_range = _get_backend_settings().adaptive_edit_planning
+        if use_plan_range:
             resolution = LocalRangeResolution.model_validate(plan.range_json)
             start_ts = resolution.edit_core.start_ts
             end_ts = resolution.edit_core.end_ts
@@ -615,10 +618,23 @@ async def _generate_edit(
         raise ValueError(f"segment length must be {MIN_SEG_LEN}-{MAX_SEG_LEN}s (got {length:.2f}s)")
     if end_ts > proj.duration + 1e-3:
         raise ValueError("end_ts past project duration")
+    generation_length = (
+        resolution.generation_context.duration
+        if use_plan_range and resolution is not None
+        else length
+    )
+    if generation_length > MAX_SEG_LEN:
+        raise ValueError(
+            "generation context must be at most "
+            f"{MAX_SEG_LEN}s (got {generation_length:.2f}s)"
+        )
     if video_gen_provider and video_gen_provider != "auto":
         from app.ai.services.provider_capabilities import validate_provider_duration
 
-        provider_error = validate_provider_duration(video_gen_provider, length)
+        provider_error = validate_provider_duration(
+            video_gen_provider,
+            generation_length,
+        )
         if provider_error:
             raise ValueError(provider_error)
     if bbox.get("x", 0) + bbox.get("w", 0) > 1.0001 or bbox.get("y", 0) + bbox.get("h", 0) > 1.0001:
@@ -637,6 +653,7 @@ async def _generate_edit(
             "video_gen_provider": video_gen_provider or "auto",
             "plan_id": plan.id if plan else None,
             "planned_context": plan.range_json if plan else None,
+            "adaptive_context_enabled": use_plan_range,
         },
     )
     db.add(job)
@@ -844,11 +861,19 @@ async def _accept_variant(
 ) -> dict[str, Any]:
     """Accept a variant and apply it to the timeline — mirrors POST /api/accept."""
     from app.services.entity_discovery import enqueue_entity_discovery
+    from app.services.accepted_generation import (
+        accepted_generation_range,
+        record_accepted_range,
+        update_project_edl_for_acceptance,
+    )
+    from app.services.generation_quality import acceptance_allowed, acceptance_block_reason
+    from app.services.timeline_response import build_timeline_response
     from app.workers import entity_job
 
     job_id: str = args["job_id"]
     variant_index: int = args.get("variant_index", 0)
     discover_occurrences: bool = bool(args.get("discover_occurrences", False))
+    continuity_override: bool = bool(args.get("continuity_override", False))
 
     job = (
         await db.execute(
@@ -867,9 +892,16 @@ async def _accept_variant(
     )
     if variant is None or variant.status != "done" or not variant.url:
         raise ValueError("variant not ready")
+    if not acceptance_allowed(
+        job.payload,
+        override_requested=continuity_override,
+        override_enabled=_get_backend_settings().allow_hard_failed_acceptance,
+    ):
+        raise ValueError(acceptance_block_reason(job.payload))
 
     if job.start_ts is None or job.end_ts is None:
         raise ValueError("job has no segment range")
+    accepted_range = accepted_generation_range(job)
 
     # deactivate overlapping generated segments
     overlapping = (
@@ -878,8 +910,8 @@ async def _accept_variant(
                 Segment.project_id == proj.id,
                 Segment.active == True,  # noqa: E712
                 Segment.source == "generated",
-                Segment.start_ts < job.end_ts,
-                Segment.end_ts > job.start_ts,
+                Segment.start_ts < accepted_range.committed_end,
+                Segment.end_ts > accepted_range.committed_start,
             )
         )
     ).scalars().all()
@@ -888,15 +920,23 @@ async def _accept_variant(
 
     seg = Segment(
         project_id=proj.id,
-        start_ts=job.start_ts,
-        end_ts=job.end_ts,
+        start_ts=accepted_range.committed_start,
+        end_ts=accepted_range.committed_end,
         source="generated",
         url=variant.url,
         variant_id=variant.id,
-        order_index=int(job.start_ts * 1000),
+        order_index=int(accepted_range.committed_start * 1000),
         active=True,
     )
     db.add(seg)
+    await db.flush()
+    record_accepted_range(job, segment_id=seg.id, accepted_range=accepted_range)
+    update_project_edl_for_acceptance(
+        proj,
+        segment_id=seg.id,
+        variant=variant,
+        accepted_range=accepted_range,
+    )
     await db.commit()
     await db.refresh(seg)
 
@@ -915,10 +955,13 @@ async def _accept_variant(
             if runner is not None and not reused:
                 runner.submit(ent_job.id, lambda: entity_job.run(ent_job.id))
 
+    await db.refresh(proj)
+    timeline = await build_timeline_response(db, proj)
     return {
         "segment_id": seg.id,
         "entity_job_id": entity_job_id,
         "message": f"Variant {variant_index} accepted and applied to timeline",
+        "timeline": timeline.model_dump(mode="json"),
     }
 
 

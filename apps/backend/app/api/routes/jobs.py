@@ -37,6 +37,7 @@ async def get_job(
     if proj is None or proj.session_id != session.id:
         raise HTTPException(status_code=404, detail="job not found")
 
+    payload = job.payload or {}
     return JobOut(
         job_id=job.id,
         kind=job.kind,
@@ -44,9 +45,18 @@ async def get_job(
         error=job.error,
         start_ts=job.start_ts,
         end_ts=job.end_ts,
-        provider=(job.payload or {}).get("selected_provider"),
-        model=(job.payload or {}).get("selected_model"),
-        warnings=(job.payload or {}).get("warnings") or [],
+        provider=payload.get("selected_provider"),
+        model=payload.get("selected_model"),
+        warnings=payload.get("warnings") or [],
+        execution_window=payload.get("execution_window"),
+        continuity_validation=payload.get("continuity_validation"),
+        generation_quality_state=payload.get("generation_quality_state"),
+        generation_quality_evidence=payload.get("generation_quality_evidence") or [],
+        generation_attempts=payload.get("generation_attempts"),
+        generated_seconds=payload.get("generated_seconds"),
+        provider_attempts=payload.get("provider_attempts") or [],
+        localized_compositing=payload.get("localized_compositing") or [],
+        local_flow_telemetry=payload.get("local_flow_telemetry"),
         variants=[
             VariantOut(
                 id=v.id,

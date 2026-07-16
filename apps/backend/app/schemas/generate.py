@@ -7,6 +7,7 @@ from app.schemas.common import BBox
 
 class GenerateRequest(BaseModel):
     project_id: str
+    target_clip_id: str | None = None
     plan_id: str | None = None
     start_ts: float | None = Field(default=None, ge=0.0)
     end_ts: float | None = Field(default=None, gt=0.0)

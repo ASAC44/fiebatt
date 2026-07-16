@@ -134,6 +134,39 @@ export type JobResp = {
   provider?: string | null;
   model?: string | null;
   warnings?: string[];
+  execution_window?: GenerationExecutionWindow | null;
+  continuity_validation?: ContinuityValidation | null;
+  generation_quality_state?: string | null;
+  generation_quality_evidence?: string[];
+  generation_attempts?: number | null;
+  generated_seconds?: number | null;
+  provider_attempts?: string[];
+  localized_compositing?: Array<{ applied?: boolean; reason?: string }>;
+  local_flow_telemetry?: Record<string, unknown> | null;
+};
+
+export type GenerationExecutionWindow = {
+  adaptive: boolean;
+  core_start: number;
+  core_end: number;
+  context_start: number;
+  context_end: number;
+  edit_start_offset: number;
+  edit_end_offset: number;
+  pre_handle: number;
+  post_handle: number;
+};
+
+export type ContinuityValidation = {
+  passed: boolean;
+  sampled_frames: number;
+  metrics: Record<string, number | null>;
+  issues: Array<{
+    code: string;
+    value: number;
+    threshold: number;
+    boundary: string | null;
+  }>;
 };
 
 export type JobResponse = JobResp;
@@ -141,6 +174,7 @@ export type JobResponse = JobResp;
 
 export type GenerateReq = {
   project_id: string;
+  target_clip_id?: string;
   plan_id?: string;
   start_ts: number;
   end_ts: number;
@@ -176,6 +210,7 @@ export type EditPlanResp = {
   provider_reason: string;
   estimate: {
     analysis_mode: string;
+    analysis_duration_ms: number;
     frames_inspected: number;
     expected_generation_calls: number;
     expected_generated_seconds: number;
@@ -184,6 +219,15 @@ export type EditPlanResp = {
   confidence: number;
   warnings: string[];
   status: string;
+  adaptive_generation_enabled: boolean;
+};
+
+export type HealthResp = {
+  ok: boolean;
+  features?: {
+    adaptive_edit_planning?: boolean;
+    hard_failed_acceptance_override?: boolean;
+  };
 };
 
 export type CreateEditPlanReq = {
@@ -198,6 +242,7 @@ export type CreateEditPlanReq = {
 export type AcceptResp = {
   segment_id: string;
   entity_job_id: string | null;
+  timeline: TimelineResp;
 };
 
 export type AcceptResponse = AcceptResp;
@@ -238,6 +283,10 @@ export type TimelineSegment = {
   source: "original" | "generated";
   url: string;
   audio: boolean;
+  segment_id?: string | null;
+  media_start_ts?: number;
+  media_end_ts?: number;
+  media_duration?: number;
 };
 
 /** One clip in a saved EDL snapshot. Mirrors the frontend's Clip shape
@@ -375,6 +424,10 @@ export function login(email: string, password: string): Promise<AuthResponse> {
 
 export function listProjects(): Promise<ProjectListItem[]> {
   return request<ProjectListItem[]>("/api/projects");
+}
+
+export function getHealth(): Promise<HealthResp> {
+  return request<HealthResp>("/api/health");
 }
 
 export function getProject(project_id: string): Promise<ProjectResp> {

@@ -104,6 +104,8 @@ async def test_create_and_get_non_generating_plan(client, owned_selection):
     assert body["edit_core"] == {"start_ts": 8.25, "end_ts": 11.75}
     assert body["generation_context"]["start_ts"] == 7.5
     assert body["estimate"]["expected_generation_calls"] == 1
+    assert body["estimate"]["analysis_duration_ms"] >= 0.0
+    assert body["adaptive_generation_enabled"] is False
     assert "fixture warning" in body["warnings"]
     assert any("legacy fixed window" in warning for warning in body["warnings"])
     assert len(body["chunks"]) == 1

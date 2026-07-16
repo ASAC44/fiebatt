@@ -35,6 +35,7 @@ class EditPlanRequest(BaseModel):
 
 class PlanEstimateResponse(BaseModel):
     analysis_mode: str
+    analysis_duration_ms: float = 0.0
     frames_inspected: int
     expected_generation_calls: int
     expected_generated_seconds: float
@@ -67,3 +68,4 @@ class EditPlanResponse(BaseModel):
     warnings: list[str]
     chunks: list[GenerationChunkResponse]
     status: str
+    adaptive_generation_enabled: bool

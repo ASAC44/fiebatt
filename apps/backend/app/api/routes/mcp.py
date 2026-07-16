@@ -26,6 +26,30 @@ router = APIRouter(tags=["mcp"])
 PROTOCOL_VERSION = "2025-03-26"
 REQUIRED_SCOPE = "fiebatt:edit"
 
+READ_TOOLS = {
+    "list_projects", "get_project", "get_job_status", "wait_for_job",
+    "get_timeline", "get_export_status", "preview_frame", "preview_strip",
+    "list_entities", "get_propagation_status",
+}
+MEDIA_TOOLS = {"prepare_upload", "complete_upload"}
+GENERATION_TOOLS = {
+    "analyze_video", "identify_region", "generate_edit", "export_video",
+    "grade_preview", "score_variant", "score_continuity", "remix_variant",
+    "batch_generate", "propagate_edit",
+}
+
+
+def _required_scope(tool_name: str) -> str:
+    if tool_name == "account_status":
+        return REQUIRED_SCOPE
+    if tool_name in READ_TOOLS:
+        return "projects:read"
+    if tool_name in MEDIA_TOOLS:
+        return "media:write"
+    if tool_name in GENERATION_TOOLS:
+        return "generation:write"
+    return "projects:write"
+
 SPECIAL_TOOLS = [
     {
         "name": "account_status",
@@ -76,7 +100,7 @@ SPECIAL_TOOLS = [
 ]
 
 
-def _tools() -> list[dict[str, Any]]:
+def _tools(scopes: set[str]) -> list[dict[str, Any]]:
     tools = list(SPECIAL_TOOLS)
     for item in OPENAI_TOOLS:
         function = item["function"]
@@ -90,7 +114,7 @@ def _tools() -> list[dict[str, Any]]:
                 "destructiveHint": name in {"delete_segment", "accept_variant", "revert_timeline"},
             },
         })
-    return tools
+    return [tool for tool in tools if _required_scope(tool["name"]) in scopes]
 
 
 def _jsonrpc(request_id: Any, result: Any = None, error: dict | None = None, *, status: int = 200):
@@ -193,7 +217,11 @@ async def _execute_special(
 
 @router.post("/mcp")
 async def mcp(request: Request, db: AsyncSession = Depends(get_db)):
-    claims = decode_access_token(extract_bearer(request.headers.get("authorization")) or "")
+    audience = f"{get_settings().oauth_issuer}/mcp"
+    claims = decode_access_token(
+        extract_bearer(request.headers.get("authorization")) or "",
+        audience=audience,
+    )
     if claims is None:
         return _unauthorized()
     scopes = set(str(claims.get("scope", "")).split())
@@ -220,7 +248,7 @@ async def mcp(request: Request, db: AsyncSession = Depends(get_db)):
     if method == "ping":
         return _jsonrpc(request_id, {})
     if method == "tools/list":
-        return _jsonrpc(request_id, {"tools": _tools()})
+        return _jsonrpc(request_id, {"tools": _tools(scopes)})
     if method != "tools/call":
         return _jsonrpc(request_id, error={"code": -32601, "message": "Method not found"})
 
@@ -229,6 +257,8 @@ async def mcp(request: Request, db: AsyncSession = Depends(get_db)):
     args = params.get("arguments") or {}
     if not isinstance(name, str) or not isinstance(args, dict):
         return _jsonrpc(request_id, error={"code": -32602, "message": "Invalid tool arguments"})
+    if _required_scope(name) not in scopes:
+        return JSONResponse({"error": "insufficient_scope"}, status_code=403)
 
     user_id = str(claims["sub"])
     try:

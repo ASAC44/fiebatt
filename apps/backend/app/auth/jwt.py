@@ -108,7 +108,7 @@ def verify_access_token(token: str) -> Optional[AuthedUser]:
     return AuthedUser(id=str(sub), email=str(email))
 
 
-def decode_access_token(token: str) -> dict[str, Any] | None:
+def decode_access_token(token: str, *, audience: str | None = None) -> dict[str, Any] | None:
     if not token:
         return None
     try:
@@ -116,7 +116,8 @@ def decode_access_token(token: str) -> dict[str, Any] | None:
             token,
             get_settings().auth_jwt_secret,
             algorithms=["HS256"],
-            options={"verify_aud": False},
+            audience=audience,
+            options={"verify_aud": audience is not None},
         )
     except jwt.InvalidTokenError:
         return None

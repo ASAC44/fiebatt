@@ -3,13 +3,15 @@ from __future__ import annotations
 import base64
 import hashlib
 import html
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt import AuthedUser, create_access_token, normalize_email, verify_password
@@ -21,6 +23,9 @@ from app.models.user import User
 
 router = APIRouter(tags=["oauth"])
 DEFAULT_SCOPES = "fiebatt:edit projects:read projects:write media:write generation:write"
+ALLOWED_SCOPES = frozenset(DEFAULT_SCOPES.split())
+PKCE_CHALLENGE_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")
+PKCE_VERIFIER_RE = re.compile(r"^[A-Za-z0-9._~-]{43,128}$")
 
 
 def _hash(value: str) -> str:
@@ -41,6 +46,20 @@ def _oauth_error(error: str, description: str, status_code: int = 400) -> JSONRe
         status_code=status_code,
         headers={"Cache-Control": "no-store"},
     )
+
+
+def _validate_authorization_request(
+    response_type: str,
+    code_challenge: str,
+    code_challenge_method: str,
+    scope: str,
+) -> None:
+    if response_type != "code" or code_challenge_method != "S256":
+        raise HTTPException(status_code=400, detail="authorization code with S256 PKCE is required")
+    if not PKCE_CHALLENGE_RE.fullmatch(code_challenge):
+        raise HTTPException(status_code=400, detail="invalid PKCE code challenge")
+    if not set(scope.split()) <= ALLOWED_SCOPES:
+        raise HTTPException(status_code=400, detail="unsupported OAuth scope")
 
 
 @router.get("/.well-known/oauth-authorization-server")
@@ -143,8 +162,7 @@ async def authorize_page(
     db: AsyncSession = Depends(get_db),
 ):
     await _validated_client(db, client_id, redirect_uri)
-    if response_type != "code" or code_challenge_method != "S256":
-        raise HTTPException(status_code=400, detail="authorization code with S256 PKCE is required")
+    _validate_authorization_request(response_type, code_challenge, code_challenge_method, scope)
     return _login_page({
         "client_id": client_id,
         "redirect_uri": redirect_uri,
@@ -171,12 +189,17 @@ async def authorize_submit(
     db: AsyncSession = Depends(get_db),
 ):
     await _validated_client(db, client_id, redirect_uri)
+    _validate_authorization_request(response_type, code_challenge, code_challenge_method, scope)
     fields = {
         "client_id": client_id, "redirect_uri": redirect_uri, "response_type": response_type,
         "code_challenge": code_challenge, "code_challenge_method": code_challenge_method,
         "scope": scope, "state": state,
     }
     normalized = normalize_email(email)
+    if "@" not in normalized or "." not in normalized.rsplit("@", 1)[-1]:
+        return _login_page(fields, "Enter a valid email address.")
+    if not 8 <= len(password) <= 256:
+        return _login_page(fields, "Password must be 8-256 characters.")
     from sqlalchemy import select
 
     user = (await db.execute(select(User).where(User.email == normalized))).scalar_one_or_none()
@@ -243,10 +266,18 @@ async def token(
         if (
             row is None or row.used or row.client_id != client_id
             or row.redirect_uri != redirect_uri or row.expires_at.replace(tzinfo=timezone.utc) <= _now()
+            or not PKCE_VERIFIER_RE.fullmatch(code_verifier)
             or not secrets.compare_digest(_b64url_sha256(code_verifier), row.code_challenge)
         ):
             return _oauth_error("invalid_grant", "invalid, expired, or already used authorization code")
-        row.used = True
+        consumed = await db.execute(
+            update(OAuthAuthorizationCode)
+            .where(OAuthAuthorizationCode.code_hash == row.code_hash, OAuthAuthorizationCode.used == False)  # noqa: E712
+            .values(used=True)
+            .execution_options(synchronize_session=False)
+        )
+        if consumed.rowcount != 1:
+            return _oauth_error("invalid_grant", "invalid, expired, or already used authorization code")
         user = await db.get(User, row.user_id)
         if user is None:
             return _oauth_error("invalid_grant", "account no longer exists")
@@ -260,7 +291,14 @@ async def token(
             or row.expires_at.replace(tzinfo=timezone.utc) <= _now()
         ):
             return _oauth_error("invalid_grant", "invalid or expired refresh token")
-        row.revoked = True
+        consumed = await db.execute(
+            update(OAuthRefreshToken)
+            .where(OAuthRefreshToken.token_hash == row.token_hash, OAuthRefreshToken.revoked == False)  # noqa: E712
+            .values(revoked=True)
+            .execution_options(synchronize_session=False)
+        )
+        if consumed.rowcount != 1:
+            return _oauth_error("invalid_grant", "invalid or expired refresh token")
         user = await db.get(User, row.user_id)
         if user is None:
             return _oauth_error("invalid_grant", "account no longer exists")

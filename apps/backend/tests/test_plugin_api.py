@@ -14,6 +14,7 @@ os.environ["PUBLIC_API_URL"] = "https://api.example.test"
 
 from app.db.init import create_all  # noqa: E402
 from app.main import app  # noqa: E402
+from app.auth.jwt import AuthedUser, create_access_token  # noqa: E402
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -110,6 +111,20 @@ async def test_pkce_oauth_connects_codex_to_mcp(client: AsyncClient):
         },
     )
     assert tokens.status_code == 200
+
+    replay = await client.post(
+        "/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "client_id": client_id,
+            "code": query["code"][0],
+            "redirect_uri": redirect_uri,
+            "code_verifier": verifier,
+        },
+    )
+    assert replay.status_code == 400
+    assert replay.json()["error"] == "invalid_grant"
+
     oauth_headers = {"Authorization": f"Bearer {tokens.json()['access_token']}"}
 
     initialized = await client.post(
@@ -169,3 +184,69 @@ async def test_mcp_advertises_oauth_when_unauthenticated(client: AsyncClient):
     )
     assert response.status_code == 401
     assert "oauth-protected-resource/mcp" in response.headers["www-authenticate"]
+
+
+@pytest.mark.asyncio
+async def test_oauth_submission_revalidates_pkce_and_signup_fields(client: AsyncClient):
+    redirect_uri = "http://127.0.0.1:43123/callback"
+    registered = await client.post("/oauth/register", json={"redirect_uris": [redirect_uri]})
+    client_id = registered.json()["client_id"]
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(b"x" * 43).digest()).decode("ascii").rstrip("=")
+    fields = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "token",
+        "code_challenge": challenge,
+        "code_challenge_method": "plain",
+        "email": "not-an-email",
+        "password": "x",
+        "create_account": "true",
+    }
+
+    invalid_pkce = await client.post("/oauth/authorize", data=fields, follow_redirects=False)
+    assert invalid_pkce.status_code == 400
+
+    fields.update(response_type="code", code_challenge_method="S256")
+    invalid_signup = await client.post("/oauth/authorize", data=fields, follow_redirects=False)
+    assert invalid_signup.status_code == 200
+    assert "Enter a valid email address" in invalid_signup.text
+
+
+@pytest.mark.asyncio
+async def test_mcp_enforces_audience_and_tool_scopes(client: AsyncClient):
+    limited = create_access_token(
+        AuthedUser(id="limited-user", email="limited@example.com"),
+        scopes=["fiebatt:edit"],
+        audience="https://api.example.test/mcp",
+    )
+    headers = {"Authorization": f"Bearer {limited}"}
+    listed = await client.post(
+        "/mcp",
+        headers=headers,
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+    )
+    assert [tool["name"] for tool in listed.json()["result"]["tools"]] == ["account_status"]
+
+    forbidden = await client.post(
+        "/mcp",
+        headers=headers,
+        json={
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": "prepare_upload", "arguments": {}},
+        },
+    )
+    assert forbidden.status_code == 403
+
+    wrong_audience = create_access_token(
+        AuthedUser(id="limited-user", email="limited@example.com"),
+        scopes=["fiebatt:edit"],
+        audience="https://other.example.test",
+    )
+    rejected = await client.post(
+        "/mcp",
+        headers={"Authorization": f"Bearer {wrong_audience}"},
+        json={"jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {}},
+    )
+    assert rejected.status_code == 401

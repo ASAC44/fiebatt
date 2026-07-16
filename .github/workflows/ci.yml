@@ -92,4 +92,5 @@ jobs:
           cache: "pip"
           cache-dependency-path: apps/backend/requirements.txt
       - run: pip install -r apps/backend/requirements.txt
-      - run: PYTHONPATH=apps/backend python -m pytest apps/backend/tests/ai apps/backend/tests/test_plugin_api.py -q
+      - run: PYTHONPATH=apps/backend python -m pytest apps/backend/tests/ai -q
+      - run: PYTHONPATH=apps/backend python -m pytest apps/backend/tests/test_plugin_api.py -q

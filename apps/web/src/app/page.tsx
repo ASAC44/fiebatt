@@ -1,27 +1,12 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import Image from "next/image";
 import Link from "next/link";
-import { useSyncExternalStore } from "react";
 import CardNav from "@/components/ui/card-nav";
 import { Button } from "@/components/ui/button";
 import { AnimatedSpan, Terminal, TypingAnimation } from "@/components/ui/terminal";
 import GradualBlur from "@/components/GradualBlur";
 import { SiteFooter } from "@/components/site-footer";
-import { hasAuthToken } from "@/lib/auth";
-
-const TechnicalFlowExcalidraw = dynamic(
-  () => import("@/components/technical-flow-excalidraw").then((mod) => mod.TechnicalFlowExcalidraw),
-  {
-    loading: () => (
-      <div className="flex h-[620px] items-center justify-center rounded-[2rem] border border-black/10 bg-[#F4F4F1] text-sm text-neutral-500 md:h-[760px]">
-        Loading flow chart...
-      </div>
-    ),
-    ssr: false,
-  },
-);
 
 const navItems = [
   {
@@ -123,13 +108,8 @@ const comparisonCards = [
 ];
 
 export default function Home() {
-  const loggedIn = useSyncExternalStore(
-    subscribeToAuthStorage,
-    hasAuthToken,
-    () => false,
-  );
-  const ctaHref = loggedIn ? "/projects" : "/login";
-  const ctaText = loggedIn ? "Projects" : "Login";
+  const ctaHref = "/projects";
+  const ctaText = "Open projects";
 
   return (
     <main className="bg-[#F4F4F1] text-black">
@@ -392,21 +372,10 @@ export default function Home() {
               </Link>
             </Button>
           </div>
-
-          <TechnicalFlowExcalidraw />
         </div>
       </section>
 
       <SiteFooter />
     </main>
   );
-}
-
-function subscribeToAuthStorage(onStoreChange: () => void) {
-  window.addEventListener("storage", onStoreChange);
-  window.addEventListener("focus", onStoreChange);
-  return () => {
-    window.removeEventListener("storage", onStoreChange);
-    window.removeEventListener("focus", onStoreChange);
-  };
 }

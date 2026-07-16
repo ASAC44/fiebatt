@@ -321,6 +321,11 @@ export type EntityResp = {
   appearances: AppearanceResp[];
 };
 
+export type DiscoveryJobResp = {
+  job_id: string;
+  reused: boolean;
+};
+
 export type PropagateReq = {
   entity_id: string;
   source_variant_url: string;
@@ -425,6 +430,13 @@ export const acceptVariant = accept;
 
 export function getEntity(entity_id: string): Promise<EntityResp> {
   return request<EntityResp>(`/api/entities/${entity_id}`);
+}
+
+export function discoverOccurrences(segment_id: string): Promise<DiscoveryJobResp> {
+  return request<DiscoveryJobResp>(
+    `/api/segments/${segment_id}/discover-occurrences`,
+    { method: "POST" },
+  );
 }
 
 export function propagate(req: PropagateReq): Promise<PropagateResp> {

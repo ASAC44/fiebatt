@@ -47,6 +47,7 @@ export function ContinuityPanel({
     propagation,
     propagationCounts,
     hasPropagatableAppearances,
+    startDiscovery,
     startPropagation,
     applyPropagation,
     applyAllPropagation,
@@ -93,7 +94,10 @@ export function ContinuityPanel({
             causal editing
           </div>
           <div style={{ fontSize: 13, color: "var(--ink)", marginTop: 2 }}>
-            {discovery.status === "idle" && "accept a variant to track entities across the reel"}
+            {discovery.status === "idle" &&
+              (acceptedEdit
+                ? "local edit accepted — search other occurrences only if needed"
+                : "accept a variant to enable occurrence search")}
             {discovery.status === "pending" && "continuity scan queued..."}
             {discovery.status === "processing" && "scanning the reel for matching appearances..."}
             {discovery.status === "ready" &&
@@ -139,6 +143,26 @@ export function ContinuityPanel({
           <span>prompt: {acceptedEdit.prompt || "untitled edit"}</span>
         </div>
       )}
+
+      {acceptedEdit && !latestEntity &&
+        (discovery.status === "idle" || discovery.status === "error") && (
+          <button
+            onClick={() => void startDiscovery()}
+            style={{
+              width: "100%",
+              padding: "10px 14px",
+              borderRadius: 9,
+              border: "1px solid rgba(255, 196, 87, 0.25)",
+              background: "rgba(255, 196, 87, 0.07)",
+              color: "rgba(255, 196, 87, 0.9)",
+              fontSize: 11,
+              fontFamily: "var(--font-mono, monospace)",
+              cursor: "pointer",
+            }}
+          >
+            find other occurrences · scans full reel
+          </button>
+        )}
 
       {/* discovery error */}
       {discovery.error && (

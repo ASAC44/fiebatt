@@ -18,6 +18,7 @@ from app.models.project import Project
 from app.models.segment import Segment
 from app.models.session import Session as SessionModel
 from app.schemas.accept import AcceptRequest, AcceptResponse
+from app.services.entity_discovery import enqueue_entity_discovery
 from app.workers import entity_job
 
 router = APIRouter(tags=["accept"])
@@ -84,35 +85,19 @@ async def accept(
     await db.commit()
     await db.refresh(seg)
 
-    # fire an entity-search job — but only when the generation actually has a
-    # concrete entity to track. For full-frame regenerations (no bbox drawn)
-    # and for "remove" intents there's nothing meaningful to identify, and
-    # kicking the job off anyway produces a red "continuity error" chip on
-    # the frontend when Gemini inevitably fails to ID a subject. Skip those
-    # and the UI renders the idle "X tracked" pill instead.
-    bbox = job.bbox_json or {}
-    bbox_w = float(bbox.get("w", 0.0)) if isinstance(bbox, dict) else 0.0
-    bbox_h = float(bbox.get("h", 0.0)) if isinstance(bbox, dict) else 0.0
-    bbox_is_tracked = bool(bbox) and bbox_w < 0.98 and bbox_h < 0.98 and bbox_w * bbox_h > 0.0
-
     entity_job_id: str | None = None
-    if bbox_is_tracked and body.discover_occurrences:
-        ent_job = Job(
-            project_id=proj.id,
-            kind="entity",
-            status="pending",
-            payload={
-                "segment_id": seg.id,
-                "reference_frame_ts": job.reference_frame_ts,
-                "reference_variant_url": variant.url,
-                "bbox": job.bbox_json,
-            },
+    if body.discover_occurrences:
+        ent_job, reused = await enqueue_entity_discovery(
+            db,
+            project=proj,
+            segment=seg,
+            source_job=job,
+            reference_variant_url=variant.url,
         )
-        db.add(ent_job)
-        await db.commit()
-        await db.refresh(ent_job)
-
-        runner.submit(ent_job.id, lambda: entity_job.run(ent_job.id))
-        entity_job_id = ent_job.id
+        if ent_job is not None:
+            await db.commit()
+            if not reused:
+                runner.submit(ent_job.id, lambda: entity_job.run(ent_job.id))
+            entity_job_id = ent_job.id
 
     return AcceptResponse(segment_id=seg.id, entity_job_id=entity_job_id)

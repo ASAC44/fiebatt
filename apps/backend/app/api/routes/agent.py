@@ -102,16 +102,19 @@ Propagation workflow (for edits that should apply across the full video):
 3. Tell the user: "Here are the variants. Accept the one you like in the
    editor (click 'Apply to Timeline'). After that, tell me and I'll propagate
    the edit across the rest of the video."
-4. When the user says they accepted it, call list_entities(project_id) to
+4. When the user asks to find/apply other occurrences, call
+   discover_occurrences(segment_id) for the accepted generated segment, then
+   wait for that job. Never start this full-reel scan for a local-only request.
+5. Call list_entities(project_id) to
    find the entity that was identified. Pick the most recently created one
    (first in the list).
-5. Get the accepted variant's URL — it's the url field of the variant the
+6. Get the accepted variant's URL — it's the url field of the variant the
    user accepted. You can find it by calling get_timeline() and looking for
    the most recent "generated" segment that matches the edit range.
-6. Call propagate_edit(entity_id=..., source_variant_url=...,
+7. Call propagate_edit(entity_id=..., source_variant_url=...,
    prompt="<original edit prompt>"). This regenerates every appearance of
    the entity using the accepted style as reference.
-7. Check progress with get_propagation_status. When status is "done", the
+8. Check progress with get_propagation_status. When status is "done", the
    propagated edits are applied to the timeline. Tell the user they can
    export the final video.
 
@@ -195,6 +198,20 @@ TOOL_DECLARATIONS = [
                 "prompt": types.Schema(type=types.Type.STRING),
             },
             required=["project_id", "selection_id", "prompt"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="discover_occurrences",
+        description=(
+            "Explicitly scan the full reel for other occurrences of the target "
+            "from an accepted generated segment. Use only when user asks for it."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "segment_id": types.Schema(type=types.Type.STRING),
+            },
+            required=["segment_id"],
         ),
     ),
     types.FunctionDeclaration(

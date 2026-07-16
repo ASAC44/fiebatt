@@ -529,6 +529,34 @@ async def _create_edit_plan(
     return result.model_dump(mode="json")
 
 
+@_register("discover_occurrences")
+async def _discover_occurrences(
+    *,
+    args: dict[str, Any],
+    db: AsyncSession,
+    session_id: str,
+    runner: Any | None = None,
+) -> dict[str, Any]:
+    """Run same explicit occurrence-discovery operation as continuity UI."""
+    from fastapi import HTTPException
+
+    from app.api.routes.entities import discover_occurrences
+    from app.models.session import Session as SessionModel
+
+    if runner is None:
+        raise ValueError("job runner unavailable")
+    try:
+        result = await discover_occurrences(
+            args["segment_id"],
+            SessionModel(id=session_id),
+            db,
+            runner,
+        )
+    except HTTPException as exc:
+        raise ValueError(str(exc.detail)) from exc
+    return result.model_dump(mode="json")
+
+
 @_register("generate_edit")
 async def _generate_edit(
     *,
@@ -815,6 +843,7 @@ async def _accept_variant(
     runner: Any | None = None,
 ) -> dict[str, Any]:
     """Accept a variant and apply it to the timeline — mirrors POST /api/accept."""
+    from app.services.entity_discovery import enqueue_entity_discovery
     from app.workers import entity_job
 
     job_id: str = args["job_id"]
@@ -873,24 +902,18 @@ async def _accept_variant(
 
     entity_job_id: str | None = None
     if discover_occurrences:
-        ent_job = Job(
-            project_id=proj.id,
-            kind="entity",
-            status="pending",
-            payload={
-                "segment_id": seg.id,
-                "reference_frame_ts": job.reference_frame_ts,
-                "reference_variant_url": variant.url,
-                "bbox": job.bbox_json,
-            },
+        ent_job, reused = await enqueue_entity_discovery(
+            db,
+            project=proj,
+            segment=seg,
+            source_job=job,
+            reference_variant_url=variant.url,
         )
-        db.add(ent_job)
-        await db.commit()
-        await db.refresh(ent_job)
-        entity_job_id = ent_job.id
-
-        if runner is not None:
-            runner.submit(ent_job.id, lambda: entity_job.run(ent_job.id))
+        if ent_job is not None:
+            await db.commit()
+            entity_job_id = ent_job.id
+            if runner is not None and not reused:
+                runner.submit(ent_job.id, lambda: entity_job.run(ent_job.id))
 
     return {
         "segment_id": seg.id,

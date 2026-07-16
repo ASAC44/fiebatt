@@ -16,3 +16,8 @@ class EntityOut(BaseModel):
     category: str | None = None
     reference_crop_url: str | None = None
     appearances: list[AppearanceOut]
+
+
+class DiscoveryJobOut(BaseModel):
+    job_id: str
+    reused: bool = False

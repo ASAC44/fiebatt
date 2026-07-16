@@ -257,13 +257,14 @@ Important environment groups:
 The web app uses first-party email/password auth. Create an account at
 `/signup`, then log in at `/login`; the API stores the session in an HttpOnly
 cookie rather than exposing the token to browser JavaScript.
-- vision worker: `VISION_WORKER_URL` (`GPU_WORKER_URL` remains a compatibility fallback)
+- vision worker: `VISION_WORKER_URL` for tracking and embeddings (`GPU_WORKER_URL` remains a compatibility fallback)
+- optional segmentation worker: `SAM_SEGMENTATION_URL`
 - provider keys: Mesh API / qwen / Gemini / DashScope / ElevenLabs keys depending on the path being tested
 
 For a Hugging Face ZeroGPU worker, upload `apps/api/vision-worker/hf-space/`
-as a Gradio Space, select ZeroGPU hardware, and set `VISION_WORKER_URL` to its
-public `https://<owner>-<space>.hf.space` URL. The backend calls the Space's
-named `/segment` Gradio endpoint automatically.
+as a Gradio Space, select ZeroGPU hardware, and set `SAM_SEGMENTATION_URL` to
+its public `https://<owner>-<space>.hf.space` URL. Keep `VISION_WORKER_URL`
+pointed at the full worker used for bounded tracking and embeddings.
 
 For quick local development, `USE_AI_STUBS=true` keeps the pipeline testable without paid providers. For real generation, use `USE_AI_STUBS=false` and configure the required provider keys. If `MESH_API_KEY` is present, the agent chat loop prefers Mesh API for text planning and tool calls.
 

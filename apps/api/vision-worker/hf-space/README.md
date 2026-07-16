@@ -41,6 +41,6 @@ result = client.predict(
 ```
 
 The result contains `mask_b64`, `score`, and `candidate_count`. Set the
-Fiebatt backend's `VISION_WORKER_URL` to the Space's `*.hf.space` URL; the
-backend automatically uses the Gradio API for Hugging Face Spaces.
-
+Fiebatt API's `SAM_SEGMENTATION_URL` to the Space's `*.hf.space` URL. Keep
+`VISION_WORKER_URL` pointed at the full worker, because the Space does not
+provide bounded video tracking or embedding endpoints.

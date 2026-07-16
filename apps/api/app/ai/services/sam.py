@@ -26,6 +26,11 @@ from app.ai.services.config import get_settings
 log = logging.getLogger(__name__)
 
 
+def _segmentation_worker_url() -> str:
+    settings = get_settings()
+    return settings.sam_segmentation_url.strip() or settings.vision_worker_url
+
+
 def _is_huggingface_space(worker_url: str) -> bool:
     """Return whether a worker URL should be called through Gradio."""
     parsed = urlparse(worker_url)
@@ -92,8 +97,7 @@ async def bbox_to_mask_result(
     bbox: dict[str, float],
 ) -> MaskResult:
     """Return reusable mask metadata without breaking the legacy path contract."""
-    settings = get_settings()
-    worker_url = settings.vision_worker_url
+    worker_url = _segmentation_worker_url()
 
     frame_bytes = Path(frame_path).read_bytes()
     frame_b64 = base64.b64encode(frame_bytes).decode()
@@ -137,7 +141,7 @@ async def bbox_to_mask_result(
 async def is_available() -> bool:
     """Check if the vision worker is reachable."""
     try:
-        worker_url = get_settings().vision_worker_url
+        worker_url = _segmentation_worker_url()
 
         if _is_huggingface_space(worker_url):
             health_url = worker_url.rstrip("/")

@@ -1,5 +1,6 @@
 """Tests for CLI command wiring via typer.testing.CliRunner."""
 
+import re
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -8,6 +9,7 @@ from typer.testing import CliRunner
 from fiebatt_cli.main import app
 
 runner = CliRunner()
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 class TestHelpOutput:
@@ -21,11 +23,12 @@ class TestHelpOutput:
     def test_generate_help_shows_options(self) -> None:
         result = runner.invoke(app, ["generate", "--help"])
         assert result.exit_code == 0
-        assert "--project" in result.output
-        assert "--start" in result.output
-        assert "--end" in result.output
-        assert "--bbox" in result.output
-        assert "--prompt" in result.output
+        output = ANSI_ESCAPE.sub("", result.output)
+        assert "--project" in output
+        assert "--start" in output
+        assert "--end" in output
+        assert "--bbox" in output
+        assert "--prompt" in output
 
     def test_auth_help(self) -> None:
         result = runner.invoke(app, ["auth", "--help"])

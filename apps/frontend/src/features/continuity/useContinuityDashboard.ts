@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   applyPropagationResult,
+  discoverOccurrences,
   getEntity,
   getProject,
   getPropagation,
@@ -59,6 +60,7 @@ export type ContinuityDashboardController = {
   hasPropagatableAppearances: boolean;
   refreshProjectSummary: () => Promise<void>;
   beginAcceptedEdit: (input: AcceptedEditInput) => Promise<void>;
+  startDiscovery: () => Promise<void>;
   startPropagation: () => Promise<void>;
   applyPropagation: (resultId: string) => Promise<void>;
   applyAllPropagation: () => Promise<void>;
@@ -238,6 +240,24 @@ export function useContinuityDashboard(
     }
   }, []);
 
+  const startDiscovery = useCallback(async () => {
+    if (!acceptedEdit) return;
+    setDiscovery({ status: "pending", jobId: null, error: null });
+    try {
+      const response = await discoverOccurrences(acceptedEdit.segmentId);
+      await beginAcceptedEdit({
+        ...acceptedEdit,
+        entityJobId: response.job_id,
+      });
+    } catch (error) {
+      setDiscovery({
+        status: "error",
+        jobId: null,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }, [acceptedEdit, beginAcceptedEdit]);
+
   const startPropagation = useCallback(async () => {
     if (!latestEntity || !acceptedEdit) return;
 
@@ -378,6 +398,7 @@ export function useContinuityDashboard(
     hasPropagatableAppearances: (latestEntity?.appearances.length ?? 0) > 0,
     refreshProjectSummary,
     beginAcceptedEdit,
+    startDiscovery,
     startPropagation,
     applyPropagation,
     applyAllPropagation,

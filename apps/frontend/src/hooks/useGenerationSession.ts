@@ -3,10 +3,12 @@ import { useEffect, useRef, useState } from "react";
 
 import {
   accept,
+  createEditPlan,
   generate,
   pollJob,
   streamJobEvents,
   type AcceptResp,
+  type EditPlanResp,
   type JobResp,
   type JobStreamEvent,
   type Variant,
@@ -26,6 +28,7 @@ type UseGenerationSessionArgs = {
   clip: Clip | null;
   sourceClip?: Clip | null;
   bbox: BBox | null;
+  selectionId?: string | null;
   previewFrameTs: number | null;
   onAccepted?: (payload: AcceptedVariantPayload) => void | Promise<void>;
 };
@@ -42,11 +45,15 @@ export function useGenerationSession({
   clip,
   sourceClip,
   bbox,
+  selectionId,
   previewFrameTs,
   onAccepted,
 }: UseGenerationSessionArgs) {
   const { dispatch } = useEDL();
   const [prompt, setPrompt] = useState("");
+  const [plan, setPlan] = useState<EditPlanResp | null>(null);
+  const [planning, setPlanning] = useState(false);
+  const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [variants, setVariants] = useState<Variant[]>([]);
@@ -58,13 +65,21 @@ export function useGenerationSession({
   const streamCtlRef = useRef<AbortController | null>(null);
   // authoritative edit end_ts returned by the job
   const actualEndTsRef = useRef<number | null>(null);
+  const actualStartTsRef = useRef<number | null>(null);
 
   const canGenerate =
     !!clip &&
     clip.kind === "source" &&
     !!clip.projectId &&
     !!prompt.trim() &&
+    !planning &&
     !busy;
+
+  function updatePrompt(value: string) {
+    setPrompt(value);
+    setFallbackNotice(null);
+    if (plan && plan.intent.raw_prompt !== value.trim()) setPlan(null);
+  }
 
   function closeStream() {
     streamCtlRef.current?.abort();
@@ -81,12 +96,16 @@ export function useGenerationSession({
     jobIdRef.current = null;
     generationTargetRef.current = null;
     actualEndTsRef.current = null;
+    actualStartTsRef.current = null;
+    setPlan(null);
+    setPlanning(false);
+    setFallbackNotice(null);
     if (!keepPrompt) setPrompt("");
   }
 
   useEffect(() => {
     clearSession();
-  }, [clip?.id]);
+  }, [clip?.id, selectionId]);
 
   useEffect(() => {
     return () => closeStream();
@@ -94,6 +113,16 @@ export function useGenerationSession({
 
   async function run(): Promise<boolean> {
     if (!canGenerate || !clip || !clip.projectId) return false;
+    if (bbox && !plan) {
+      if (selectionId) {
+        const planned = await preparePlan(undefined, true);
+        if (planned) return true;
+      } else {
+        setFallbackNotice(
+          "Precise selection unavailable. Rendering with legacy fixed window.",
+        );
+      }
+    }
     const baseClip = sourceClip ?? clip;
     closeStream();
     setBusy(true);
@@ -114,6 +143,7 @@ export function useGenerationSession({
     try {
       const { job_id } = await generate({
         project_id: clip.projectId,
+        plan_id: plan?.plan_id,
         start_ts: clip.sourceStart,
         end_ts: clip.sourceEnd,
         bbox: bbox ?? { x: 0, y: 0, w: 1, h: 1 },
@@ -152,6 +182,7 @@ export function useGenerationSession({
       }
       // capture the authoritative edit window returned by the backend
       actualEndTsRef.current = final.end_ts ?? null;
+      actualStartTsRef.current = final.start_ts ?? null;
       setVariants(final.variants);
       return true;
     } catch (e) {
@@ -160,6 +191,40 @@ export function useGenerationSession({
       return false;
     } finally {
       setBusy(false);
+      setStatus("");
+    }
+  }
+
+  async function preparePlan(
+    explicitRange?: { start: number; end: number },
+    allowLegacyFallback = false,
+  ): Promise<boolean> {
+    if (!clip?.projectId || !selectionId || !prompt.trim()) return false;
+    setPlanning(true);
+    setErr(null);
+    setStatus("planning");
+    try {
+      const next = await createEditPlan({
+        project_id: clip.projectId,
+        selection_id: selectionId,
+        prompt: prompt.trim(),
+        explicit_start_ts: explicitRange?.start,
+        explicit_end_ts: explicitRange?.end,
+      });
+      setPlan(next);
+      setFallbackNotice(null);
+      return true;
+    } catch (error) {
+      if (allowLegacyFallback) {
+        setFallbackNotice(
+          "Adaptive planning unavailable. Rendering with legacy fixed window.",
+        );
+      } else {
+        setErr(String(error));
+      }
+      return false;
+    } finally {
+      setPlanning(false);
       setStatus("");
     }
   }
@@ -175,8 +240,9 @@ export function useGenerationSession({
       const trimmedPrompt = prompt.trim();
       // Use the backend's authoritative end_ts. Fall back to the originally
       // requested range if the server did not return it.
+      const actualStart = actualStartTsRef.current ?? target.sourceStart;
       const actualEnd = actualEndTsRef.current ?? target.sourceEnd;
-      const duration = actualEnd - target.sourceStart;
+      const duration = actualEnd - actualStart;
       const replacement = newClip({
         url: variant.url,
         sourceStart: 0,
@@ -194,7 +260,7 @@ export function useGenerationSession({
       dispatch({
         type: "replace_range",
         id: target.id,
-        start: target.sourceStart,
+        start: actualStart,
         end: actualEnd,
         with: replacement,
       });
@@ -220,7 +286,10 @@ export function useGenerationSession({
 
   return {
     prompt,
-    setPrompt,
+    setPrompt: updatePrompt,
+    plan,
+    planning,
+    fallbackNotice,
     busy,
     status,
     variants,
@@ -230,6 +299,7 @@ export function useGenerationSession({
     canGenerate,
     logs,
     run,
+    adjustPlan: (start: number, end: number) => preparePlan({ start, end }),
     acceptVariant,
     clearSession,
   };

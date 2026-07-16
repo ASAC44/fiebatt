@@ -237,6 +237,12 @@
   gap: 8px;
 }
 
+.reveal__notice {
+  margin: 0;
+  color: rgba(255, 196, 87, 0.82);
+  font-size: 10px;
+}
+
 .reveal__context-pill {
   min-width: 0;
   display: inline-flex;

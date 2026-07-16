@@ -32,6 +32,7 @@ from app.api.routes import (
     preview,
     oauth,
     providers,
+    edit_plans,
     mcp,
 )
 
@@ -102,5 +103,6 @@ app.include_router(conversations.router, prefix="/api")
 app.include_router(preview.router, prefix="/api")
 app.include_router(ai_observability_router, prefix="/api/ai")
 app.include_router(providers.router, prefix="/api")
+app.include_router(edit_plans.router, prefix="/api")
 app.include_router(oauth.router)
 app.include_router(mcp.router)

@@ -9,6 +9,7 @@ from app.ai import services as ai
 from app.db.session import get_db
 from app.deps import get_session
 from app.models.project import Project
+from app.models.selection import SelectionArtifact
 from app.models.session import Session as SessionModel
 from app.schemas.mask import MaskRequest, MaskResponse
 from app.services import ffmpeg, storage
@@ -45,7 +46,7 @@ async def mask(
 
     # Call SAM to get a segmentation mask
     try:
-        mask_path = await ai.sam.bbox_to_mask(
+        mask_result = await ai.sam.bbox_to_mask_result(
             frame_path=str(frame_path),
             bbox=body.bbox.model_dump(),
         )
@@ -60,15 +61,48 @@ async def mask(
         raise HTTPException(status_code=500, detail=f"SAM segmentation failed: {e}")
 
     # Convert mask image to contour points normalized to [0, 1]
-    contours = _mask_to_contours(mask_path)
+    contours = _mask_to_contours(mask_result.path)
+
+    mask_url = await storage.publish(Path(mask_result.path), content_type="image/png")
+    subject_reference_url: str | None = None
+    try:
+        subject_reference_path = ai.sam.create_subject_reference(
+            str(frame_path), mask_result.path
+        )
+        subject_reference_url = await storage.publish(
+            Path(subject_reference_path), content_type="image/png"
+        )
+    except Exception:
+        log.exception("subject reference creation failed; keeping mask artifact")
+
+    artifact = SelectionArtifact(
+        project_id=proj.id,
+        frame_ts=body.frame_ts,
+        bbox_json=body.bbox.model_dump(),
+        contours_json=contours,
+        mask_url=mask_url,
+        subject_reference_url=subject_reference_url,
+        sam_score=mask_result.score,
+        source_revision=proj.video_url,
+    )
+    db.add(artifact)
+    await db.commit()
+    await db.refresh(artifact)
 
     # Clean up temporary mask file
     try:
-        Path(mask_path).unlink(missing_ok=True)
+        Path(mask_result.path).unlink(missing_ok=True)
     except Exception:
         pass
 
-    return MaskResponse(contour=contours[0] if contours else [], contours=contours)
+    return MaskResponse(
+        contour=contours[0] if contours else [],
+        contours=contours,
+        selection_id=artifact.id,
+        mask_url=mask_url,
+        subject_reference_url=subject_reference_url,
+        score=mask_result.score,
+    )
 
 
 def _mask_to_contours(mask_path: str) -> list[list[list[float]]]:

@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useState, type ReactNode } from "react";
+import type { EditPlanResp } from "@/lib/api";
 import { clipAtTime, duration, sourceTimeFor, useEDL, type Clip } from "@/stores/edl";
 import { Icon, type IconName } from "./Icon";
 import { AgentChat } from "./AgentChat";
@@ -125,6 +126,9 @@ function AiTab({
   const {
     prompt,
     setPrompt,
+    plan,
+    planning,
+    fallbackNotice,
     busy,
     status,
     variants,
@@ -134,12 +138,14 @@ function AiTab({
     canGenerate,
     logs,
     run,
+    adjustPlan,
     acceptVariant,
     clearSession,
   } = useGenerationSession({
     clip: activeClip,
     sourceClip: activeSourceClip,
     bbox,
+    selectionId: state.mask?.selectionId,
     previewFrameTs: activePreviewFrameTs,
     onAccepted: async ({ acceptResponse, prompt, sourceVariantUrl }) => {
       await continuity.beginAcceptedEdit({
@@ -150,7 +156,7 @@ function AiTab({
       });
     },
   });
-  const activeSession = busy || variants.length > 0 || acceptingIdx != null;
+  const activeSession = busy || planning || !!plan || variants.length > 0 || acceptingIdx != null;
 
   useEffect(() => {
     if (!activeSession) {
@@ -204,6 +210,9 @@ function AiTab({
   return (
     <section className="pane">
       <div className="reveal-host reveal-host--panel">
+        {plan && variants.length === 0 ? (
+          <EditPlanPreview plan={plan} busy={planning || busy} onAdjust={adjustPlan} />
+        ) : null}
         <GenerationReveal
           clip={activeClip}
           bbox={bbox}
@@ -214,7 +223,7 @@ function AiTab({
           session={{
             prompt,
             setPrompt,
-            busy,
+            busy: busy || planning,
             status,
             variants,
             err,
@@ -222,6 +231,12 @@ function AiTab({
             acceptingIdx,
             canGenerate,
             logs,
+            runLabel: plan
+              ? "generate planned edit"
+              : bbox
+                ? "preview adaptive plan"
+                : "generate variants",
+            notice: fallbackNotice,
             run: runReveal,
             acceptVariant: acceptReveal,
             clearSession: clearReveal,
@@ -233,6 +248,78 @@ function AiTab({
       <ContinuityPanel continuity={continuity} />
     </section>
   );
+}
+
+function EditPlanPreview({
+  plan,
+  busy,
+  onAdjust,
+}: {
+  plan: EditPlanResp;
+  busy: boolean;
+  onAdjust: (start: number, end: number) => Promise<boolean>;
+}) {
+  const [start, setStart] = useState(plan.edit_core.start_ts);
+  const [end, setEnd] = useState(plan.edit_core.end_ts);
+
+  useEffect(() => {
+    setStart(plan.edit_core.start_ts);
+    setEnd(plan.edit_core.end_ts);
+  }, [plan.plan_id, plan.edit_core.start_ts, plan.edit_core.end_ts]);
+
+  const valid = end > start && start >= plan.occurrence_start && end <= plan.occurrence_end;
+  return (
+    <section className="edit-plan" aria-label="adaptive edit plan">
+      <div className="edit-plan__head">
+        <span className="mono">planned before render</span>
+        <strong>{Math.round(plan.confidence * 100)}% confidence</strong>
+      </div>
+      <div className="edit-plan__lane mono">
+        <span>occurrence {formatPlanTime(plan.occurrence_start)}–{formatPlanTime(plan.occurrence_end)}</span>
+        <span>context {formatPlanTime(plan.generation_context.start_ts)}–{formatPlanTime(plan.generation_context.end_ts)}</span>
+      </div>
+      <div className="edit-plan__range">
+        <label>
+          core in
+          <input
+            type="number"
+            min={plan.occurrence_start}
+            max={plan.occurrence_end}
+            step={0.1}
+            value={start}
+            onChange={(event) => setStart(Number(event.target.value))}
+          />
+        </label>
+        <label>
+          core out
+          <input
+            type="number"
+            min={plan.occurrence_start}
+            max={plan.occurrence_end}
+            step={0.1}
+            value={end}
+            onChange={(event) => setEnd(Number(event.target.value))}
+          />
+        </label>
+        <button disabled={!valid || busy} onClick={() => void onAdjust(start, end)}>
+          update
+        </button>
+      </div>
+      <div className="edit-plan__meta mono">
+        <span>{plan.provider}</span>
+        <span>{plan.estimate.expected_generation_calls} call</span>
+        <span>{plan.estimate.expected_generated_seconds.toFixed(1)} generated seconds</span>
+        <span>{plan.estimate.frames_inspected} frames inspected</span>
+      </div>
+      {plan.warnings.map((warning) => (
+        <p className="edit-plan__warning mono" key={warning}>{warning}</p>
+      ))}
+    </section>
+  );
+}
+
+function formatPlanTime(value: number) {
+  return `${value.toFixed(2)}s`;
 }
 
 function ContinuityTab({

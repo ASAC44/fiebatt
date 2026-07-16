@@ -47,6 +47,8 @@ class Settings(BaseSettings):
 
     # when true, worker calls resolve to ai/services/_stubs.py
     use_ai_stubs: bool = True
+    # Plans can be previewed before PR2 changes generation semantics.
+    adaptive_edit_planning: bool = False
 
     # ── vultr object storage ────────────────────────────────────────
     # S3-compatible. empty values disable the integration and storage

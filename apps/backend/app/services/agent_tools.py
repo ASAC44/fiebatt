@@ -495,6 +495,40 @@ async def _identify_region(
     }
 
 
+@_register("create_edit_plan")
+async def _create_edit_plan(
+    *,
+    args: dict[str, Any],
+    db: AsyncSession,
+    session_id: str,
+    runner: Any | None = None,
+) -> dict[str, Any]:
+    """Use the same planning operation as the direct editor."""
+    from fastapi import HTTPException
+
+    from app.api.routes.edit_plans import create_edit_plan
+    from app.models.session import Session as SessionModel
+    from app.schemas.edit_plan_api import EditPlanRequest
+
+    try:
+        result = await create_edit_plan(
+            EditPlanRequest(
+                project_id=args["project_id"],
+                selection_id=args["selection_id"],
+                prompt=args["prompt"],
+                requested_scope=args.get("requested_scope"),
+                explicit_start_ts=args.get("explicit_start_ts"),
+                explicit_end_ts=args.get("explicit_end_ts"),
+                video_gen_provider=args.get("video_gen_provider") or "auto",
+            ),
+            SessionModel(id=session_id),
+            db,
+        )
+    except HTTPException as exc:
+        raise ValueError(str(exc.detail)) from exc
+    return result.model_dump(mode="json")
+
+
 @_register("generate_edit")
 async def _generate_edit(
     *,
@@ -506,15 +540,47 @@ async def _generate_edit(
     """Create a generate job — mirrors POST /api/generate logic."""
     from app.workers import generate_job as generate_worker
 
+    from app.models.edit_plan import EditPlanRecord
+    from app.models.selection import SelectionArtifact
+    from app.schemas.edit_plan import LocalRangeResolution
+
     project_id: str = args["project_id"]
-    start_ts: float = args["start_ts"]
-    end_ts: float = args["end_ts"]
-    bbox: dict[str, float] = args["bbox"]
-    prompt: str = args["prompt"]
-    reference_frame_ts: float = args.get("reference_frame_ts", start_ts)
-    video_gen_provider = args.get("video_gen_provider")
+    plan_id: str | None = args.get("plan_id")
 
     proj = await _get_project_or_error(db, project_id, session_id)
+    plan: EditPlanRecord | None = None
+    if plan_id:
+        plan = await db.get(EditPlanRecord, plan_id)
+        if plan is None or plan.project_id != proj.id:
+            raise ValueError(f"edit plan not found: {plan_id}")
+        if plan.source_revision != proj.video_url:
+            raise ValueError("edit plan is stale for current source")
+        selection = await db.get(SelectionArtifact, plan.selection_id)
+        if selection is None or selection.project_id != proj.id:
+            raise ValueError("edit plan selection is unavailable")
+        if _get_backend_settings().adaptive_edit_planning:
+            resolution = LocalRangeResolution.model_validate(plan.range_json)
+            start_ts = resolution.edit_core.start_ts
+            end_ts = resolution.edit_core.end_ts
+            video_gen_provider = plan.provider
+        else:
+            fixed_duration = min(3.0, proj.duration)
+            start_ts = max(
+                0.0,
+                min(selection.frame_ts - fixed_duration / 2, proj.duration - fixed_duration),
+            )
+            end_ts = start_ts + fixed_duration
+            video_gen_provider = args.get("video_gen_provider") or "auto"
+        bbox = selection.bbox_json
+        prompt = plan.raw_prompt
+        reference_frame_ts = selection.frame_ts
+    else:
+        start_ts = float(args["start_ts"])
+        end_ts = float(args["end_ts"])
+        bbox = args["bbox"]
+        prompt = args["prompt"]
+        reference_frame_ts = float(args.get("reference_frame_ts", start_ts))
+        video_gen_provider = args.get("video_gen_provider") or "auto"
 
     length = end_ts - start_ts
     if length < MIN_SEG_LEN or length > MAX_SEG_LEN:
@@ -539,7 +605,11 @@ async def _generate_edit(
         bbox_json=bbox,
         prompt=prompt,
         reference_frame_ts=reference_frame_ts,
-        payload={"video_gen_provider": video_gen_provider or "auto"},
+        payload={
+            "video_gen_provider": video_gen_provider or "auto",
+            "plan_id": plan.id if plan else None,
+            "planned_context": plan.range_json if plan else None,
+        },
     )
     db.add(job)
     await db.commit()

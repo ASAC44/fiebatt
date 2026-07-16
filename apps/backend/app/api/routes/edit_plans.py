@@ -8,6 +8,7 @@ from app.ai.services.provider_capabilities import (
     select_video_provider,
     validate_provider_duration,
 )
+from app.config.settings import get_settings
 from app.db.session import get_db
 from app.deps import get_session
 from app.models.edit_plan import EditPlanRecord, GenerationChunk
@@ -120,6 +121,10 @@ async def create_edit_plan(
         else f"selected {provider} image conditioning; source-video context is unsupported"
     )
     warnings = list(resolution.warnings)
+    if not get_settings().adaptive_edit_planning:
+        warnings.append(
+            "adaptive generation rollout is disabled; render will use the legacy fixed window"
+        )
     if not capabilities.source_video_edit:
         warnings.append(f"{provider} cannot consume source-video motion context")
 

@@ -59,6 +59,7 @@ class AgentChatRequest(BaseModel):
     playhead_ts: float | None = None
     duration: float | None = None
     bbox: BBoxParam | None = None
+    selection_id: str | None = None
     video_gen_provider: Literal["auto", "wan", "happyhorse", "veo", "meshapi_veo"] | None = None
 
 
@@ -73,7 +74,9 @@ Preferred workflow:
 1. Understand the current reel state with get_timeline, preview_frame, and preview_strip.
 2. Use analyze_video only when broader scene/entity context would genuinely help.
 3. Use identify_region when the user points at a subject or bounding box.
-4. Use generate_edit for localized edits and then stop the generation turn.
+4. For a localized selected edit, call create_edit_plan once, inspect its
+   returned scope/range/provider, then call generate_edit with that plan_id.
+   Do not independently invent another timeline range.
    The UI polls the returned job_id and shows variants as soon as they are
    ready. Do not call wait_for_job automatically; use get_job_status only
    when the user explicitly asks for a status update.
@@ -119,9 +122,9 @@ active project_id, the user's playhead timestamp, the full reel duration,
 and any bounding box the user has drawn on the preview. You MUST use those
 values directly. Do NOT ask the user for a project_id, a bounding box, or
 timestamps that you can derive from the playhead, duration, or their
-natural-language request. Default start_ts to 0.0 and end_ts to
-timeline_duration (the full project length). Only use a shorter window
-when the user explicitly specifies a time range. Only ask for
+natural-language request. Default ambiguous edits to the local occurrence
+around the playhead. Never default to the full timeline. Reel-wide discovery
+requires explicit language such as "everywhere" or "every time". Only ask for
 clarification if the request is genuinely ambiguous in a way the
 context can't resolve.
 
@@ -170,6 +173,7 @@ def _build_context_block(body: "AgentChatRequest") -> str:
         f"- playhead_ts: {playhead}\n"
         f"- timeline_duration: {duration}\n"
         f"- active_bbox: {_format_bbox(body.bbox)}\n"
+        f"- selection_id: {body.selection_id or 'none'}\n"
     )
 
 # ---- Gemini tool declarations ----
@@ -177,6 +181,22 @@ def _build_context_block(body: "AgentChatRequest") -> str:
 types = _genai_types
 
 TOOL_DECLARATIONS = [
+    types.FunctionDeclaration(
+        name="create_edit_plan",
+        description=(
+            "Create a non-generating local plan from the current persisted selection. "
+            "Returns the authoritative plan_id, core, context, provider, and estimate."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "project_id": types.Schema(type=types.Type.STRING),
+                "selection_id": types.Schema(type=types.Type.STRING),
+                "prompt": types.Schema(type=types.Type.STRING),
+            },
+            required=["project_id", "selection_id", "prompt"],
+        ),
+    ),
     types.FunctionDeclaration(
         name="analyze_video",
         description=(
@@ -232,6 +252,10 @@ TOOL_DECLARATIONS = [
             type=types.Type.OBJECT,
             properties={
                 "project_id": types.Schema(type=types.Type.STRING),
+                "plan_id": types.Schema(
+                    type=types.Type.STRING,
+                    description="Authoritative ID returned by create_edit_plan",
+                ),
                 "start_ts": types.Schema(type=types.Type.NUMBER),
                 "end_ts": types.Schema(type=types.Type.NUMBER),
                 "bbox": types.Schema(
@@ -249,7 +273,7 @@ TOOL_DECLARATIONS = [
                     description="Frame timestamp for reference (defaults to start_ts)",
                 ),
             },
-            required=["project_id", "start_ts", "end_ts", "bbox", "prompt"],
+            required=["project_id", "plan_id"],
         ),
     ),
     types.FunctionDeclaration(
@@ -989,7 +1013,9 @@ async def _agent_stream(
             tool_call_id = tc.id
             tool_name = tc.function.name
             tool_args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-            if tool_name == "generate_edit" and body.video_gen_provider:
+            if tool_name == "create_edit_plan" and body.selection_id:
+                tool_args.setdefault("selection_id", body.selection_id)
+            if tool_name in {"create_edit_plan", "generate_edit"} and body.video_gen_provider:
                 tool_args["video_gen_provider"] = body.video_gen_provider
 
             _tool_calls_log.append({"id": tool_call_id, "tool": tool_name, "args": tool_args})

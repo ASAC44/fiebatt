@@ -35,6 +35,7 @@ export type RevealSession = {
   acceptingIdx: number | null;
   canGenerate: boolean;
   logs: GenerationLogEntry[];
+  runLabel?: string;
   run: () => Promise<boolean>;
   acceptVariant: (idx: number) => Promise<boolean>;
   clearSession: () => void;
@@ -62,6 +63,7 @@ export function GenerationReveal({
     acceptingIdx,
     canGenerate,
     logs,
+    runLabel,
     run,
     acceptVariant,
     clearSession,
@@ -207,7 +209,7 @@ export function GenerationReveal({
             onClick={() => void handleRun()}
             disabled={!canGenerate}
           >
-            {busy ? `generating · ${formatStatus(status)}` : "generate variants"}
+            {busy ? `${formatStatus(status)}…` : runLabel ?? "generate variants"}
           </button>
         </div>
 

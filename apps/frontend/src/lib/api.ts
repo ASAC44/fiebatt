@@ -141,6 +141,7 @@ export type JobResponse = JobResp;
 
 export type GenerateReq = {
   project_id: string;
+  plan_id?: string;
   start_ts: number;
   end_ts: number;
   bbox: BBox;
@@ -150,6 +151,49 @@ export type GenerateReq = {
 };
 
 export type GenerateRequest = GenerateReq;
+
+export type EditPlanResp = {
+  plan_id: string;
+  project_id: string;
+  selection_id: string;
+  scope: "local" | "explicit_range" | "selected_occurrences" | "all_occurrences";
+  intent: {
+    raw_prompt: string;
+    change_type: "appearance" | "removal" | "replacement" | "motion" | "scene";
+    action_phases: string[];
+    estimated_action_seconds: number;
+    requires_recovery_motion: boolean;
+  };
+  edit_core: { start_ts: number; end_ts: number };
+  generation_context: {
+    start_ts: number;
+    end_ts: number;
+    edit_core: { start_ts: number; end_ts: number };
+  };
+  occurrence_start: number;
+  occurrence_end: number;
+  provider: string;
+  provider_reason: string;
+  estimate: {
+    analysis_mode: string;
+    frames_inspected: number;
+    expected_generation_calls: number;
+    expected_generated_seconds: number;
+    requires_global_discovery: boolean;
+  };
+  confidence: number;
+  warnings: string[];
+  status: string;
+};
+
+export type CreateEditPlanReq = {
+  project_id: string;
+  selection_id: string;
+  prompt: string;
+  explicit_start_ts?: number;
+  explicit_end_ts?: number;
+  video_gen_provider?: VideoProvider;
+};
 
 export type AcceptResp = {
   segment_id: string;
@@ -346,6 +390,16 @@ export const uploadProject = upload;
 
 export function generate(req: GenerateReq): Promise<{ job_id: string }> {
   return request("/api/generate", {
+    method: "POST",
+    body: JSON.stringify({
+      video_gen_provider: getSettings().videoProvider,
+      ...req,
+    }),
+  });
+}
+
+export function createEditPlan(req: CreateEditPlanReq): Promise<EditPlanResp> {
+  return request("/api/edit-plans", {
     method: "POST",
     body: JSON.stringify({
       video_gen_provider: getSettings().videoProvider,

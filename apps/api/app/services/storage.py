@@ -1,4 +1,4 @@
-"""Storage layer — Amazon S3 with a local scratch fallback.
+"""Storage layer — S3 object storage with a local scratch fallback.
 
 Everything ffmpeg touches needs a real file path, so we always round-trip
 through a local scratch directory (settings.storage_path). In S3 mode:

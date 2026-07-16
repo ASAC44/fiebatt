@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./fiebatt.db"
 
     # local scratch dir — ffmpeg needs real file paths, so we write here first
-    # and upload to S3 on publish(). once s3 is wired this is just a cache,
+    # and upload to S3 on publish(). once S3 is wired this is just a cache,
     # never user-facing.
     storage_path: Path = Path("./storage")
 
@@ -60,18 +60,18 @@ class Settings(BaseSettings):
     # Emergency operator escape hatch; request must also explicitly opt in.
     allow_hard_failed_acceptance: bool = False
 
-    # ── object storage ─────────────────────────────────────────────────
-    # Amazon S3. Setting a bucket enables the integration. Credentials are
-    # optional so boto3 can use its normal environment or workload-role chain.
-    # S3_ENDPOINT_URL is only needed for a custom endpoint.
+    # ── object storage ──────────────────────────────────────────────
+    # Setting a bucket enables S3. Credentials are optional so boto3 can
+    # use its normal environment or workload-role credential chain.
+    # S3_ENDPOINT_URL is only needed for an S3-compatible custom endpoint.
     s3_bucket: str = ""
     aws_region: str = "us-east-1"
     aws_access_key_id: str = ""
     aws_secret_access_key: str = ""
     aws_session_token: str = ""
     s3_endpoint_url: str = ""
-    # "presigned" → bucket stays private, API mints GET urls
-    # "public"    → urls use the bucket's public S3 endpoint (requires
+    # "presigned" → bucket stays private, API mints GET URLs
+    # "public"    → URLs use the bucket's public endpoint (requires
     #               bucket read policy set to public-read)
     media_url_mode: str = "presigned"
     presign_expiry: int = 7 * 24 * 3600  # 7 days, max for sigv4

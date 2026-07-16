@@ -35,4 +35,4 @@ Everything in this folder is yours. FastAPI + Python.
 - Audio: replaced segments = muted, originals = passthrough
 
 ## Don't touch
-- `apps/web/`
+- `apps/web/`, `apps/api/vision-worker/`

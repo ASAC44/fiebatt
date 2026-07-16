@@ -12,7 +12,7 @@ _settings = get_settings()
 def _engine_kwargs(url: str) -> dict:
     """Tune the engine per dialect.
 
-    • postgres (vultr managed): pool, pre_ping, recycle idle conns so the
+    • postgres: pool, pre_ping, recycle idle connections so the
       ssl connection doesn't rot after a few mins. ssl is negotiated via
       the ?ssl=require / ?sslmode=require flag on the DSN.
     • sqlite: default pool is fine, no extras.

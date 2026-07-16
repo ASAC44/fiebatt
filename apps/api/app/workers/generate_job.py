@@ -5,7 +5,7 @@ Single-edit mode: one generation per prompt.
 Flow per submitted job:
   1. flip job to 'processing'
   2. extract source clip via ffmpeg
-  3. grab the reference frame + crop the bbox (image-conditioning slot)
+  3. extract a subject reference separately from full-frame boundary anchors
   4. ask Gemini for a structured edit plan (we use plan[0])
    5. run one generation (Wan or HappyHorse, per provider config), write the resulting Variant row
   6. score the result with Gemini (best-effort)
@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -30,8 +32,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai import services as ai
 from app.ai.services import sam as sam_service
+from app.ai.services.conditioning import (
+    GenerationConditioning,
+    boundary_anchor_timestamps,
+)
 from app.ai.services.provider_capabilities import (
     normalize_video_provider,
+    select_source_edit_mode,
     select_video_provider,
 )
 from app.db.session import AsyncSessionLocal
@@ -40,6 +47,21 @@ from app.models.project import Project
 from app.models.session import Session as SessionModel
 from app.services.credentials import provider_overrides
 from app.services import ffmpeg, job_events, storage
+from app.services.continuity_validator import (
+    ContinuityReport,
+    validate_generated_continuity,
+)
+from app.services.generation_window import (
+    protected_context_prompt,
+    resolve_generation_window,
+)
+from app.services.generation_quality import (
+    GenerationQualityAction,
+    corrective_prompt,
+    decide_generation_quality,
+)
+from app.services.generation_telemetry import build_local_flow_telemetry
+from app.services.local_compositor import composite_generated_target
 
 log = logging.getLogger("fiebatt.jobs.generate")
 
@@ -118,13 +140,10 @@ async def _run_variant(
     clip_path: Path,
     clip_url: str,
     plan: dict,
-    frame_path: str | None,
-    last_frame_path: str | None = None,
+    conditioning: GenerationConditioning,
     duration: float = 5,
     resolution: str = "720P",
     source_video_url: str | None = None,
-    mask_image_url: str | None = None,
-    mask_frame_id: int = 1,
 ) -> bool:
     provider = _normalize_provider(str(plan.get("_video_gen_provider") or ""))
     provider_label = _provider_label(provider)
@@ -150,10 +169,12 @@ async def _run_variant(
             )
 
     log.info(
-        "[gen.variant] START job=%s variant=%s frame=%s plan_keys=%s",
+        "[gen.variant] START job=%s variant=%s subject=%s anchors=%s/%s plan_keys=%s",
         job_id,
         variant_id,
-        "yes" if frame_path else "none (text-only)",
+        "yes" if conditioning.subject_reference_path else "no",
+        "yes" if conditioning.start_anchor_path else "no",
+        "yes" if conditioning.end_anchor_path else "no",
         sorted(plan.keys()) if isinstance(plan, dict) else "?",
     )
 
@@ -163,13 +184,17 @@ async def _run_variant(
         result = await ai.runway.generate(
             str(clip_path),
             plan,
-            frame_path=frame_path,
-            last_frame_path=last_frame_path,
+            subject_reference_path=conditioning.subject_reference_path,
+            start_anchor_path=conditioning.start_anchor_path,
+            end_anchor_path=conditioning.end_anchor_path,
             source_video_url=source_video_url,
-            mask_image_url=mask_image_url,
-            mask_frame_id=mask_frame_id,
+            mask_image_url=conditioning.mask_image_url,
+            mask_frame_id=conditioning.mask_frame_id,
             on_tick=tick,
-            duration=round(duration),
+            # Providers render whole seconds. Round upward so fractional
+            # adaptive context is never shorter than the source window;
+            # conform_generated_edit trims the result back exactly.
+            duration=math.ceil(duration - 1e-6),
             resolution=resolution,
         )
         log.info(
@@ -315,20 +340,34 @@ async def run(job_id: str) -> None:
         prompt = job.prompt or ""
         reference_frame_ts = float(job.reference_frame_ts or start_ts)
         payload = dict(job.payload or {})
+        generation_window = resolve_generation_window(
+            start_ts,
+            end_ts,
+            payload=payload,
+            project_duration=float(proj.duration),
+        )
         requested_provider = _normalize_provider(str(payload.get("video_gen_provider") or ""))
         video_provider = select_video_provider(
             requested_provider,
             source_video=True,
-            duration=end_ts - start_ts,
+            duration=generation_window.context_duration,
         )
         video_provider_label = _provider_label(video_provider)
         _, sequenced_motion, _ = ai._rewrite_motion_prompt(prompt)  # type: ignore[attr-defined]
-        requested_end_ts = end_ts
-        clip_end_ts = requested_end_ts
+        requested_end_ts = generation_window.core_end
+        clip_start_ts = generation_window.context_start
+        clip_end_ts = generation_window.context_end
+        project_fps = float(proj.fps or 1.0)
+        start_anchor_ts, end_anchor_ts = boundary_anchor_timestamps(
+            clip_start_ts,
+            clip_end_ts,
+            project_fps,
+        )
         payload.update({
             "requested_provider": requested_provider,
             "selected_provider": video_provider,
             "selected_model": _provider_model(video_provider),
+            "execution_window": generation_window.metadata(),
             "warnings": [],
         })
         job.payload = payload
@@ -345,6 +384,7 @@ async def run(job_id: str) -> None:
         project_id=proj.id,
         start_ts=start_ts,
         end_ts=requested_end_ts,
+        context_start_ts=clip_start_ts,
         context_end_ts=clip_end_ts,
         requested_provider=requested_provider,
         selected_provider=video_provider,
@@ -354,6 +394,8 @@ async def run(job_id: str) -> None:
         bbox_is_full_frame=bbox_is_full_frame,
         prompt=prompt,
         reference_frame_ts=reference_frame_ts,
+        start_anchor_ts=start_anchor_ts,
+        end_anchor_ts=end_anchor_ts,
     )
 
     if bbox_is_full_frame:
@@ -367,59 +409,96 @@ async def run(job_id: str) -> None:
 
     # ---- parallel prep: extract clip + extract frame concurrently ----
     clip_tmp_path, _ = storage.new_path("clips", "mp4")
-    frame_path, _ = storage.new_path("keyframes", "jpg")
+    subject_frame_path, _ = storage.new_path("keyframes", "jpg")
+    start_anchor_path, _ = storage.new_path("keyframes", "jpg")
     end_frame_path, _ = storage.new_path("keyframes", "jpg")
 
     await _emit(
         job_id,
         "extract_clip",
-        f"slicing source context {start_ts:.2f}s→{clip_end_ts:.2f}s",
+        f"slicing source context {clip_start_ts:.2f}s→{clip_end_ts:.2f}s",
+        requested_start_ts=start_ts,
         requested_end_ts=requested_end_ts,
     )
     await _emit(job_id, "extract_frame", f"grabbing reference frame @ {reference_frame_ts:.2f}s")
 
     async def _do_extract_clip() -> tuple[Path, str]:
-        await ffmpeg.extract_clip(proj.video_path, start_ts, clip_end_ts, clip_tmp_path)
+        await ffmpeg.extract_clip(
+            proj.video_path,
+            clip_start_ts,
+            clip_end_ts,
+            clip_tmp_path,
+        )
         clip_url = await storage.publish(clip_tmp_path, content_type="video/mp4")
         return clip_tmp_path, clip_url
 
-    async def _do_extract_frame() -> tuple[Path, bool]:
+    async def _do_extract_subject_frame() -> tuple[Path, bool]:
         try:
-            await ffmpeg.extract_frame(proj.video_path, reference_frame_ts, frame_path)
-            await storage.publish(frame_path, content_type="image/jpeg")
-            return frame_path, True
+            await ffmpeg.extract_frame(
+                proj.video_path,
+                reference_frame_ts,
+                subject_frame_path,
+            )
+            await storage.publish(subject_frame_path, content_type="image/jpeg")
+            return subject_frame_path, True
         except Exception as e:
-            log.exception("frame extract failed (continuing without frame)")
-            await _emit(job_id, "extract_frame_error", f"couldn't grab reference frame: {e}")
-            return frame_path, False
+            log.exception("subject frame extract failed (continuing without subject reference)")
+            await _emit(
+                job_id,
+                "extract_frame_error",
+                f"couldn't grab subject reference frame: {e}",
+            )
+            return subject_frame_path, False
+
+    async def _do_extract_start_anchor() -> tuple[Path, bool]:
+        try:
+            await ffmpeg.extract_frame(
+                proj.video_path,
+                start_anchor_ts,
+                start_anchor_path,
+            )
+            await storage.publish(start_anchor_path, content_type="image/jpeg")
+            return start_anchor_path, True
+        except Exception as e:
+            log.exception("start anchor extract failed")
+            await _emit(
+                job_id,
+                "extract_start_anchor_error",
+                f"couldn't grab full-frame start anchor: {e}",
+            )
+            return start_anchor_path, False
 
     async def _do_extract_end_frame() -> tuple[Path, bool]:
-        if video_provider != "veo" or round(requested_end_ts - start_ts) != 8:
-            return end_frame_path, False
         try:
-            await ffmpeg.extract_frame(proj.video_path, requested_end_ts - 0.05, end_frame_path)
+            await ffmpeg.extract_frame(proj.video_path, end_anchor_ts, end_frame_path)
             await storage.publish(end_frame_path, content_type="image/jpeg")
             return end_frame_path, True
         except Exception as e:
-            log.exception("end frame extract failed (continuing with first frame only)")
-            await _emit(job_id, "extract_end_frame_error", f"couldn't grab end frame: {e}")
+            log.exception("end anchor extract failed")
+            await _emit(
+                job_id,
+                "extract_end_frame_error",
+                f"couldn't grab full-frame end anchor: {e}",
+            )
             return end_frame_path, False
 
     clip_task = asyncio.create_task(_do_extract_clip())
-    frame_task = asyncio.create_task(_do_extract_frame())
+    subject_frame_task = asyncio.create_task(_do_extract_subject_frame())
+    start_anchor_task = asyncio.create_task(_do_extract_start_anchor())
     end_frame_task = asyncio.create_task(_do_extract_end_frame())
 
-    # frame is needed for plan_variants — wait for it first
-    frame_path, frame_ok = await frame_task
+    # Subject frame is needed for plan_variants; anchors remain full-frame.
+    subject_frame_path, subject_frame_ok = await subject_frame_task
+    start_anchor_path, start_anchor_ok = await start_anchor_task
     end_frame_path, end_frame_ok = await end_frame_task
-    conditioning_frame = str(frame_path) if frame_ok else None
-    conditioning_end_frame = str(end_frame_path) if end_frame_ok else None
+    conditioning_start_anchor = str(start_anchor_path) if start_anchor_ok else None
+    conditioning_end_anchor = str(end_frame_path) if end_frame_ok else None
 
     # crop the bbox for Gemini reference while plan runs
     crop_path: Path | None = None
-    if frame_ok and bbox and not bbox_is_full_frame:
+    if subject_frame_ok and bbox and not bbox_is_full_frame:
         try:
-            crop_path = await ffmpeg.crop_bbox_from_frame(frame_path, bbox)
+            crop_path = await ffmpeg.crop_bbox_from_frame(subject_frame_path, bbox)
             await storage.publish(crop_path, content_type="image/png")
             await _emit(
                 job_id,
@@ -437,8 +516,8 @@ async def run(job_id: str) -> None:
             )
             crop_path = None
 
-    edit_duration = requested_end_ts - start_ts
-    segment_duration = round(edit_duration)
+    generation_duration = generation_window.context_duration
+    segment_duration = round(generation_duration)
     generation_resolution = "720P"
 
     # Derive generation conditioning from the actual SAM pixels, not merely
@@ -448,13 +527,18 @@ async def run(job_id: str) -> None:
     mask_path: str | None = None
     mask_image_url: str | None = None
     subject_reference_path: str | None = None
-    if frame_ok and bbox and not bbox_is_full_frame:
+    sam_available = False
+    if subject_frame_ok and bbox and not bbox_is_full_frame:
         try:
-            if await sam_service.is_available():
-                mask_path = await sam_service.bbox_to_mask(str(frame_path), bbox)
+            sam_available = await sam_service.is_available()
+            if sam_available:
+                mask_path = await sam_service.bbox_to_mask(
+                    str(subject_frame_path),
+                    bbox,
+                )
                 mask_image_url = await storage.publish(Path(mask_path), content_type="image/png")
                 subject_reference_path = sam_service.create_subject_reference(
-                    str(frame_path),
+                    str(subject_frame_path),
                     mask_path,
                 )
                 await storage.publish(Path(subject_reference_path), content_type="image/png")
@@ -462,7 +546,15 @@ async def run(job_id: str) -> None:
                     job_id,
                     "sam_mask",
                     "SAM isolated the selected subject for localized generation",
-                    native_tracking_candidate=video_provider == "wan" and edit_duration <= 5.001,
+                    native_tracking_candidate=(
+                        select_source_edit_mode(
+                            video_provider,
+                            duration=generation_duration,
+                            source_video=True,
+                            mask_available=True,
+                        )
+                        == "tracked_mask"
+                    ),
                 )
             else:
                 await _emit(job_id, "sam_unavailable", "SAM unavailable; using bbox crop fallback")
@@ -480,7 +572,14 @@ async def run(job_id: str) -> None:
     )
 
     # start Gemini plan while clip finishes in background
-    plan_task = asyncio.create_task(ai.gemini.plan_variants(prompt, bbox, str(frame_path)))
+    planning_frame_path = (
+        str(subject_frame_path)
+        if subject_frame_ok
+        else (conditioning_start_anchor or "")
+    )
+    plan_task = asyncio.create_task(
+        ai.gemini.plan_variants(prompt, bbox, planning_frame_path)
+    )
     clip_path, clip_url = await clip_task  # should be done by now
     try:
         plans = await plan_task
@@ -501,13 +600,16 @@ async def run(job_id: str) -> None:
     plan["_video_gen_provider"] = video_provider
 
     intent = str(plan.get("intent") or "").lower()
-    strategy = "first_frame"
-
-    conditioning_frame_effective: str | None = (
+    subject_reference_effective: str | None = (
         subject_reference_path
         or (str(crop_path) if crop_path is not None else None)
-        or conditioning_frame
     )
+    if video_provider in {"wan", "happyhorse"}:
+        strategy = "source_video_with_subject_reference"
+    elif video_provider == "veo" and abs(generation_duration - 8.0) <= 0.05:
+        strategy = "first_last_boundary_frames"
+    else:
+        strategy = "start_boundary_frame"
 
     safe_plan = {
         "description": plan.get("description"),
@@ -534,28 +636,45 @@ async def run(job_id: str) -> None:
         variant_id = v.id
         await db.commit()
 
-    if subject_reference_path:
-        conditioned_on = "SAM-isolated subject reference"
-    elif crop_path is not None:
-        conditioned_on = "bbox crop fallback"
-    elif conditioning_frame_effective:
-        conditioned_on = "full frame"
-    else:
-        conditioned_on = "text_only (scene regenerated from prose)"
-
     source_video_url = _public_url_or_none(clip_url)
     mask_public_url = _public_url_or_none(mask_image_url or "")
-    project_fps = float(proj.fps or 1.0)
-    mask_frame_id = min(
-        round(edit_duration * project_fps) + 1,
-        max(1, round(max(0.0, reference_frame_ts - start_ts) * project_fps) + 1),
+    edit_mode = select_source_edit_mode(
+        video_provider,
+        duration=generation_duration,
+        source_video=source_video_url is not None,
+        mask_available=mask_public_url is not None,
     )
+    mask_frame_id = min(
+        round(generation_duration * project_fps) + 1,
+        max(
+            1,
+            round(max(0.0, reference_frame_ts - clip_start_ts) * project_fps) + 1,
+        ),
+    )
+    generation_conditioning = GenerationConditioning(
+        subject_reference_path=subject_reference_effective,
+        subject_reference_timestamp=(
+            reference_frame_ts if subject_reference_effective else None
+        ),
+        mask_image_url=mask_public_url if edit_mode == "tracked_mask" else None,
+        mask_frame_id=mask_frame_id,
+        start_anchor_path=conditioning_start_anchor,
+        start_anchor_timestamp=(start_anchor_ts if conditioning_start_anchor else None),
+        end_anchor_path=conditioning_end_anchor,
+        end_anchor_timestamp=(end_anchor_ts if conditioning_end_anchor else None),
+    )
+    conditioned_on = {
+        "subject_reference": subject_reference_effective is not None,
+        "source_video": source_video_url is not None,
+        "start_anchor": conditioning_start_anchor is not None,
+        "end_anchor": conditioning_end_anchor is not None,
+    }
     warnings: list[str] = []
     if video_provider in {"wan", "happyhorse"} and source_video_url is None:
         warnings.append(
             f"{video_provider} could not access a public source clip; using frame-conditioned generation"
         )
-    if mask_path and video_provider == "wan" and edit_duration > 5.001:
+    if mask_path and video_provider == "wan" and edit_mode == "source_video":
         warnings.append(
             "Wan native tracked-mask edits are limited to 5 seconds; using the isolated SAM subject reference"
         )
@@ -563,13 +682,55 @@ async def run(job_id: str) -> None:
         warnings.append(
             "SAM mask is not provider-accessible; using the isolated SAM subject reference"
         )
+    if video_provider in {"veo", "meshapi_veo"} and conditioning_start_anchor is None:
+        warnings.append(
+            f"{video_provider} start boundary anchor is unavailable; using text-only generation"
+        )
     async with AsyncSessionLocal() as db:
         current_job = await db.get(Job, job_id)
         if current_job is not None:
             current_payload = dict(current_job.payload or {})
             current_payload["warnings"] = warnings
+            current_payload["conditioning"] = generation_conditioning.metadata()
             current_job.payload = current_payload
             await db.commit()
+
+    def prompt_for_provider(provider: str, correction: str = "") -> str:
+        base = (
+            protected_context_prompt(prompt, generation_window)
+            if provider in {"wan", "happyhorse"} and source_video_url is not None
+            else prompt
+        )
+        return base + correction
+
+    async def dispatch(provider: str, correction: str = "") -> bool:
+        attempt_mode = select_source_edit_mode(
+            provider,
+            duration=generation_duration,
+            source_video=source_video_url is not None,
+            mask_available=mask_public_url is not None,
+        )
+        attempt_conditioning = replace(
+            generation_conditioning,
+            mask_image_url=(
+                mask_public_url if attempt_mode == "tracked_mask" else None
+            ),
+        )
+        return await _run_variant(
+            job_id=job_id,
+            variant_id=variant_id,
+            clip_path=clip_path,
+            clip_url=clip_url,
+            plan={
+                **plan,
+                "_video_gen_provider": provider,
+                "_edit_prompt": prompt_for_provider(provider, correction),
+            },
+            conditioning=attempt_conditioning,
+            duration=generation_duration,
+            resolution=generation_resolution,
+            source_video_url=source_video_url,
+        )
 
     await _emit(
         job_id,
@@ -583,20 +744,54 @@ async def run(job_id: str) -> None:
         warnings=warnings,
     )
 
-    await _run_variant(
-        job_id=job_id,
-        variant_id=variant_id,
-        clip_path=clip_path,
-        clip_url=clip_url,
-        plan={**plan, "_edit_prompt": prompt},
-        frame_path=conditioning_frame_effective,
-        last_frame_path=conditioning_end_frame,
-        duration=edit_duration,
-        resolution=generation_resolution,
-        source_video_url=source_video_url,
-        mask_image_url=mask_public_url if edit_duration <= 5.001 else None,
-        mask_frame_id=mask_frame_id,
-    )
+    attempts = 1
+    generated_seconds = generation_duration
+    provider_attempts = [video_provider]
+    fallback_used = False
+    initial_ok = await dispatch(video_provider)
+
+    if generation_window.adaptive and not initial_ok:
+        async with AsyncSessionLocal() as db:
+            failed_variant = await db.get(Variant, variant_id)
+            generation_error = failed_variant.error if failed_variant is not None else "generation failed"
+        failure_decision = decide_generation_quality(
+            score=None,
+            continuity=None,
+            current_provider=video_provider,
+            duration=generation_duration,
+            attempts=attempts,
+            generated_seconds=generated_seconds,
+            fallback_used=fallback_used,
+            source_video_available=source_video_url is not None,
+            generation_error=generation_error,
+        )
+        if failure_decision.action in {
+            GenerationQualityAction.CORRECTIVE_RETRY,
+            GenerationQualityAction.PROVIDER_FALLBACK,
+        }:
+            if failure_decision.action == GenerationQualityAction.PROVIDER_FALLBACK:
+                assert failure_decision.next_provider is not None
+                video_provider = failure_decision.next_provider
+                fallback_used = True
+            attempts += 1
+            generated_seconds += generation_duration
+            provider_attempts.append(video_provider)
+            await _emit(
+                job_id,
+                (
+                    "gen_provider_fallback"
+                    if failure_decision.action == GenerationQualityAction.PROVIDER_FALLBACK
+                    else "gen_retry"
+                ),
+                f"generation failed; retrying with {_provider_label(video_provider)}",
+                attempt=attempts,
+                provider=video_provider,
+                evidence=list(failure_decision.evidence),
+            )
+            initial_ok = await dispatch(
+                video_provider,
+                corrective_prompt(failure_decision.evidence),
+            )
 
     # collect outcome
     async with AsyncSessionLocal() as db:
@@ -621,6 +816,96 @@ async def run(job_id: str) -> None:
         await _emit_terminal(job_id, "error", err or "generation failed")
         return
 
+    async def maybe_composite(
+        variant: Variant,
+        provider: str,
+    ) -> Variant:
+        if (
+            not generation_window.adaptive
+            or bbox_is_full_frame
+            or not sam_available
+            or not variant.url
+        ):
+            return variant
+        attempt_mode = select_source_edit_mode(
+            provider,
+            duration=generation_duration,
+            source_video=source_video_url is not None,
+            mask_available=mask_public_url is not None,
+        )
+        if attempt_mode == "tracked_mask":
+            await _emit(
+                job_id,
+                "localized_composite_skipped",
+                "provider already used its native tracked-mask edit path",
+                provider=provider,
+                reason="provider_native_tracked_mask",
+            )
+            return variant
+
+        try:
+            generated_path = await storage.path_from_url(variant.url)
+            composite_path, _ = storage.new_path("generated", "mp4")
+            result = await composite_generated_target(
+                source_path=clip_path,
+                generated_path=generated_path,
+                bbox=bbox,
+                seed_frame_index=mask_frame_id - 1,
+                output_path=composite_path,
+            )
+        except Exception as exc:
+            log.exception("generated-output compositing failed; keeping provider output")
+            result_metadata: dict[str, Any] = {
+                "applied": False,
+                "provider": provider,
+                "reason": f"output compositing unavailable: {exc}",
+            }
+        else:
+            result_metadata = {
+                "applied": result.applied,
+                "provider": provider,
+                "reason": result.reason,
+                "metrics": result.metrics,
+            }
+            if result.applied and result.path is not None:
+                composite_url = await storage.publish(
+                    result.path,
+                    content_type="video/mp4",
+                )
+                async with AsyncSessionLocal() as db:
+                    await _update_variant(db, variant.id, url=composite_url)
+                    refreshed = await db.get(Variant, variant.id)
+                    if refreshed is not None:
+                        variant = refreshed
+
+        async with AsyncSessionLocal() as db:
+            current_job = await db.get(Job, job_id)
+            if current_job is not None:
+                current_payload = dict(current_job.payload or {})
+                history = list(current_payload.get("localized_compositing") or [])
+                history.append(result_metadata)
+                current_payload["localized_compositing"] = history
+                current_job.payload = current_payload
+                await db.commit()
+        await _emit(
+            job_id,
+            (
+                "localized_composite_done"
+                if result_metadata["applied"]
+                else "localized_composite_skipped"
+            ),
+            (
+                "composited tracked generated target over original footage"
+                if result_metadata["applied"]
+                else "kept provider-native output because generated-target tracking was unsafe"
+            ),
+            **result_metadata,
+        )
+        return variant
+
+    if generation_window.adaptive:
+        done = [await maybe_composite(done[0], video_provider)]
+
     async def score_variant(variant: Variant) -> dict | None:
         if not variant.url:
             return None
@@ -632,63 +917,221 @@ async def run(job_id: str) -> None:
             return None
         return await _score_variant_safe(sampled_frames, prompt)
 
-    await _emit(job_id, "score_start", "sampling generated video for quality scoring")
-    score = await score_variant(done[0])
-
-    needs_retry = isinstance(score, dict) and (
-        int(score.get("visual_coherence") or 0) < 5
-        or int(score.get("prompt_adherence") or 0) < 6
-    )
-    if needs_retry:
-        previous_url = done[0].url
-        previous_description = done[0].description
+    async def validate_continuity(variant: Variant) -> ContinuityReport | None:
+        if not variant.url:
+            return None
+        try:
+            generated_path = await storage.path_from_url(variant.url)
+            report = await validate_generated_continuity(
+                source_path=clip_path,
+                generated_path=generated_path,
+                window=generation_window,
+                bbox=bbox,
+            )
+        except Exception as exc:
+            log.exception("continuity validation failed")
+            await _emit(
+                job_id,
+                "continuity_validation_unavailable",
+                f"couldn't validate generated seams: {exc}",
+            )
+            return None
+        async with AsyncSessionLocal() as db:
+            current_job = await db.get(Job, job_id)
+            if current_job is not None:
+                current_payload = dict(current_job.payload or {})
+                current_payload["continuity_validation"] = report.metadata()
+                current_job.payload = current_payload
+                await db.commit()
         await _emit(
             job_id,
-            "gen_retry",
-            "quality validation failed; making one corrective generation attempt",
-            attempt=2,
-            previous_score=score,
+            "continuity_validation_done",
+            "multi-frame seam and handle validation complete",
+            **report.metadata(),
         )
-        correction = (
-            "\n\nCORRECTIVE RETRY: The previous result failed quality validation. "
-            "Make every requested action visually distinct, preserve the exact action order and count, "
-            "avoid ghosting or blended limbs, and finish in the requested continuing motion."
+        return report
+
+    await _emit(
+        job_id,
+        "score_start",
+        "sampling generated video for quality and continuity scoring",
+    )
+    score, continuity_report = await asyncio.gather(
+        score_variant(done[0]),
+        validate_continuity(done[0]),
+    )
+
+    quality_state = GenerationQualityAction.PASS
+    quality_evidence: list[str] = []
+    if generation_window.adaptive:
+        decision = decide_generation_quality(
+            score=score,
+            continuity=continuity_report,
+            current_provider=video_provider,
+            duration=generation_duration,
+            attempts=attempts,
+            generated_seconds=generated_seconds,
+            fallback_used=fallback_used,
+            source_video_available=source_video_url is not None,
         )
-        await _run_variant(
-            job_id=job_id,
-            variant_id=variant_id,
-            clip_path=clip_path,
-            clip_url=clip_url,
-            plan={**plan, "_edit_prompt": prompt + correction},
-            frame_path=conditioning_frame_effective,
-            last_frame_path=conditioning_end_frame,
-            duration=edit_duration,
-            resolution=generation_resolution,
-            source_video_url=source_video_url,
-            mask_image_url=mask_public_url if edit_duration <= 5.001 else None,
-            mask_frame_id=mask_frame_id,
-        )
-        async with AsyncSessionLocal() as db:
-            retried = await db.get(Variant, variant_id)
-            if retried is not None and retried.status == "done":
-                done = [retried]
-                score = await score_variant(retried)
-            elif retried is not None:
-                await _update_variant(
-                    db,
-                    variant_id,
-                    status="done",
-                    url=previous_url,
-                    description=previous_description,
-                    error=None,
+        while decision.action in {
+            GenerationQualityAction.CORRECTIVE_RETRY,
+            GenerationQualityAction.PROVIDER_FALLBACK,
+        }:
+            previous_url = done[0].url
+            previous_description = done[0].description
+            next_provider = video_provider
+            if decision.action == GenerationQualityAction.PROVIDER_FALLBACK:
+                assert decision.next_provider is not None
+                next_provider = decision.next_provider
+                fallback_used = True
+            attempts += 1
+            generated_seconds += generation_duration
+            provider_attempts.append(next_provider)
+            await _emit(
+                job_id,
+                (
+                    "gen_provider_fallback"
+                    if decision.action == GenerationQualityAction.PROVIDER_FALLBACK
+                    else "gen_retry"
+                ),
+                (
+                    f"continuity checks failed; trying {_provider_label(next_provider)}"
+                ),
+                attempt=attempts,
+                provider=next_provider,
+                evidence=list(decision.evidence),
+                generated_seconds=generated_seconds,
+            )
+            succeeded = await dispatch(
+                next_provider,
+                corrective_prompt(decision.evidence),
+            )
+            video_provider = next_provider
+            async with AsyncSessionLocal() as db:
+                retried = await db.get(Variant, variant_id)
+                generation_error = (
+                    retried.error
+                    if retried is not None and not succeeded
+                    else None
                 )
+                if retried is not None and succeeded and retried.status == "done":
+                    done = [retried]
+                elif retried is not None:
+                    await _update_variant(
+                        db,
+                        variant_id,
+                        status="done",
+                        url=previous_url,
+                        description=previous_description,
+                        error=None,
+                    )
+                    restored = await db.get(Variant, variant_id)
+                    if restored is not None:
+                        done = [restored]
+            if succeeded:
+                done = [await maybe_composite(done[0], video_provider)]
+                score, continuity_report = await asyncio.gather(
+                    score_variant(done[0]),
+                    validate_continuity(done[0]),
+                )
+            else:
                 await _emit(
                     job_id,
                     "gen_retry_failed",
-                    "corrective attempt failed; retaining the first generated result",
+                    "generation attempt failed; retaining the last rendered result",
+                    provider=next_provider,
+                    error=generation_error,
                 )
+            decision = decide_generation_quality(
+                score=score,
+                continuity=continuity_report,
+                current_provider=video_provider,
+                duration=generation_duration,
+                attempts=attempts,
+                generated_seconds=generated_seconds,
+                fallback_used=fallback_used,
+                source_video_available=source_video_url is not None,
+                generation_error=generation_error,
+            )
+        quality_state = decision.action
+        quality_evidence = list(decision.evidence)
+    else:
+        needs_retry = isinstance(score, dict) and (
+            int(score.get("visual_coherence") or 0) < 5
+            or int(score.get("prompt_adherence") or 0) < 6
+        )
+        if needs_retry:
+            previous_url = done[0].url
+            previous_description = done[0].description
+            attempts += 1
+            generated_seconds += generation_duration
+            provider_attempts.append(video_provider)
+            await _emit(
+                job_id,
+                "gen_retry",
+                "quality validation failed; making one corrective generation attempt",
+                attempt=attempts,
+                previous_score=score,
+            )
+            correction = (
+                "\n\nCORRECTIVE RETRY: The previous result failed quality validation. "
+                "Make every requested action visually distinct, preserve the exact action order and count, "
+                "avoid ghosting or blended limbs, and finish in the requested continuing motion."
+            )
+            succeeded = await dispatch(video_provider, correction)
+            async with AsyncSessionLocal() as db:
+                retried = await db.get(Variant, variant_id)
+                if retried is not None and succeeded and retried.status == "done":
+                    done = [retried]
+                    score, continuity_report = await asyncio.gather(
+                        score_variant(retried),
+                        validate_continuity(retried),
+                    )
+                elif retried is not None:
+                    await _update_variant(
+                        db,
+                        variant_id,
+                        status="done",
+                        url=previous_url,
+                        description=previous_description,
+                        error=None,
+                    )
+                    await _emit(
+                        job_id,
+                        "gen_retry_failed",
+                        "corrective attempt failed; retaining the first generated result",
+                    )
 
+    local_flow_telemetry: dict[str, Any] | None = None
     async with AsyncSessionLocal() as db:
+        current_job = await db.get(Job, job_id)
+        if current_job is not None:
+            current_payload = dict(current_job.payload or {})
+            current_payload.update(
+                {
+                    "generation_quality_state": quality_state.value,
+                    "generation_quality_evidence": quality_evidence,
+                    "generation_attempts": attempts,
+                    "generated_seconds": generated_seconds,
+                    "provider_attempts": provider_attempts,
+                    "selected_provider": video_provider,
+                    "selected_model": _provider_model(video_provider),
+                }
+            )
+            local_flow_telemetry = build_local_flow_telemetry(
+                payload=current_payload,
+                window=generation_window,
+                continuity=continuity_report,
+                quality_state=quality_state.value,
+                attempts=attempts,
+                generated_seconds=generated_seconds,
+                provider_attempts=provider_attempts,
+                selected_provider=video_provider,
+            )
+            current_payload["local_flow_telemetry"] = local_flow_telemetry
+            current_job.payload = current_payload
+            await db.commit()
         if isinstance(score, dict):
             await _update_variant(
                 db,
@@ -707,6 +1150,14 @@ async def run(job_id: str) -> None:
             await _emit(job_id, "score_skipped", "scoring was unavailable; continuing")
         await _update_job(db, job_id, status="done")
 
+    if local_flow_telemetry is not None:
+        await _emit(
+            job_id,
+            "local_flow_metrics",
+            "recorded local generation cost and seam metrics",
+            **local_flow_telemetry,
+        )
+
     log.info(
         "[gen.run] job=%s COMPLETE variant_url=%s",
         job_id,
@@ -716,6 +1167,16 @@ async def run(job_id: str) -> None:
     await _emit_terminal(
         job_id,
         "done",
-        "generation complete",
+        (
+            "generation complete with a continuity hard-fail"
+            if quality_state == GenerationQualityAction.HARD_FAIL
+            else "generation complete"
+        ),
         variant_url=done[0].url,
+        generation_quality_state=quality_state.value,
+        generation_quality_evidence=quality_evidence,
+        acceptance_blocked=quality_state == GenerationQualityAction.HARD_FAIL,
+        attempts=attempts,
+        generated_seconds=generated_seconds,
+        local_flow_telemetry=local_flow_telemetry,
     )

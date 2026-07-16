@@ -9,12 +9,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.session import get_db
+from app.config.settings import get_settings
 from app.deps import get_session, get_runner
 from app.models.job import Job, Variant
 from app.models.project import Project
 from app.models.segment import Segment
 from app.models.session import Session as SessionModel
 from app.schemas.common import BBox
+from app.services.accepted_generation import (
+    accepted_generation_range,
+    record_accepted_range,
+    update_project_edl_for_acceptance,
+)
+from app.services.generation_quality import acceptance_allowed, acceptance_block_reason
 from app.workers import entity_job
 from app.workers import generate_job as generate_worker
 
@@ -56,6 +63,8 @@ class BatchGenerateResponse(BaseModel):
 class BatchAcceptItem(BaseModel):
     job_id: str
     variant_index: int
+    discover_occurrences: bool = False
+    continuity_override: bool = False
 
 
 class BatchAcceptRequest(BaseModel):
@@ -109,9 +118,11 @@ async def _accept_variant_for_job(
     proj: Project,
     job: Job,
     variant: Variant,
+    discover_occurrences: bool = False,
 ) -> tuple[str, str | None]:
     if job.start_ts is None or job.end_ts is None:
         raise HTTPException(status_code=422, detail="job has no segment range")
+    accepted_range = accepted_generation_range(job)
 
     overlapping = (
         await db.execute(
@@ -119,8 +130,8 @@ async def _accept_variant_for_job(
                 Segment.project_id == proj.id,
                 Segment.active == True,  # noqa: E712
                 Segment.source == "generated",
-                Segment.start_ts < job.end_ts,
-                Segment.end_ts > job.start_ts,
+                Segment.start_ts < accepted_range.committed_end,
+                Segment.end_ts > accepted_range.committed_start,
             )
         )
     ).scalars().all()
@@ -129,19 +140,26 @@ async def _accept_variant_for_job(
 
     seg = Segment(
         project_id=proj.id,
-        start_ts=job.start_ts,
-        end_ts=job.end_ts,
+        start_ts=accepted_range.committed_start,
+        end_ts=accepted_range.committed_end,
         source="generated",
         url=variant.url,
         variant_id=variant.id,
-        order_index=int(job.start_ts * 1000),
+        order_index=int(accepted_range.committed_start * 1000),
         active=True,
     )
     db.add(seg)
     await db.flush()
+    record_accepted_range(job, segment_id=seg.id, accepted_range=accepted_range)
+    update_project_edl_for_acceptance(
+        proj,
+        segment_id=seg.id,
+        variant=variant,
+        accepted_range=accepted_range,
+    )
 
     entity_job_id: str | None = None
-    if _is_tracked_bbox(job.bbox_json):
+    if discover_occurrences and _is_tracked_bbox(job.bbox_json):
         ent_job = Job(
             project_id=proj.id,
             kind="entity",
@@ -151,6 +169,8 @@ async def _accept_variant_for_job(
                 "reference_frame_ts": job.reference_frame_ts,
                 "reference_variant_url": variant.url,
                 "bbox": job.bbox_json,
+                "source_start_ts": job.start_ts,
+                "source_end_ts": job.end_ts,
             },
         )
         db.add(ent_job)
@@ -291,12 +311,19 @@ async def batch_accept(
         variant = next((v for v in job.variants if v.index == item.variant_index), None)
         if variant is None or variant.status != "done" or not variant.url:
             raise HTTPException(status_code=422, detail="variant not ready")
+        if not acceptance_allowed(
+            job.payload,
+            override_requested=item.continuity_override,
+            override_enabled=get_settings().allow_hard_failed_acceptance,
+        ):
+            raise HTTPException(status_code=409, detail=acceptance_block_reason(job.payload))
 
         segment_id, entity_job_id = await _accept_variant_for_job(
             db=db,
             proj=proj,
             job=job,
             variant=variant,
+            discover_occurrences=item.discover_occurrences,
         )
         segment_ids.append(segment_id)
         entity_job_ids.append(entity_job_id)

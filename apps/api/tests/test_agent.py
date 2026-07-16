@@ -24,6 +24,7 @@ from app.workers.runner import JobRunner  # noqa: E402
 from app.api.routes.agent import sse_event, _build_messages  # noqa: E402
 from app.services.agent_tools import execute_tool  # noqa: E402
 from app.db.session import get_db  # noqa: E402
+from app.config.settings import get_settings  # noqa: E402
 
 
 FIXTURE_VIDEO = os.path.join(os.path.dirname(__file__), "fixtures", "test_5s.mp4")
@@ -76,21 +77,48 @@ async def upload_fixture_video(client: AsyncClient) -> dict:
     return res.json()
 
 
-def _make_mock_gemini_response(text: str = "I can help you edit that video."):
-    """Build a mock Gemini response with a single text part (no function calls)."""
-    mock_part = MagicMock()
-    mock_part.text = text
-    mock_part.function_call = None
+def _make_mock_agent_response(
+    text: str = "I can help you edit that video.",
+    *,
+    tool_calls: list[MagicMock] | None = None,
+):
+    """Build one OpenAI-compatible chat completion response."""
+    message = MagicMock()
+    message.content = text
+    message.tool_calls = tool_calls or []
+    choice = MagicMock()
+    choice.message = message
+    response = MagicMock()
+    response.choices = [choice]
+    return response
 
-    mock_content = MagicMock()
-    mock_content.parts = [mock_part]
 
-    mock_candidate = MagicMock()
-    mock_candidate.content = mock_content
+def _make_tool_call(name: str, arguments: dict) -> MagicMock:
+    tool_call = MagicMock()
+    tool_call.id = f"call-{name}"
+    tool_call.function.name = name
+    tool_call.function.arguments = json.dumps(arguments)
+    return tool_call
 
-    mock_response = MagicMock()
-    mock_response.candidates = [mock_candidate]
-    return mock_response
+
+def _mock_agent_client(*responses) -> MagicMock:
+    client = MagicMock()
+    client.chat.completions.create = AsyncMock(
+        side_effect=list(responses) if len(responses) > 1 else None,
+        return_value=responses[0] if len(responses) == 1 else None,
+    )
+    return client
+
+
+@pytest.fixture
+def live_agent_settings(monkeypatch):
+    monkeypatch.setenv("USE_AI_STUBS", "false")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "test-key")
+    monkeypatch.setenv("MESH_API_KEY", "")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 def _parse_sse_events(raw: str) -> list[dict]:
@@ -228,22 +256,15 @@ async def test_agent_chat_request_validation(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_agent_chat_endpoint_exists(client: AsyncClient):
+async def test_agent_chat_endpoint_exists(client: AsyncClient, live_agent_settings):
     """POST /api/agent/chat with a valid body returns 200 with SSE content type.
 
     Mocks Gemini to avoid needing an API key.
     """
-    mock_response = _make_mock_gemini_response("I can help you edit that video.")
+    mock_response = _make_mock_agent_response("I can help you edit that video.")
+    mock_client = _mock_agent_client(mock_response)
 
-    mock_aio = MagicMock()
-    mock_aio.models = MagicMock()
-    mock_aio.models.generate_content = AsyncMock(return_value=mock_response)
-
-    mock_client = MagicMock()
-    mock_client.aio = mock_aio
-
-    with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}), \
-         patch("app.api.routes.agent.genai.Client", return_value=mock_client):
+    with patch("app.api.routes.agent.AsyncOpenAI", return_value=mock_client):
         res = await client.post(
             "/api/agent/chat",
             json={
@@ -268,9 +289,14 @@ async def test_agent_chat_endpoint_exists(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_agent_chat_no_api_key(client: AsyncClient):
-    """Without GEMINI_API_KEY, the endpoint streams an error event."""
-    with patch.dict(os.environ, {"GEMINI_API_KEY": ""}, clear=False):
+async def test_agent_chat_no_api_key(client: AsyncClient, monkeypatch):
+    """Without a model gateway key, the endpoint streams an error event."""
+    monkeypatch.setenv("USE_AI_STUBS", "false")
+    monkeypatch.setenv("MESH_API_KEY", "")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    get_settings.cache_clear()
+    try:
         res = await client.post(
             "/api/agent/chat",
             json={
@@ -280,6 +306,8 @@ async def test_agent_chat_no_api_key(client: AsyncClient):
             },
             headers=headers(),
         )
+    finally:
+        get_settings.cache_clear()
 
     assert res.status_code == 200
     events = _parse_sse_events(res.text)
@@ -288,27 +316,20 @@ async def test_agent_chat_no_api_key(client: AsyncClient):
     assert "done" in event_types
 
     error_event = next(e for e in events if e["event"] == "error")
-    assert "GEMINI_API_KEY" in error_event["data"]["message"]
+    assert "No AI API key" in error_event["data"]["message"]
 
 
 @pytest.mark.asyncio
-async def test_agent_chat_missing_project(client: AsyncClient):
+async def test_agent_chat_missing_project(client: AsyncClient, live_agent_settings):
     """POST /api/agent/chat with a non-existent project_id still starts streaming.
 
     The endpoint itself doesn't validate project_id -- that happens during tool
     execution. So we expect a 200 with SSE events.
     """
-    mock_response = _make_mock_gemini_response("Let me look at that project.")
+    mock_response = _make_mock_agent_response("Let me look at that project.")
+    mock_client = _mock_agent_client(mock_response)
 
-    mock_aio = MagicMock()
-    mock_aio.models = MagicMock()
-    mock_aio.models.generate_content = AsyncMock(return_value=mock_response)
-
-    mock_client = MagicMock()
-    mock_client.aio = mock_aio
-
-    with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}), \
-         patch("app.api.routes.agent.genai.Client", return_value=mock_client):
+    with patch("app.api.routes.agent.AsyncOpenAI", return_value=mock_client):
         res = await client.post(
             "/api/agent/chat",
             json={
@@ -324,19 +345,12 @@ async def test_agent_chat_missing_project(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_sse_event_format_in_stream(client: AsyncClient):
+async def test_sse_event_format_in_stream(client: AsyncClient, live_agent_settings):
     """Verify SSE events in the stream are properly formatted with event/data lines."""
-    mock_response = _make_mock_gemini_response("Testing SSE format.")
+    mock_response = _make_mock_agent_response("Testing SSE format.")
+    mock_client = _mock_agent_client(mock_response)
 
-    mock_aio = MagicMock()
-    mock_aio.models = MagicMock()
-    mock_aio.models.generate_content = AsyncMock(return_value=mock_response)
-
-    mock_client = MagicMock()
-    mock_client.aio = mock_aio
-
-    with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}), \
-         patch("app.api.routes.agent.genai.Client", return_value=mock_client):
+    with patch("app.api.routes.agent.AsyncOpenAI", return_value=mock_client):
         res = await client.post(
             "/api/agent/chat",
             json={
@@ -574,19 +588,14 @@ async def test_tool_get_job_status_not_found(db_session):
 
 
 @pytest.mark.asyncio
-async def test_agent_chat_gemini_error(client: AsyncClient):
-    """When Gemini API raises, the stream includes an error event."""
-    mock_aio = MagicMock()
-    mock_aio.models = MagicMock()
-    mock_aio.models.generate_content = AsyncMock(
+async def test_agent_chat_gateway_error(client: AsyncClient, live_agent_settings):
+    """When the model gateway raises, the stream includes an error event."""
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = AsyncMock(
         side_effect=Exception("API rate limit exceeded")
     )
 
-    mock_client = MagicMock()
-    mock_client.aio = mock_aio
-
-    with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}), \
-         patch("app.api.routes.agent.genai.Client", return_value=mock_client):
+    with patch("app.api.routes.agent.AsyncOpenAI", return_value=mock_client):
         res = await client.post(
             "/api/agent/chat",
             json={
@@ -608,36 +617,16 @@ async def test_agent_chat_gemini_error(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_agent_chat_with_function_call(client: AsyncClient):
-    """When Gemini returns a function call, tool_call_start/end events appear."""
-    # First response: function call to analyze_video
-    fc_part = MagicMock()
-    fc_part.text = None
-    fc_part.function_call = MagicMock()
-    fc_part.function_call.name = "analyze_video"
-    fc_part.function_call.args = {"project_id": "test-proj"}
-
-    fc_content = MagicMock()
-    fc_content.parts = [fc_part]
-    fc_candidate = MagicMock()
-    fc_candidate.content = fc_content
-    fc_response = MagicMock()
-    fc_response.candidates = [fc_candidate]
-
-    # Second response: just text (ends the loop)
-    text_response = _make_mock_gemini_response("Analysis complete!")
-
-    mock_aio = MagicMock()
-    mock_aio.models = MagicMock()
-    mock_aio.models.generate_content = AsyncMock(
-        side_effect=[fc_response, text_response]
+async def test_agent_chat_with_function_call(client: AsyncClient, live_agent_settings):
+    """When the gateway returns a function call, tool events appear."""
+    first_response = _make_mock_agent_response(
+        "",
+        tool_calls=[_make_tool_call("analyze_video", {"project_id": "test-proj"})],
     )
+    text_response = _make_mock_agent_response("Analysis complete!")
+    mock_client = _mock_agent_client(first_response, text_response)
 
-    mock_client = MagicMock()
-    mock_client.aio = mock_aio
-
-    with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}), \
-         patch("app.api.routes.agent.genai.Client", return_value=mock_client), \
+    with patch("app.api.routes.agent.AsyncOpenAI", return_value=mock_client), \
          patch("app.api.routes.agent.execute_tool", new_callable=AsyncMock) as mock_exec:
         mock_exec.return_value = {
             "status": "done",

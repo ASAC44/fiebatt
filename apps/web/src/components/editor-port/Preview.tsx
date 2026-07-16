@@ -82,7 +82,15 @@ export function Preview() {
         dispatch({
           type: "set_mask",
           mask: resp.contour.length
-            ? { contour: resp.contour, contours: resp.contours }
+            ? {
+                contour: resp.contour,
+                contours: resp.contours,
+                selectionId: resp.selection_id,
+                seedTs: frameTs,
+                maskUrl: resp.mask_url,
+                subjectReferenceUrl: resp.subject_reference_url,
+                score: resp.score,
+              }
             : null,
         });
       })

@@ -8,18 +8,57 @@ from dataclasses import dataclass
 class VideoProviderCapabilities:
     source_video_edit: bool
     allowed_durations: tuple[int, ...] | None
-    max_duration: int
-    first_last_frames: bool = False
+    max_total_duration: int
+    max_mask_duration: int | None = None
+    first_frame: bool = False
+    last_frame_durations: tuple[int, ...] = ()
     reference_images: bool = False
+
+    @property
+    def max_duration(self) -> int:
+        """Compatibility alias for callers using the old capability name."""
+        return self.max_total_duration
+
+    @property
+    def first_last_frames(self) -> bool:
+        """Compatibility alias; duration-specific checks use supports_last_frame."""
+        return self.first_frame and bool(self.last_frame_durations)
+
+    def supports_last_frame(self, duration: float) -> bool:
+        return any(abs(duration - allowed) <= 0.05 for allowed in self.last_frame_durations)
 
 
 VIDEO_PROVIDER_CAPABILITIES: dict[str, VideoProviderCapabilities] = {
-    "wan": VideoProviderCapabilities(True, None, 10, reference_images=True),
-    "happyhorse": VideoProviderCapabilities(True, None, 15, reference_images=True),
-    "veo": VideoProviderCapabilities(
-        False, (4, 6, 8), 8, first_last_frames=True, reference_images=True
+    "wan": VideoProviderCapabilities(
+        True,
+        None,
+        10,
+        max_mask_duration=5,
+        first_frame=True,
+        reference_images=True,
     ),
-    "meshapi_veo": VideoProviderCapabilities(False, None, 8, reference_images=True),
+    "happyhorse": VideoProviderCapabilities(
+        True,
+        None,
+        15,
+        first_frame=True,
+        reference_images=True,
+    ),
+    "veo": VideoProviderCapabilities(
+        False,
+        (4, 6, 8),
+        8,
+        first_frame=True,
+        last_frame_durations=(8,),
+        reference_images=True,
+    ),
+    "meshapi_veo": VideoProviderCapabilities(
+        False,
+        None,
+        8,
+        first_frame=True,
+        reference_images=True,
+    ),
 }
 
 
@@ -50,12 +89,35 @@ def select_video_provider(
     return "veo"
 
 
+def select_source_edit_mode(
+    provider: str,
+    *,
+    duration: float,
+    source_video: bool,
+    mask_available: bool,
+) -> str:
+    """Choose the least destructive edit path supported by the provider."""
+    capabilities = VIDEO_PROVIDER_CAPABILITIES.get(provider)
+    if capabilities is None or not source_video:
+        return "image_conditioned"
+    if (
+        provider == "wan"
+        and mask_available
+        and capabilities.max_mask_duration is not None
+        and duration <= capabilities.max_mask_duration + 0.05
+    ):
+        return "tracked_mask"
+    if capabilities.source_video_edit:
+        return "source_video"
+    return "image_conditioned"
+
+
 def validate_provider_duration(provider: str, duration: float) -> str | None:
     capabilities = VIDEO_PROVIDER_CAPABILITIES.get(provider)
     if capabilities is None:
         return None
-    if duration > capabilities.max_duration + 0.05:
-        return f"{provider} supports edit durations up to {capabilities.max_duration} seconds"
+    if duration > capabilities.max_total_duration + 0.05:
+        return f"{provider} supports edit durations up to {capabilities.max_total_duration} seconds"
     if capabilities.allowed_durations is None:
         return None
     rounded = round(duration)

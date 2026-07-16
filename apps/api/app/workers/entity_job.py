@@ -7,6 +7,7 @@ Results persist as EntityAppearance rows tied to a single Entity.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from pathlib import Path
 
 from sqlalchemy import select
@@ -18,6 +19,16 @@ from app.models.job import Job
 from app.models.project import Project
 from app.models.segment import Segment
 from app.services import ffmpeg, storage
+from app.services.coarse_occurrence import (
+    persist_coarse_candidates,
+    search_coarse_occurrences,
+    source_revision_cache_dir,
+)
+from app.services.dense_occurrence import (
+    DenseTrackEvidence,
+    persist_dense_tracks,
+    refine_occurrence_candidate,
+)
 
 log = logging.getLogger("fiebatt.jobs.entity")
 
@@ -50,8 +61,12 @@ async def run(job_id: str) -> None:
         job.status = "processing"
         source_video_path = proj.video_path
         source_video_url = proj.video_url
-        source_segment_start = source_segment.start_ts if source_segment else None
-        source_segment_end = source_segment.end_ts if source_segment else None
+        source_segment_start = payload.get("source_start_ts")
+        source_segment_end = payload.get("source_end_ts")
+        if source_segment_start is None and source_segment is not None:
+            source_segment_start = source_segment.start_ts
+        if source_segment_end is None and source_segment is not None:
+            source_segment_end = source_segment.end_ts
         await db.commit()
 
     # pull the reference frame crop now (was previously done synchronously
@@ -115,7 +130,12 @@ async def run(job_id: str) -> None:
     try:
         from app.config.settings import get_settings as _get_bs
 
-        cache_dir = Path(_get_bs().storage_path) / "keyframes" / proj.id
+        settings = _get_bs()
+        cache_dir = source_revision_cache_dir(
+            Path(settings.storage_path),
+            project_id=proj.id,
+            source_revision=proj.video_url,
+        )
         cache_dir.mkdir(parents=True, exist_ok=True)
         cached_pattern = cache_dir / "frame_%04d.jpg"
         existing = sorted(cache_dir.glob("frame_*.jpg"))
@@ -141,6 +161,139 @@ async def run(job_id: str) -> None:
                 j.status = "error"
                 j.error = f"keyframes failed: {e}"
                 await db.commit()
+        return
+
+    global_planning = settings.global_edit_planning
+    if global_planning and payload.get("discovery_scope") not in {
+        "all_occurrences",
+        "selected_occurrences",
+    }:
+        async with AsyncSessionLocal() as db:
+            j = await db.get(Job, job_id)
+            if j:
+                j.status = "error"
+                j.error = "global discovery requires explicit occurrence scope"
+                await db.commit()
+        return
+
+    if global_planning:
+        try:
+            coarse = await search_coarse_occurrences(
+                identity=identity,
+                reference_crop_path=reference_crop_path,
+                keyframe_paths=keyframe_paths,
+                source_revision=proj.video_url,
+                duration=float(proj.duration),
+                exclude_start=(
+                    float(source_segment_start)
+                    if source_segment_start is not None
+                    else None
+                ),
+                exclude_end=(
+                    float(source_segment_end)
+                    if source_segment_end is not None
+                    else None
+                ),
+                vlm_search=ai.gemini.find_entity_in_keyframes,
+            )
+            browser_candidates = tuple(
+                replace(
+                    candidate,
+                    keyframe_url=keyframe_url_by_path.get(
+                        str(candidate.keyframe_url or ""),
+                        candidate.keyframe_url,
+                    ),
+                )
+                for candidate in coarse.candidates
+            )
+        except Exception as e:
+            log.exception("coarse occurrence search failed")
+            async with AsyncSessionLocal() as db:
+                j = await db.get(Job, job_id)
+                if j:
+                    j.status = "error"
+                    j.error = f"coarse search failed: {e}"
+                    await db.commit()
+            return
+
+        async with AsyncSessionLocal() as db:
+            candidate_rows, cache_hits = await persist_coarse_candidates(
+                db,
+                entity_id=entity_id,
+                candidates=browser_candidates,
+            )
+            j = await db.get(Job, job_id)
+            if j:
+                next_payload = dict(j.payload or {})
+                next_payload.update(
+                    {
+                        "entity_id": entity_id,
+                        "coarse_candidate_count": len(browser_candidates),
+                        "coarse_cache_hits": cache_hits,
+                        "coarse_analysis_mode": coarse.analysis_mode,
+                        "coarse_frames_inspected": coarse.frames_inspected,
+                    }
+                )
+                j.payload = next_payload
+            await db.commit()
+
+        if reference_crop_path is None:
+            async with AsyncSessionLocal() as db:
+                j = await db.get(Job, job_id)
+                if j:
+                    j.status = "error"
+                    j.error = "dense occurrence tracking requires a reference crop"
+                    await db.commit()
+            return
+        dense_source = Path(source_video_path)
+        if not dense_source.exists():
+            dense_source = await storage.path_from_url(source_video_url)
+        tracks: list[DenseTrackEvidence] = []
+        for candidate in candidate_rows:
+            try:
+                tracks.append(
+                    await refine_occurrence_candidate(
+                        source_path=dense_source,
+                        project_duration=float(proj.duration),
+                        candidate=candidate,
+                        reference_crop_path=reference_crop_path,
+                    )
+                )
+            except Exception as exc:
+                log.exception("dense occurrence tracking failed for %s", candidate.id)
+                tracks.append(
+                    DenseTrackEvidence(
+                        candidate_id=candidate.id,
+                        passed=False,
+                        reason=f"dense tracking failed: {type(exc).__name__}",
+                        seed_ts=candidate.keyframe_ts,
+                        start_ts=candidate.keyframe_ts,
+                        end_ts=candidate.keyframe_ts,
+                        confidence=0.0,
+                        tracker="unavailable",
+                        frames=(),
+                    )
+                )
+
+        async with AsyncSessionLocal() as db:
+            occurrence_count, rejected_count = await persist_dense_tracks(
+                db,
+                entity_id=entity_id,
+                source_revision=proj.video_url,
+                tracks=tracks,
+            )
+            j = await db.get(Job, job_id)
+            if j:
+                next_payload = dict(j.payload or {})
+                next_payload.update(
+                    {
+                        "dense_occurrence_count": occurrence_count,
+                        "dense_rejected_count": rejected_count,
+                    }
+                )
+                j.payload = next_payload
+                j.status = "done"
+            await db.commit()
         return
 
     try:

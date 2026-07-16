@@ -194,7 +194,8 @@ def _validate_segment_length(start_ts: float, end_ts: float) -> None:
     length = end_ts - start_ts
     if length < MIN_SEG_LEN or length > MAX_SEG_LEN:
         raise ValueError(
-            f"segment length must be {MIN_SEG_LEN}-{MAX_SEG_LEN}s (got {length:.2f}s)"
+            f"segment length must be {MIN_SEG_LEN:g}-{MAX_SEG_LEN:g}s "
+            f"(got {length:.2f}s)"
         )
 
 
@@ -495,6 +496,68 @@ async def _identify_region(
     }
 
 
+@_register("create_edit_plan")
+async def _create_edit_plan(
+    *,
+    args: dict[str, Any],
+    db: AsyncSession,
+    session_id: str,
+    runner: Any | None = None,
+) -> dict[str, Any]:
+    """Use the same planning operation as the direct editor."""
+    from fastapi import HTTPException
+
+    from app.api.routes.edit_plans import create_edit_plan
+    from app.models.session import Session as SessionModel
+    from app.schemas.edit_plan_api import EditPlanRequest
+
+    try:
+        result = await create_edit_plan(
+            EditPlanRequest(
+                project_id=args["project_id"],
+                selection_id=args["selection_id"],
+                prompt=args["prompt"],
+                requested_scope=args.get("requested_scope"),
+                explicit_start_ts=args.get("explicit_start_ts"),
+                explicit_end_ts=args.get("explicit_end_ts"),
+                video_gen_provider=args.get("video_gen_provider") or "auto",
+            ),
+            SessionModel(id=session_id),
+            db,
+        )
+    except HTTPException as exc:
+        raise ValueError(str(exc.detail)) from exc
+    return result.model_dump(mode="json")
+
+
+@_register("discover_occurrences")
+async def _discover_occurrences(
+    *,
+    args: dict[str, Any],
+    db: AsyncSession,
+    session_id: str,
+    runner: Any | None = None,
+) -> dict[str, Any]:
+    """Run same explicit occurrence-discovery operation as continuity UI."""
+    from fastapi import HTTPException
+
+    from app.api.routes.entities import discover_occurrences
+    from app.models.session import Session as SessionModel
+
+    if runner is None:
+        raise ValueError("job runner unavailable")
+    try:
+        result = await discover_occurrences(
+            args["segment_id"],
+            SessionModel(id=session_id),
+            db,
+            runner,
+        )
+    except HTTPException as exc:
+        raise ValueError(str(exc.detail)) from exc
+    return result.model_dump(mode="json")
+
+
 @_register("generate_edit")
 async def _generate_edit(
     *,
@@ -506,25 +569,76 @@ async def _generate_edit(
     """Create a generate job — mirrors POST /api/generate logic."""
     from app.workers import generate_job as generate_worker
 
+    from app.models.edit_plan import EditPlanRecord
+    from app.models.selection import SelectionArtifact
+    from app.schemas.edit_plan import LocalRangeResolution
+
     project_id: str = args["project_id"]
-    start_ts: float = args["start_ts"]
-    end_ts: float = args["end_ts"]
-    bbox: dict[str, float] = args["bbox"]
-    prompt: str = args["prompt"]
-    reference_frame_ts: float = args.get("reference_frame_ts", start_ts)
-    video_gen_provider = args.get("video_gen_provider")
+    plan_id: str | None = args.get("plan_id")
 
     proj = await _get_project_or_error(db, project_id, session_id)
+    plan: EditPlanRecord | None = None
+    resolution: LocalRangeResolution | None = None
+    use_plan_range = False
+    if plan_id:
+        plan = await db.get(EditPlanRecord, plan_id)
+        if plan is None or plan.project_id != proj.id:
+            raise ValueError(f"edit plan not found: {plan_id}")
+        if plan.source_revision != proj.video_url:
+            raise ValueError("edit plan is stale for current source")
+        selection = await db.get(SelectionArtifact, plan.selection_id)
+        if selection is None or selection.project_id != proj.id:
+            raise ValueError("edit plan selection is unavailable")
+        use_plan_range = _get_backend_settings().adaptive_edit_planning
+        if use_plan_range:
+            resolution = LocalRangeResolution.model_validate(plan.range_json)
+            start_ts = resolution.edit_core.start_ts
+            end_ts = resolution.edit_core.end_ts
+            video_gen_provider = plan.provider
+        else:
+            fixed_duration = min(3.0, proj.duration)
+            start_ts = max(
+                0.0,
+                min(selection.frame_ts - fixed_duration / 2, proj.duration - fixed_duration),
+            )
+            end_ts = start_ts + fixed_duration
+            video_gen_provider = args.get("video_gen_provider") or "auto"
+        bbox = selection.bbox_json
+        prompt = plan.raw_prompt
+        reference_frame_ts = selection.frame_ts
+    else:
+        start_ts = float(args["start_ts"])
+        end_ts = float(args["end_ts"])
+        bbox = args["bbox"]
+        prompt = args["prompt"]
+        reference_frame_ts = float(args.get("reference_frame_ts", start_ts))
+        video_gen_provider = args.get("video_gen_provider") or "auto"
 
     length = end_ts - start_ts
     if length < MIN_SEG_LEN or length > MAX_SEG_LEN:
-        raise ValueError(f"segment length must be {MIN_SEG_LEN}-{MAX_SEG_LEN}s (got {length:.2f}s)")
+        raise ValueError(
+            f"segment length must be {MIN_SEG_LEN:g}-{MAX_SEG_LEN:g}s "
+            f"(got {length:.2f}s)"
+        )
     if end_ts > proj.duration + 1e-3:
         raise ValueError("end_ts past project duration")
+    generation_length = (
+        resolution.generation_context.duration
+        if use_plan_range and resolution is not None
+        else length
+    )
+    if generation_length > MAX_SEG_LEN:
+        raise ValueError(
+            "generation context must be at most "
+            f"{MAX_SEG_LEN:g}s (got {generation_length:.2f}s)"
+        )
     if video_gen_provider and video_gen_provider != "auto":
         from app.ai.services.provider_capabilities import validate_provider_duration
 
-        provider_error = validate_provider_duration(video_gen_provider, length)
+        provider_error = validate_provider_duration(
+            video_gen_provider,
+            generation_length,
+        )
         if provider_error:
             raise ValueError(provider_error)
     if bbox.get("x", 0) + bbox.get("w", 0) > 1.0001 or bbox.get("y", 0) + bbox.get("h", 0) > 1.0001:
@@ -539,7 +653,12 @@ async def _generate_edit(
         bbox_json=bbox,
         prompt=prompt,
         reference_frame_ts=reference_frame_ts,
-        payload={"video_gen_provider": video_gen_provider or "auto"},
+        payload={
+            "video_gen_provider": video_gen_provider or "auto",
+            "plan_id": plan.id if plan else None,
+            "planned_context": plan.range_json if plan else None,
+            "adaptive_context_enabled": use_plan_range,
+        },
     )
     db.add(job)
     await db.commit()
@@ -745,10 +864,20 @@ async def _accept_variant(
     runner: Any | None = None,
 ) -> dict[str, Any]:
     """Accept a variant and apply it to the timeline — mirrors POST /api/accept."""
+    from app.services.entity_discovery import enqueue_entity_discovery
+    from app.services.accepted_generation import (
+        accepted_generation_range,
+        record_accepted_range,
+        update_project_edl_for_acceptance,
+    )
+    from app.services.generation_quality import acceptance_allowed, acceptance_block_reason
+    from app.services.timeline_response import build_timeline_response
     from app.workers import entity_job
 
     job_id: str = args["job_id"]
     variant_index: int = args.get("variant_index", 0)
+    discover_occurrences: bool = bool(args.get("discover_occurrences", False))
+    continuity_override: bool = bool(args.get("continuity_override", False))
 
     job = (
         await db.execute(
@@ -767,9 +896,16 @@ async def _accept_variant(
     )
     if variant is None or variant.status != "done" or not variant.url:
         raise ValueError("variant not ready")
+    if not acceptance_allowed(
+        job.payload,
+        override_requested=continuity_override,
+        override_enabled=_get_backend_settings().allow_hard_failed_acceptance,
+    ):
+        raise ValueError(acceptance_block_reason(job.payload))
 
     if job.start_ts is None or job.end_ts is None:
         raise ValueError("job has no segment range")
+    accepted_range = accepted_generation_range(job)
 
     # deactivate overlapping generated segments
     overlapping = (
@@ -778,8 +914,8 @@ async def _accept_variant(
                 Segment.project_id == proj.id,
                 Segment.active == True,  # noqa: E712
                 Segment.source == "generated",
-                Segment.start_ts < job.end_ts,
-                Segment.end_ts > job.start_ts,
+                Segment.start_ts < accepted_range.committed_end,
+                Segment.end_ts > accepted_range.committed_start,
             )
         )
     ).scalars().all()
@@ -788,41 +924,48 @@ async def _accept_variant(
 
     seg = Segment(
         project_id=proj.id,
-        start_ts=job.start_ts,
-        end_ts=job.end_ts,
+        start_ts=accepted_range.committed_start,
+        end_ts=accepted_range.committed_end,
         source="generated",
         url=variant.url,
         variant_id=variant.id,
-        order_index=int(job.start_ts * 1000),
+        order_index=int(accepted_range.committed_start * 1000),
         active=True,
     )
     db.add(seg)
+    await db.flush()
+    record_accepted_range(job, segment_id=seg.id, accepted_range=accepted_range)
+    update_project_edl_for_acceptance(
+        proj,
+        segment_id=seg.id,
+        variant=variant,
+        accepted_range=accepted_range,
+    )
     await db.commit()
     await db.refresh(seg)
 
-    # fire entity-search background job
-    ent_job = Job(
-        project_id=proj.id,
-        kind="entity",
-        status="pending",
-        payload={
-            "segment_id": seg.id,
-            "reference_frame_ts": job.reference_frame_ts,
-            "reference_variant_url": variant.url,
-            "bbox": job.bbox_json,
-        },
-    )
-    db.add(ent_job)
-    await db.commit()
-    await db.refresh(ent_job)
+    entity_job_id: str | None = None
+    if discover_occurrences:
+        ent_job, reused = await enqueue_entity_discovery(
+            db,
+            project=proj,
+            segment=seg,
+            source_job=job,
+            reference_variant_url=variant.url,
+        )
+        if ent_job is not None:
+            await db.commit()
+            entity_job_id = ent_job.id
+            if runner is not None and not reused:
+                runner.submit(ent_job.id, lambda: entity_job.run(ent_job.id))
 
-    if runner is not None:
-        runner.submit(ent_job.id, lambda: entity_job.run(ent_job.id))
-
+    await db.refresh(proj)
+    timeline = await build_timeline_response(db, proj)
     return {
         "segment_id": seg.id,
-        "entity_job_id": ent_job.id,
+        "entity_job_id": entity_job_id,
         "message": f"Variant {variant_index} accepted and applied to timeline",
+        "timeline": timeline.model_dump(mode="json"),
     }
 
 

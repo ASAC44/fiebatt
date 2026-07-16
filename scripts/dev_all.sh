@@ -3,9 +3,9 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="$ROOT_DIR/.dev-logs"
-FRONTEND_DIR="$ROOT_DIR/apps/frontend"
-BACKEND_DIR="$ROOT_DIR/apps/backend"
-VISION_WORKER_DIR="$ROOT_DIR/apps/vision-worker"
+WEB_DIR="$ROOT_DIR/apps/web"
+API_DIR="$ROOT_DIR/apps/api"
+VISION_WORKER_DIR="$API_DIR/vision-worker"
 
 mkdir -p "$LOG_DIR"
 
@@ -16,7 +16,7 @@ if [[ -f "$ROOT_DIR/.env" ]]; then
   set +a
 fi
 
-export PYTHONPATH="$ROOT_DIR/apps/backend${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$API_DIR${PYTHONPATH:+:$PYTHONPATH}"
 export VISION_WORKER_URL="${VISION_WORKER_URL:-${GPU_WORKER_URL:-http://localhost:8001}}"
 
 PIDS=()
@@ -70,20 +70,20 @@ wait_for_service() {
   return 1
 }
 
-if [[ ! -x "$BACKEND_DIR/.venv/bin/python" ]] || \
-  ! "$BACKEND_DIR/.venv/bin/python" -c "import uvicorn" >/dev/null 2>&1; then
-  echo "missing backend environment: apps/backend/.venv with uvicorn installed" >&2
+if [[ ! -x "$API_DIR/.venv/bin/python" ]] || \
+  ! "$API_DIR/.venv/bin/python" -c "import uvicorn" >/dev/null 2>&1; then
+  echo "missing API environment: apps/api/.venv with uvicorn installed" >&2
   exit 1
 fi
 
 if [[ ! -x "$VISION_WORKER_DIR/.venv/bin/python" ]] || \
   ! "$VISION_WORKER_DIR/.venv/bin/python" -c "import uvicorn" >/dev/null 2>&1; then
-  echo "missing vision worker environment: apps/vision-worker/.venv with uvicorn installed" >&2
+  echo "missing vision worker environment: apps/api/vision-worker/.venv with uvicorn installed" >&2
   exit 1
 fi
 
-if [[ ! -x "$FRONTEND_DIR/node_modules/.bin/next" ]]; then
-  echo "missing frontend dependencies: run 'npm install --prefix apps/frontend'" >&2
+if [[ ! -x "$WEB_DIR/node_modules/.bin/next" ]]; then
+  echo "missing web dependencies: run 'npm install --prefix apps/web'" >&2
   exit 1
 fi
 
@@ -96,13 +96,13 @@ check_port_free 3001
 check_port_free 8000
 check_port_free 8001
 
-start_service frontend npm --prefix "$FRONTEND_DIR" run dev
+start_service web npm --prefix "$WEB_DIR" run dev
 
-start_service backend \
-  "$BACKEND_DIR/.venv/bin/python" -m uvicorn \
+start_service api \
+  "$API_DIR/.venv/bin/python" -m uvicorn \
   app.main:app \
   --reload \
-  --reload-dir "$BACKEND_DIR/app" \
+  --reload-dir "$API_DIR/app" \
   --host 0.0.0.0 \
   --port 8000
 
@@ -111,13 +111,13 @@ start_service vision-worker bash -c "cd '$VISION_WORKER_DIR' && exec .venv/bin/p
 echo
 echo "waiting for services..."
 wait_for_service vision-worker http://localhost:8001/health
-wait_for_service backend http://localhost:8000/api/health
-wait_for_service frontend http://localhost:3001
+wait_for_service api http://localhost:8000/api/health
+wait_for_service web http://localhost:3001
 
 echo
 echo "fiebatt services started"
-echo "  frontend:      http://localhost:3001"
-echo "  backend:       http://localhost:8000"
+echo "  web:           http://localhost:3001"
+echo "  api:           http://localhost:8000"
 echo "  vision worker: http://localhost:8001"
 echo "  logs:          $LOG_DIR"
 echo

@@ -134,6 +134,39 @@ export type JobResp = {
   provider?: string | null;
   model?: string | null;
   warnings?: string[];
+  execution_window?: GenerationExecutionWindow | null;
+  continuity_validation?: ContinuityValidation | null;
+  generation_quality_state?: string | null;
+  generation_quality_evidence?: string[];
+  generation_attempts?: number | null;
+  generated_seconds?: number | null;
+  provider_attempts?: string[];
+  localized_compositing?: Array<{ applied?: boolean; reason?: string }>;
+  local_flow_telemetry?: Record<string, unknown> | null;
+};
+
+export type GenerationExecutionWindow = {
+  adaptive: boolean;
+  core_start: number;
+  core_end: number;
+  context_start: number;
+  context_end: number;
+  edit_start_offset: number;
+  edit_end_offset: number;
+  pre_handle: number;
+  post_handle: number;
+};
+
+export type ContinuityValidation = {
+  passed: boolean;
+  sampled_frames: number;
+  metrics: Record<string, number | null>;
+  issues: Array<{
+    code: string;
+    value: number;
+    threshold: number;
+    boundary: string | null;
+  }>;
 };
 
 export type JobResponse = JobResp;
@@ -141,6 +174,8 @@ export type JobResponse = JobResp;
 
 export type GenerateReq = {
   project_id: string;
+  target_clip_id?: string;
+  plan_id?: string;
   start_ts: number;
   end_ts: number;
   bbox: BBox;
@@ -151,9 +186,64 @@ export type GenerateReq = {
 
 export type GenerateRequest = GenerateReq;
 
+export type EditPlanResp = {
+  plan_id: string;
+  project_id: string;
+  selection_id: string;
+  scope: "local" | "explicit_range" | "selected_occurrences" | "all_occurrences";
+  intent: {
+    raw_prompt: string;
+    change_type: "appearance" | "removal" | "replacement" | "motion" | "scene";
+    action_phases: string[];
+    estimated_action_seconds: number;
+    requires_recovery_motion: boolean;
+  };
+  edit_core: { start_ts: number; end_ts: number };
+  generation_context: {
+    start_ts: number;
+    end_ts: number;
+    edit_core: { start_ts: number; end_ts: number };
+  };
+  occurrence_start: number;
+  occurrence_end: number;
+  provider: string;
+  provider_reason: string;
+  estimate: {
+    analysis_mode: string;
+    analysis_duration_ms: number;
+    frames_inspected: number;
+    expected_generation_calls: number;
+    expected_generated_seconds: number;
+    requires_global_discovery: boolean;
+  };
+  confidence: number;
+  warnings: string[];
+  status: string;
+  adaptive_generation_enabled: boolean;
+};
+
+export type HealthResp = {
+  ok: boolean;
+  features?: {
+    adaptive_edit_planning?: boolean;
+    global_edit_planning?: boolean;
+    hard_failed_acceptance_override?: boolean;
+  };
+};
+
+export type CreateEditPlanReq = {
+  project_id: string;
+  selection_id: string;
+  prompt: string;
+  explicit_start_ts?: number;
+  explicit_end_ts?: number;
+  video_gen_provider?: VideoProvider;
+};
+
 export type AcceptResp = {
   segment_id: string;
   entity_job_id: string | null;
+  timeline: TimelineResp;
 };
 
 export type AcceptResponse = AcceptResp;
@@ -194,6 +284,10 @@ export type TimelineSegment = {
   source: "original" | "generated";
   url: string;
   audio: boolean;
+  segment_id?: string | null;
+  media_start_ts?: number;
+  media_end_ts?: number;
+  media_duration?: number;
 };
 
 /** One clip in a saved EDL snapshot. Mirrors the frontend's Clip shape
@@ -247,6 +341,10 @@ export type TimelineSaveResp = {
 export type MaskResp = {
   contour: [number, number][]; // normalized 0-1 points forming the mask outline
   contours?: [number, number][][]; // disconnected subject components
+  selection_id?: string | null;
+  mask_url?: string | null;
+  subject_reference_url?: string | null;
+  score?: number | null;
 };
 
 export type IdentifyResp = {
@@ -273,15 +371,25 @@ export type EntityResp = {
   appearances: AppearanceResp[];
 };
 
-export type PropagateReq = {
-  entity_id: string;
-  source_variant_url: string;
-  prompt: string;
-  auto_apply?: boolean;
+export type DiscoveryJobResp = {
+  job_id: string;
+  reused: boolean;
 };
+
+export type PropagateReq =
+  | {
+      global_plan_id: string;
+    }
+  | {
+      entity_id: string;
+      source_variant_url: string;
+      prompt: string;
+      auto_apply?: boolean;
+    };
 
 export type PropagateResp = {
   propagation_job_id: string;
+  global_plan_id?: string | null;
 };
 
 export type PropagationResultResp = {
@@ -298,6 +406,57 @@ export type PropagationStatusResp = {
   status: JobStatus;
   error: string | null;
   results: PropagationResultResp[];
+};
+
+export type GlobalEditChunkResp = {
+  chunk_id: string;
+  index: number;
+  edit_start: number;
+  edit_end: number;
+  context_start: number;
+  context_end: number;
+  provider: string;
+  split_reason: string;
+  status: string;
+  attempts: number;
+  output_url: string | null;
+  error: string | null;
+};
+
+export type GlobalEditOccurrenceResp = {
+  appearance_id: string;
+  start_ts: number;
+  end_ts: number;
+  confidence: number;
+  status: string;
+  output_url: string | null;
+  error: string | null;
+  chunks: GlobalEditChunkResp[];
+};
+
+export type GlobalEditPlanResp = {
+  plan_id: string;
+  project_id: string;
+  entity_id: string;
+  reference_segment_id: string;
+  scope: "selected_occurrences" | "all_occurrences";
+  requested_provider: string;
+  prompt: string;
+  occurrences: GlobalEditOccurrenceResp[];
+  estimate: {
+    occurrence_count: number;
+    expected_generation_calls: number;
+    expected_generated_seconds: number;
+    mean_track_confidence: number;
+    reference_accepted: boolean;
+  };
+  status: string;
+};
+
+export type GlobalEditApplyResp = {
+  plan_id: string;
+  segment_ids: string[];
+  timeline: TimelineResp;
 };
 
 // ─── endpoints ────────────────────────────────────────────────────────
@@ -322,6 +481,10 @@ export function login(email: string, password: string): Promise<AuthResponse> {
 
 export function listProjects(): Promise<ProjectListItem[]> {
   return request<ProjectListItem[]>("/api/projects");
+}
+
+export function getHealth(): Promise<HealthResp> {
+  return request<HealthResp>("/api/health");
 }
 
 export function getProject(project_id: string): Promise<ProjectResp> {
@@ -350,6 +513,16 @@ export function generate(req: GenerateReq): Promise<{ job_id: string }> {
   });
 }
 
+export function createEditPlan(req: CreateEditPlanReq): Promise<EditPlanResp> {
+  return request("/api/edit-plans", {
+    method: "POST",
+    body: JSON.stringify({
+      video_gen_provider: getSettings().videoProvider,
+      ...req,
+    }),
+  });
+}
+
 export const generateVariant = generate;
 
 export function getJob(id: string): Promise<JobResp> {
@@ -369,10 +542,42 @@ export function getEntity(entity_id: string): Promise<EntityResp> {
   return request<EntityResp>(`/api/entities/${entity_id}`);
 }
 
+export function discoverOccurrences(segment_id: string): Promise<DiscoveryJobResp> {
+  return request<DiscoveryJobResp>(
+    `/api/segments/${segment_id}/discover-occurrences`,
+    { method: "POST" },
+  );
+}
+
 export function propagate(req: PropagateReq): Promise<PropagateResp> {
   return request<PropagateResp>("/api/propagate", {
     method: "POST",
     body: JSON.stringify(req),
+  });
+}
+
+export function createGlobalEditPlan(req: {
+  entity_id: string;
+  reference_segment_id: string;
+  scope: "selected_occurrences" | "all_occurrences";
+  occurrence_ids?: string[];
+}): Promise<GlobalEditPlanResp> {
+  return request<GlobalEditPlanResp>("/api/global-edit-plans", {
+    method: "POST",
+    body: JSON.stringify({
+      video_gen_provider: getSettings().videoProvider,
+      ...req,
+    }),
+  });
+}
+
+export function getGlobalEditPlan(planId: string): Promise<GlobalEditPlanResp> {
+  return request<GlobalEditPlanResp>(`/api/global-edit-plans/${planId}`);
+}
+
+export function applyGlobalEditPlan(planId: string): Promise<GlobalEditApplyResp> {
+  return request<GlobalEditApplyResp>(`/api/global-edit-plans/${planId}/apply`, {
+    method: "POST",
   });
 }
 

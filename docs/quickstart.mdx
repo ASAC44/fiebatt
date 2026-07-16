@@ -51,9 +51,9 @@ description: "Run fiebatt locally, verify the stack, and make your first localiz
 
 The repo is split by responsibility:
 
-- `apps/frontend/` for the Next.js app
-- `apps/backend/` for FastAPI, worker orchestration, and backend-owned AI integrations
-- `apps/vision-worker/` for optional segmentation and visual embedding support
+- `apps/web/` for the Next.js app
+- `apps/api/` for FastAPI, worker orchestration, and API-owned AI integrations
+- `apps/api/vision-worker/` for optional segmentation and visual embedding support
 - `compose.yaml` for local and self-hosted orchestration
 
 <div className="docs-stage">
@@ -68,7 +68,7 @@ The repo is split by responsibility:
   <Step title="Install web dependencies">
 
 ```bash
-npm install --prefix apps/frontend
+npm install --prefix apps/web
 ```
 
   </Step>
@@ -86,7 +86,7 @@ The web app runs on `http://localhost:3001`.
 Run the FastAPI backend with the repo-root environment loaded.
 
 ```bash
-cd apps/backend && PYTHONPATH=$(pwd) uvicorn app.main:app --reload --port 8000
+cd apps/api && PYTHONPATH=$(pwd) uvicorn app.main:app --reload --port 8000
 ```
 
 The backend serves uploads, projects, generation, identify, mask, propagation, narration, and export on `http://localhost:8000`.

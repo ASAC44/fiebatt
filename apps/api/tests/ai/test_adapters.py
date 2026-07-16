@@ -214,6 +214,67 @@ def test_wan_local_edit_payload_uses_tracked_sam_mask():
     assert payload["parameters"]["expand_mode"] == "original"
 
 
+def test_happyhorse_keeps_subject_reference_out_of_first_frame_slot(tmp_path):
+    from app.ai.services.happyhorse import _build_generation_payload
+
+    subject = tmp_path / "subject.png"
+    subject.write_bytes(b"subject")
+    model, payload, _ = _build_generation_payload(
+        "Make only the selected person jump.",
+        reference_frame_path=str(subject),
+        source_video_url="https://cdn.example.test/context.mp4",
+        duration=5,
+    )
+
+    assert "video-edit" in model
+    assert [item["type"] for item in payload["input"]["media"]] == [
+        "video",
+        "reference_image",
+    ]
+
+
+def test_happyhorse_image_generation_uses_full_start_boundary(tmp_path):
+    from app.ai.services.happyhorse import _build_generation_payload
+
+    start_anchor = tmp_path / "start-full-frame.jpg"
+    start_anchor.write_bytes(b"full-frame")
+    model, payload, _ = _build_generation_payload(
+        "Make the selected person jump.",
+        reference_frame_path=str(start_anchor),
+        source_video_url=None,
+        duration=5,
+    )
+
+    assert "i2v" in model
+    assert payload["input"]["media"][0]["type"] == "first_frame"
+
+
+@pytest.mark.asyncio
+async def test_veo_uses_full_start_and_end_boundary_frames(monkeypatch, tmp_path):
+    from app.ai.services import veo
+
+    start_anchor = tmp_path / "start.jpg"
+    end_anchor = tmp_path / "end.jpg"
+    start_anchor.write_bytes(b"start-full-frame")
+    end_anchor.write_bytes(b"end-full-frame")
+    captured = {}
+
+    async def capture_generation(**kwargs):
+        captured.update(kwargs)
+        return str(tmp_path / "result.mp4")
+
+    monkeypatch.setattr(veo, "_generate_and_download", capture_generation)
+    await veo.generate_variant(
+        "Make the selected person jump.",
+        reference_frame_path=str(start_anchor),
+        last_frame_path=str(end_anchor),
+        duration=8,
+    )
+
+    assert captured["image"].image_bytes == b"start-full-frame"
+    assert captured["config"].last_frame.image_bytes == b"end-full-frame"
+
+
 def test_video_provider_aliases_normalize_to_runtime_provider():
     from app.ai.services.config import Settings
 

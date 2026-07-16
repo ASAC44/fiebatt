@@ -4,7 +4,7 @@
 
 Proposed architecture. This document describes the intended replacement for the current fixed-window generation flow; it is not an implementation record.
 
-Plan rebased conceptually onto repository structure at `b6f799c`: canonical product paths are `apps/backend`, `apps/frontend`, and `apps/vision-worker`.
+Plan rebased conceptually onto repository structure at `b6f799c`: canonical product paths are `apps/api`, `apps/web`, and `apps/api/vision-worker`.
 
 ## Goal
 
@@ -787,7 +787,7 @@ Run only after behavioral PRs stabilize.
 
 - Remove feature-flagged fixed-window path and compatibility fields after rollout confidence.
 - Consolidate duplicated planner/generation helpers and dead bridge code.
-- Keep canonical application code under `apps/backend`, `apps/frontend`, and `apps/vision-worker`.
+- Keep canonical application code under `apps/api`, `apps/web`, and `apps/api/vision-worker`.
 - Move maintained product/architecture/runbook material into `docs/`.
 - Move executable operational/development utilities into `scripts/`.
 - Update imports, Docker/CI references, ownership files, README, plugin references, and links atomically.

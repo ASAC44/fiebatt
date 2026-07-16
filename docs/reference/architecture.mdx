@@ -9,10 +9,10 @@ fiebatt is organized as a multi-surface application with a Next.js editor, a bac
 
 ## Repository map
 
-- `apps/frontend/`: Next.js route surfaces, editor UI, project browsing, landing pages, continuity UI
-- `apps/backend/`: FastAPI routes, models, workers, media processing, and AI integrations under `app/ai/`
+- `apps/web/`: Next.js route surfaces, editor UI, project browsing, landing pages, continuity UI
+- `apps/api/`: FastAPI routes, models, workers, media processing, and AI integrations under `app/ai/`
 - `apps/cli/`: command-line interface wrapping the backend API, includes multi-agent video analysis
-- `apps/vision-worker/`: optional SAM2 segmentation and CLIP embedding service
+- `apps/api/vision-worker/`: optional SAM2 segmentation and CLIP embedding service
 - `compose.yaml`: local and self-hosted service orchestration
 
 ## Web responsibilities

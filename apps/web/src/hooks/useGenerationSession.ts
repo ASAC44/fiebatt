@@ -3,16 +3,19 @@ import { useEffect, useRef, useState } from "react";
 
 import {
   accept,
+  createEditPlan,
   generate,
+  getHealth,
   pollJob,
   streamJobEvents,
   type AcceptResp,
+  type EditPlanResp,
   type JobResp,
   type JobStreamEvent,
   type Variant,
   type BBox,
 } from "@/lib/api";
-import { newClip, useEDL, type Clip } from "@/stores/edl";
+import type { Clip } from "@/stores/edl";
 
 type GenerationTarget = Pick<
   Clip,
@@ -26,6 +29,7 @@ type UseGenerationSessionArgs = {
   clip: Clip | null;
   sourceClip?: Clip | null;
   bbox: BBox | null;
+  selectionId?: string | null;
   previewFrameTs: number | null;
   onAccepted?: (payload: AcceptedVariantPayload) => void | Promise<void>;
 };
@@ -42,29 +46,40 @@ export function useGenerationSession({
   clip,
   sourceClip,
   bbox,
+  selectionId,
   previewFrameTs,
   onAccepted,
 }: UseGenerationSessionArgs) {
-  const { dispatch } = useEDL();
   const [prompt, setPrompt] = useState("");
+  const [plan, setPlan] = useState<EditPlanResp | null>(null);
+  const [planning, setPlanning] = useState(false);
+  const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
+  const [adaptivePlanningEnabled, setAdaptivePlanningEnabled] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [variants, setVariants] = useState<Variant[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [acceptingIdx, setAcceptingIdx] = useState<number | null>(null);
   const [logs, setLogs] = useState<GenerationLogEntry[]>([]);
+  const [result, setResult] = useState<JobResp | null>(null);
   const jobIdRef = useRef<string | null>(null);
   const generationTargetRef = useRef<GenerationTarget | null>(null);
   const streamCtlRef = useRef<AbortController | null>(null);
-  // authoritative edit end_ts returned by the job
-  const actualEndTsRef = useRef<number | null>(null);
 
   const canGenerate =
     !!clip &&
     clip.kind === "source" &&
     !!clip.projectId &&
     !!prompt.trim() &&
-    !busy;
+    !planning &&
+    !busy &&
+    adaptivePlanningEnabled !== null;
+
+  function updatePrompt(value: string) {
+    setPrompt(value);
+    setFallbackNotice(null);
+    if (plan && plan.intent.raw_prompt !== value.trim()) setPlan(null);
+  }
 
   function closeStream() {
     streamCtlRef.current?.abort();
@@ -78,15 +93,37 @@ export function useGenerationSession({
     setErr(null);
     setAcceptingIdx(null);
     setLogs([]);
+    setResult(null);
     jobIdRef.current = null;
     generationTargetRef.current = null;
-    actualEndTsRef.current = null;
+    setPlan(null);
+    setPlanning(false);
+    setFallbackNotice(null);
     if (!keepPrompt) setPrompt("");
   }
 
   useEffect(() => {
     clearSession();
-  }, [clip?.id]);
+  }, [clip?.id, selectionId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getHealth()
+      .then((health) => {
+        if (!cancelled) {
+          setAdaptivePlanningEnabled(
+            health.features?.adaptive_edit_planning === true,
+          );
+        }
+      })
+      .catch(() => {
+        // An older/unavailable backend must retain the known-safe legacy path.
+        if (!cancelled) setAdaptivePlanningEnabled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     return () => closeStream();
@@ -94,12 +131,27 @@ export function useGenerationSession({
 
   async function run(): Promise<boolean> {
     if (!canGenerate || !clip || !clip.projectId) return false;
+    if (bbox && adaptivePlanningEnabled && !plan) {
+      if (selectionId) {
+        const planned = await preparePlan(undefined, true);
+        if (planned) return true;
+      } else {
+        setFallbackNotice(
+          "Precise selection unavailable. Rendering with legacy fixed window.",
+        );
+      }
+    } else if (bbox && adaptivePlanningEnabled === false) {
+      setFallbackNotice(
+        "Adaptive planning is disabled by the backend. Rendering with the legacy fixed window.",
+      );
+    }
     const baseClip = sourceClip ?? clip;
     closeStream();
     setBusy(true);
     setErr(null);
     setStatus("queued");
     setVariants([]);
+    setResult(null);
     setAcceptingIdx(null);
     setLogs([]);
     generationTargetRef.current = {
@@ -114,6 +166,8 @@ export function useGenerationSession({
     try {
       const { job_id } = await generate({
         project_id: clip.projectId,
+        target_clip_id: baseClip.id,
+        plan_id: plan?.plan_id,
         start_ts: clip.sourceStart,
         end_ts: clip.sourceEnd,
         bbox: bbox ?? { x: 0, y: 0, w: 1, h: 1 },
@@ -150,8 +204,7 @@ export function useGenerationSession({
       if (final.status !== "done" || !final.variants.length) {
         throw new Error(final.error || "generation failed");
       }
-      // capture the authoritative edit window returned by the backend
-      actualEndTsRef.current = final.end_ts ?? null;
+      setResult(final);
       setVariants(final.variants);
       return true;
     } catch (e) {
@@ -160,6 +213,52 @@ export function useGenerationSession({
       return false;
     } finally {
       setBusy(false);
+      setStatus("");
+    }
+  }
+
+  async function preparePlan(
+    explicitRange?: { start: number; end: number },
+    allowLegacyFallback = false,
+  ): Promise<boolean> {
+    if (!clip?.projectId || !selectionId || !prompt.trim()) return false;
+    setPlanning(true);
+    setErr(null);
+    setStatus("planning");
+    try {
+      const next = await createEditPlan({
+        project_id: clip.projectId,
+        selection_id: selectionId,
+        prompt: prompt.trim(),
+        explicit_start_ts: explicitRange?.start,
+        explicit_end_ts: explicitRange?.end,
+      });
+      if (!next.adaptive_generation_enabled) {
+        setPlan(null);
+        setAdaptivePlanningEnabled(false);
+        if (allowLegacyFallback) {
+          setFallbackNotice(
+            "Adaptive planning is disabled by the backend. Rendering with the legacy fixed window.",
+          );
+        } else {
+          setErr("Adaptive planning was disabled before this plan could be used.");
+        }
+        return false;
+      }
+      setPlan(next);
+      setFallbackNotice(null);
+      return true;
+    } catch (error) {
+      if (allowLegacyFallback) {
+        setFallbackNotice(
+          "Adaptive planning unavailable. Rendering with legacy fixed window.",
+        );
+      } else {
+        setErr(String(error));
+      }
+      return false;
+    } finally {
+      setPlanning(false);
       setStatus("");
     }
   }
@@ -173,31 +272,11 @@ export function useGenerationSession({
       if (!variant?.url) throw new Error("variant has no url");
       const accepted = await accept(jobIdRef.current, idx);
       const trimmedPrompt = prompt.trim();
-      // Use the backend's authoritative end_ts. Fall back to the originally
-      // requested range if the server did not return it.
-      const actualEnd = actualEndTsRef.current ?? target.sourceEnd;
-      const duration = actualEnd - target.sourceStart;
-      const replacement = newClip({
-        url: variant.url,
-        sourceStart: 0,
-        sourceEnd: duration,
-        mediaDuration: duration,
-        kind: "generated",
-        label: trimmedPrompt.slice(0, 28) || "ai edit",
-        projectId: target.projectId,
-        generatedFromClipId: target.id,
-        volume: target.volume,
-      });
-      // always use replace_range so the rest of the clip is preserved.
-      // Split at the backend's accepted edit end so the right clip resumes
-      // at the same source timestamp where the AI replacement ends.
-      dispatch({
-        type: "replace_range",
-        id: target.id,
-        start: target.sourceStart,
-        end: actualEnd,
-        with: replacement,
-      });
+      window.dispatchEvent(
+        new CustomEvent("fiebatt:timeline-refresh", {
+          detail: { tool: "accept_variant", timeline: accepted.timeline },
+        }),
+      );
       setPrompt("");
       clearSession({ keepPrompt: false });
       if (onAccepted) {
@@ -220,7 +299,11 @@ export function useGenerationSession({
 
   return {
     prompt,
-    setPrompt,
+    setPrompt: updatePrompt,
+    plan,
+    planning,
+    fallbackNotice,
+    adaptivePlanningEnabled,
     busy,
     status,
     variants,
@@ -229,7 +312,9 @@ export function useGenerationSession({
     acceptingIdx,
     canGenerate,
     logs,
+    result,
     run,
+    adjustPlan: (start: number, end: number) => preparePlan({ start, end }),
     acceptVariant,
     clearSession,
   };

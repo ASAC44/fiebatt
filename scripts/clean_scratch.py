@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Garbage-collect the backend scratch directory.
+"""Garbage-collect the API scratch directory.
 
-The FastAPI process treats `apps/backend/storage/<category>/` as a disposable
+The FastAPI process treats `apps/api/storage/<category>/` as a disposable
 cache for ffmpeg inputs/outputs. Nothing deletes from it, so on a long-
 running server it grows forever until the disk fills.
 
 This script walks the scratch tree and deletes files older than
 --max-age-hours (default 48h). It's safe to run while the server is up:
-every file here can be re-derived either from Vultr object storage
+every file here can be re-derived either from S3
 (uploads, variants, stitched, exports) or from re-running ffmpeg.
 
 The `uploads/` directory is excluded by default because that's the only
@@ -47,15 +47,15 @@ log = logging.getLogger("fiebatt.clean_scratch")
 
 
 def _resolve_scratch_root(explicit: Path | None) -> Path:
-    """Find the scratch dir. Prefer --root, else apps/backend/storage relative
-    to the script, else $PWD/apps/backend/storage."""
+    """Find the scratch dir. Prefer --root, else apps/api/storage relative
+    to the script, else $PWD/apps/api/storage."""
     if explicit is not None:
         return explicit.resolve()
     here = Path(__file__).resolve().parent.parent
-    candidate = here / "backend" / "storage"
+    candidate = here / "apps" / "api" / "storage"
     if candidate.exists():
         return candidate
-    return (Path.cwd() / "backend" / "storage").resolve()
+    return (Path.cwd() / "apps" / "api" / "storage").resolve()
 
 
 def _sweep(directory: Path, *, cutoff: float, dry_run: bool) -> tuple[int, int]:
@@ -94,7 +94,7 @@ def _sweep(directory: Path, *, cutoff: float, dry_run: bool) -> tuple[int, int]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="prune scratch videos/keyframes")
     ap.add_argument("--root", type=Path, default=None,
-                    help="scratch dir (default: ./apps/backend/storage)")
+                    help="scratch dir (default: ./apps/api/storage)")
     ap.add_argument("--max-age-hours", type=float, default=48.0,
                     help="delete files older than this (default: 48)")
     ap.add_argument("--include-uploads", action="store_true",

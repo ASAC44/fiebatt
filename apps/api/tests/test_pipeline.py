@@ -54,6 +54,9 @@ async def test_health(client: AsyncClient):
     body = res.json()
     assert body["ok"] is True
     assert body["ai_mode"] == "stub"
+    assert body["features"]["adaptive_edit_planning"] is False
+    assert body["features"]["global_edit_planning"] is False
+    assert body["features"]["hard_failed_acceptance_override"] is False
 
 
 @pytest.mark.asyncio
@@ -187,6 +190,15 @@ async def test_generate_poll_accept(client: AsyncClient):
     assert accept_res.status_code == 200
     accepted = accept_res.json()
     assert "segment_id" in accepted
+    accepted_generated = next(
+        segment
+        for segment in accepted["timeline"]["segments"]
+        if segment["source"] == "generated"
+    )
+    assert accepted_generated["media_start_ts"] == pytest.approx(0.0)
+    assert accepted_generated["media_end_ts"] == pytest.approx(
+        accepted_generated["end_ts"] - accepted_generated["start_ts"]
+    )
 
     # verify timeline has generated segment
     tl_res = await client.get(f"/api/timeline/{project_id}", headers=headers())

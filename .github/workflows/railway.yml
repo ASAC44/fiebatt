@@ -1,0 +1,27 @@
+name: Railway Deploy
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: railway-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_PROJECT_ID: 0b4d085d-f6da-4f03-a395-3ce56fdf1395
+      RAILWAY_ENVIRONMENT: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy api
+        run: railway up apps/api --path-as-root --service backend --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --ci --message "deploy api from github"
+
+      - name: Deploy web
+        run: railway up apps/web --path-as-root --service frontend --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --ci --message "deploy web from github"

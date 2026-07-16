@@ -14,4 +14,9 @@ async def health():
         "real_ai_ready": settings.real_ai_ready,
         "narration_ai_ready": settings.narration_ai_ready,
         "storage_mode": "s3" if settings.s3_enabled else "local",
+        "features": {
+            "adaptive_edit_planning": settings.adaptive_edit_planning,
+            "global_edit_planning": settings.global_edit_planning,
+            "hard_failed_acceptance_override": settings.allow_hard_failed_acceptance,
+        },
     }

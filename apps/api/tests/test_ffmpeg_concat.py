@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
+
+from app.services import ffmpeg
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess[bytes]:
@@ -79,3 +84,37 @@ def test_concat_clips_xfade_outputs_blended_frames(tmp_path):
     assert blended[2] > before[2] + 40
     assert after[2] > 180
     assert after[0] < 80
+
+
+def test_prepend_handoff_replaces_only_clip_entrance(tmp_path):
+    red = tmp_path / "red.mp4"
+    blue = tmp_path / "blue.mp4"
+    out = tmp_path / "handed.mp4"
+    _make_color_clip(red, "red")
+    _make_color_clip(blue, "blue")
+
+    asyncio.run(ffmpeg.prepend_video_handoff(red, blue, 0.4, out))
+
+    entrance = _average_rgb_at(out, 0.2)
+    tail = _average_rgb_at(out, 0.7)
+    assert entrance[2] > 180
+    assert entrance[0] < 80
+    assert tail[0] > 180
+    assert tail[2] < 80
+
+
+def test_concat_video_clips_keeps_hard_boundary_and_full_duration(tmp_path):
+    red = tmp_path / "red.mp4"
+    blue = tmp_path / "blue.mp4"
+    out = tmp_path / "joined.mp4"
+    _make_color_clip(red, "red")
+    _make_color_clip(blue, "blue")
+
+    asyncio.run(ffmpeg.concat_video_clips([red, blue], out))
+
+    metadata = asyncio.run(ffmpeg.probe(out))
+    before = _average_rgb_at(out, 0.8)
+    after = _average_rgb_at(out, 1.2)
+    assert metadata["duration"] == pytest.approx(2.0, abs=0.15)
+    assert before[0] > 180 and before[2] < 80
+    assert after[2] > 180 and after[0] < 80

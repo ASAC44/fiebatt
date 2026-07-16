@@ -70,6 +70,11 @@ export type BBox = { x: number; y: number; w: number; h: number };
 export type Mask = {
   contour: [number, number][];
   contours?: [number, number][][];
+  selectionId?: string | null;
+  seedTs?: number | null;
+  maskUrl?: string | null;
+  subjectReferenceUrl?: string | null;
+  score?: number | null;
 };
 
 /** Gemini's description of whatever's inside the current bbox. */

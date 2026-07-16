@@ -22,7 +22,7 @@ venv/
 *.db
 *.db-journal
 storage/
-apps/vision-worker/checkpoints/
+apps/api/vision-worker/checkpoints/
 
 # typescript
 *.tsbuildinfo

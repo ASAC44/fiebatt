@@ -14,7 +14,9 @@ import asyncio
 import base64
 import logging
 import os
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -50,6 +52,23 @@ def _call_huggingface_space(worker_url: str, payload: dict) -> dict:
     return result
 
 
+@dataclass(frozen=True, slots=True)
+class MaskResult:
+    path: str
+    score: float | None = None
+    candidate_count: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TrackResult:
+    tracker: str
+    frames: list[dict[str, Any]]
+    processed_start_index: int
+    processed_end_index: int
+    cancelled: bool = False
+    warning: str | None = None
+
+
 async def bbox_to_mask(
     frame_path: str,
     bbox: dict[str, float],
@@ -65,6 +84,14 @@ async def bbox_to_mask(
     Returns:
         Path to the generated mask image (PNG, white = foreground)
     """
+    return (await bbox_to_mask_result(frame_path, bbox)).path
+
+
+async def bbox_to_mask_result(
+    frame_path: str,
+    bbox: dict[str, float],
+) -> MaskResult:
+    """Return reusable mask metadata without breaking the legacy path contract."""
     settings = get_settings()
     worker_url = settings.vision_worker_url
 
@@ -96,7 +123,15 @@ async def bbox_to_mask(
     mask_path = str(Path(frame_path).with_suffix(".mask.png"))
     Path(mask_path).write_bytes(mask_bytes)
 
-    return mask_path
+    return MaskResult(
+        path=mask_path,
+        score=float(data["score"]) if data.get("score") is not None else None,
+        candidate_count=(
+            int(data["candidate_count"])
+            if data.get("candidate_count") is not None
+            else None
+        ),
+    )
 
 
 async def is_available() -> bool:
@@ -116,6 +151,43 @@ async def is_available() -> bool:
             return resp.status_code == 200
     except Exception:
         return False
+
+
+async def track_frames(
+    frame_paths: list[str],
+    *,
+    seed_frame_index: int,
+    bbox: dict[str, float] | None = None,
+    seed_mask_path: str | None = None,
+    max_frames: int = 120,
+    max_seconds: float = 30.0,
+    include_masks: bool = False,
+) -> TrackResult:
+    """Call the bounded SAM2 video tracker with cached local frames."""
+    settings = get_settings()
+    payload: dict[str, Any] = {
+        "frames_b64": [base64.b64encode(Path(path).read_bytes()).decode() for path in frame_paths],
+        "seed_frame_index": seed_frame_index,
+        "bbox": bbox,
+        "max_frames": max_frames,
+        "max_seconds": max_seconds,
+        "include_masks": include_masks,
+    }
+    if seed_mask_path:
+        payload["seed_mask_b64"] = base64.b64encode(Path(seed_mask_path).read_bytes()).decode()
+
+    async with httpx.AsyncClient(timeout=max_seconds + 10.0) as client:
+        response = await client.post(f"{settings.vision_worker_url}/sam/track", json=payload)
+        response.raise_for_status()
+    data = response.json()
+    return TrackResult(
+        tracker=str(data["tracker"]),
+        frames=list(data.get("frames") or []),
+        processed_start_index=int(data["processed_start_index"]),
+        processed_end_index=int(data["processed_end_index"]),
+        cancelled=bool(data.get("cancelled", False)),
+        warning=data.get("warning"),
+    )
 
 
 def create_subject_reference(

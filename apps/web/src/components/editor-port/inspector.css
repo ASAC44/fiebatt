@@ -85,6 +85,33 @@
 }
 
 /* prompt */
+.edit-plan {
+  margin: 10px 10px 0;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+}
+
+.edit-plan__head,
+.edit-plan__lane,
+.edit-plan__meta,
+.edit-plan__range {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.edit-plan__head { margin-bottom: 8px; }
+.edit-plan__lane,
+.edit-plan__meta { flex-wrap: wrap; font-size: 10px; color: var(--chrome-lo); }
+.edit-plan__range { margin: 10px 0; }
+.edit-plan__range label { display: grid; gap: 3px; font-size: 10px; color: var(--chrome-lo); }
+.edit-plan__range input { width: 76px; padding: 5px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); color: var(--ink); }
+.edit-plan__range button { padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); }
+.edit-plan__warning { margin: 7px 0 0; color: var(--warning, #d99a3e); font-size: 10px; }
+
 .pane__prompt {
   font-family: var(--f-ui);
   background: var(--recessed);

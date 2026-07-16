@@ -346,9 +346,10 @@ export function AgentChat({ demoMode = false, projectId }: AgentChatProps) {
         playheadTs: edlState.playhead,
         duration: totalDuration(edlState.clips),
         bbox: edlState.bbox ?? null,
+        selectionId: edlState.mask?.selectionId ?? null,
       });
     },
-    [demoMode, projectId, sendMessage, sendDemoMessage, edlState.playhead, edlState.clips, edlState.bbox],
+    [demoMode, projectId, sendMessage, sendDemoMessage, edlState.playhead, edlState.clips, edlState.bbox, edlState.mask?.selectionId],
   );
 
   // Suggestion cards are a "generating…" status note — the user can't
@@ -378,9 +379,10 @@ export function AgentChat({ demoMode = false, projectId }: AgentChatProps) {
         playheadTs: edlState.playhead,
         duration: totalDuration(edlState.clips),
         bbox: edlState.bbox ?? null,
+        selectionId: edlState.mask?.selectionId ?? null,
       });
     },
-    [demoMode, projectId, sendMessage, sendDemoMessage, edlState.playhead, edlState.clips, edlState.bbox],
+    [demoMode, projectId, sendMessage, sendDemoMessage, edlState.playhead, edlState.clips, edlState.bbox, edlState.mask?.selectionId],
   );
 
   return (

@@ -24,7 +24,7 @@ The full pipeline is captured as an Excalidraw diagram:
 
 ![fiebatt technical flow](docs/images/fiebatt-technical-flow.svg)
 
-[Open the fiebatt technical flow diagram](apps/frontend/public/fiebatt-technical-flow.excalidraw)
+[Open the fiebatt technical flow diagram](apps/web/public/fiebatt-technical-flow.excalidraw)
 
 The diagram covers the end-to-end path from editor or CLI input through project context, qwen planning, CLIP retrieval, SAM2 masking, frame inspection, localized generation, scoring, variant storage, compare, timeline refresh, continuity, and export.
 
@@ -129,10 +129,10 @@ The CLI wraps the same backend API that powers the web editor. That means an age
 
 ```text
 apps/
-  frontend/      Next.js app: landing page, project library, editor UI
-  backend/       FastAPI app, AI adapters, prompts, workers, and tests
+  web/           Next.js app: landing page, project library, editor UI
+  api/           FastAPI app, AI adapters, prompts, workers, and tests
+    vision-worker/  Optional SAM2 and CLIP inference service
   cli/           Command-line interface for scripting and agent workflows
-  vision-worker/ Optional SAM2 and CLIP inference service
 
 docs/
   demo-clips/   Demo source clips
@@ -159,25 +159,25 @@ storage/         Local development media storage
 ### Install web dependencies
 
 ```bash
-cd apps/frontend
+cd apps/web
 npm install
 ```
 
 ### Run the web app
 
 ```bash
-cd apps/frontend
+cd apps/web
 npm run dev
 ```
 
 The Next.js app runs on port `3001` by default.
 
-### Run the backend
+### Run the API
 
 From the repository root:
 
 ```bash
-./scripts/dev_backend.sh
+./scripts/dev_api.sh
 ```
 
 The backend runs on port `8000` by default.
@@ -226,7 +226,7 @@ codex plugin marketplace remove fiebatt
 ### Run with Docker Compose
 
 ```bash
-docker compose up --build backend db
+docker compose up --build api db
 ```
 
 If you want the optional vision-worker profile:
@@ -247,7 +247,7 @@ Important environment groups:
 
 - database: `DATABASE_URL`
 - auth: `AUTH_JWT_SECRET`, `AUTH_JWT_EXPIRES_MINUTES`
-- media storage: `VULTR_S3_*` or local media fallback
+- media storage: `S3_BUCKET`, `AWS_REGION`, and the standard AWS credential chain, or local media fallback
 - AI mode: `USE_AI_STUBS`
 - local edit rollout: `ADAPTIVE_EDIT_PLANNING` (defaults off; fixed-window fallback stays available)
 - emergency continuity override: `ALLOW_HARD_FAILED_ACCEPTANCE` (keep off during normal rollout)
@@ -259,6 +259,11 @@ The web app uses first-party email/password auth. Create an account at
 the backend as `Authorization: Bearer <token>`.
 - vision worker: `VISION_WORKER_URL` (`GPU_WORKER_URL` remains a compatibility fallback)
 - provider keys: Mesh API / qwen / Gemini / DashScope / ElevenLabs keys depending on the path being tested
+
+For a Hugging Face ZeroGPU worker, upload `apps/api/vision-worker/hf-space/`
+as a Gradio Space, select ZeroGPU hardware, and set `VISION_WORKER_URL` to its
+public `https://<owner>-<space>.hf.space` URL. The backend calls the Space's
+named `/segment` Gradio endpoint automatically.
 
 For quick local development, `USE_AI_STUBS=true` keeps the pipeline testable without paid providers. For real generation, use `USE_AI_STUBS=false` and configure the required provider keys. If `MESH_API_KEY` is present, the agent chat loop prefers Mesh API for text planning and tool calls.
 
@@ -308,14 +313,14 @@ events.onmessage = (event) => console.log(JSON.parse(event.data));
 Web build:
 
 ```bash
-cd apps/frontend
+cd apps/web
 npm run build
 ```
 
 Backend and AI tests:
 
 ```bash
-PYTHONPATH=apps/backend pytest apps/backend/tests -q
+PYTHONPATH=apps/api pytest apps/api/tests -q
 ```
 
 Smoke flow:
@@ -336,7 +341,7 @@ These are useful for local testing, docs, and repeatable demos.
 
 ## Notes for contributors
 
-- Keep the web app in `apps/frontend`; this is the only supported frontend.
+- Keep the web app in `apps/web`; this is the only supported frontend.
 - Prefer backend API changes that preserve the same editor and CLI flow.
 - Keep generated media, debug frames, and scratch files out of the repository unless they are intentional documentation assets.
 - If you add a new backend capability, update the Excalidraw flow diagram and this README so the product story stays accurate.

@@ -39,6 +39,7 @@ interface SendMessageOptions {
   playheadTs?: number | null;
   duration?: number | null;
   bbox?: { x: number; y: number; w: number; h: number } | null;
+  selectionId?: string | null;
 }
 
 /**
@@ -130,6 +131,7 @@ export function useAgentStream(projectId?: string | null) {
       playheadTs,
       duration,
       bbox,
+      selectionId,
     }: SendMessageOptions) => {
       // Do not create duplicate backend jobs while one turn is active.
       if (inFlightRef.current) return;
@@ -231,6 +233,7 @@ export function useAgentStream(projectId?: string | null) {
             playhead_ts: playheadTs ?? null,
             duration: duration ?? null,
             bbox: bbox ?? null,
+            selection_id: selectionId ?? null,
             video_gen_provider: getSettings().videoProvider,
           }),
         });

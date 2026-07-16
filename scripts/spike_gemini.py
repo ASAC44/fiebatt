@@ -11,7 +11,7 @@ import os
 
 # Add the backend package root to the import path.
 repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(repo_root, "apps", "backend"))
+sys.path.insert(0, os.path.join(repo_root, "apps", "api"))
 
 from dotenv import load_dotenv
 load_dotenv()

@@ -1,21 +1,21 @@
 services:
-  frontend:
+  web:
     build:
-      context: ./apps/frontend
+      context: ./apps/web
       args:
-        NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-http://backend:8000}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://api:8000}
     env_file:
       - .env
     environment:
-      NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-http://backend:8000}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://api:8000}
     ports:
       - "3001:3001"
     depends_on:
-      - backend
+      - api
 
-  backend:
+  api:
     build:
-      context: ./apps/backend
+      context: ./apps/api
     ports:
       - "8000:8000"
     env_file:
@@ -32,11 +32,11 @@ services:
   vision-worker:
     profiles: ["gpu"]
     build:
-      context: ./apps/vision-worker
+      context: ./apps/api/vision-worker
     ports:
       - "8001:8001"
     volumes:
-      - ./apps/vision-worker/checkpoints:/app/checkpoints:ro
+      - ./apps/api/vision-worker/checkpoints:/app/checkpoints:ro
 
   db:
     image: postgres:16-alpine

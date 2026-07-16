@@ -4,6 +4,7 @@ os.environ["USE_AI_STUBS"] = "true"
 
 from app.ai import services as ai  # noqa: E402
 from app.ai.services.provider_capabilities import (  # noqa: E402
+    select_source_edit_mode,
     select_video_provider,
     validate_provider_duration,
 )
@@ -50,3 +51,21 @@ def test_veo_duration_validation_is_strict():
 def test_wan_duration_validation_matches_video_edit_api():
     assert validate_provider_duration("wan", 10.0) is None
     assert validate_provider_duration("wan", 12.0) is not None
+
+
+def test_wan_prefers_tracked_mask_only_when_full_context_fits():
+    assert select_source_edit_mode(
+        "wan", duration=4.9, source_video=True, mask_available=True
+    ) == "tracked_mask"
+    assert select_source_edit_mode(
+        "wan", duration=6.0, source_video=True, mask_available=True
+    ) == "source_video"
+
+
+def test_source_edit_mode_falls_back_by_provider_capability():
+    assert select_source_edit_mode(
+        "happyhorse", duration=12.0, source_video=True, mask_available=True
+    ) == "source_video"
+    assert select_source_edit_mode(
+        "veo", duration=8.0, source_video=True, mask_available=True
+    ) == "image_conditioned"

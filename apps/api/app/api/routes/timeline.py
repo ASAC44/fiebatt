@@ -12,7 +12,6 @@ the only mutation path for manual edits — AI accepts still flow through
 the resulting clip.
 """
 import time
-from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,38 +21,13 @@ from app.deps import get_session
 from app.models.project import Project
 from app.models.session import Session as SessionModel
 from app.schemas.timeline import (
-    PersistedEDL,
     TimelineOut,
     TimelineSaveReq,
     TimelineSaveResp,
-    TimelineSegment,
 )
-from app.services import storage
-from app.services.timeline_builder import build_timeline
+from app.services.timeline_response import build_timeline_response
 
 router = APIRouter(tags=["timeline"])
-
-
-def _rehydrate_edl(raw: dict | None) -> PersistedEDL | None:
-    """Turn a JSON blob from the DB into a fully re-signed EDL, or None
-    if the project has no saved snapshot yet. Every url we emit here gets
-    passed through `storage.normalize_url_like` so stale presigned links
-    mint fresh signatures on read — keeping the frontend's <video> nodes
-    playable no matter how long ago the EDL was written."""
-    if not raw:
-        return None
-    try:
-        edl = PersistedEDL.model_validate(raw)
-    except Exception:
-        # A malformed blob shouldn't brick the whole reel. Fall back to
-        # the segment-based view so the user at least sees something.
-        return None
-
-    for clip in edl.clips:
-        clip.url = storage.normalize_url_like(clip.url, fallback=clip.url)
-    for asset in edl.sources:
-        asset.url = storage.normalize_url_like(asset.url, fallback=asset.url)
-    return edl
 
 
 @router.get("/timeline/{project_id}", response_model=TimelineOut)
@@ -66,24 +40,7 @@ async def get_timeline(
     if proj is None or proj.session_id != session.id:
         raise HTTPException(status_code=404, detail="project not found")
 
-    items = await build_timeline(db, proj)
-
-    return TimelineOut(
-        project_id=proj.id,
-        duration=proj.duration,
-        segments=[
-            TimelineSegment(
-                start_ts=it.start_ts,
-                end_ts=it.end_ts,
-                source=it.source,
-                url=storage.normalize_url_like(it.url, fallback=it.url),
-                audio=it.audio,
-                segment_id=it.id,
-            )
-            for it in items
-        ],
-        edl=_rehydrate_edl(cast(dict | None, proj.timeline_edl)),
-    )
+    return await build_timeline_response(db, proj)
 
 
 @router.put("/timeline/{project_id}", response_model=TimelineSaveResp)

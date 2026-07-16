@@ -1,7 +1,7 @@
 """Accept a generated variant.
 
-Lazy-render model: accepting a variant writes a Segment row + enqueues
-the entity-search background job. That's it. No ffmpeg, no stitching, no
+Lazy-render model: accepting a variant writes a Segment row. Entity search
+is separately opt-in. No ffmpeg, no stitching, no
 full-project re-encode, no proj.video_url mutation. The timeline is
 reconstructed on read by walking Segment rows, and the final MP4 is
 rendered exactly once when the user hits Export.
@@ -12,12 +12,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.session import get_db
+from app.config.settings import get_settings
 from app.deps import get_runner, get_session
 from app.models.job import Job, Variant
 from app.models.project import Project
 from app.models.segment import Segment
 from app.models.session import Session as SessionModel
 from app.schemas.accept import AcceptRequest, AcceptResponse
+from app.services.entity_discovery import enqueue_entity_discovery
+from app.services.accepted_generation import (
+    accepted_generation_range,
+    record_accepted_range,
+    update_project_edl_for_acceptance,
+)
+from app.services.generation_quality import acceptance_allowed, acceptance_block_reason
+from app.services.timeline_response import build_timeline_response
 from app.workers import entity_job
 
 router = APIRouter(tags=["accept"])
@@ -49,9 +58,16 @@ async def accept(
     )
     if variant is None or variant.status != "done" or not variant.url:
         raise HTTPException(status_code=422, detail="variant not ready")
+    if not acceptance_allowed(
+        job.payload,
+        override_requested=body.continuity_override,
+        override_enabled=get_settings().allow_hard_failed_acceptance,
+    ):
+        raise HTTPException(status_code=409, detail=acceptance_block_reason(job.payload))
 
     if job.start_ts is None or job.end_ts is None:
         raise HTTPException(status_code=422, detail="job has no segment range")
+    accepted_range = accepted_generation_range(job)
 
     # deactivate any existing generated segments that overlap this range.
     # the newest accept wins on overlap. we don't delete rows so we keep
@@ -62,8 +78,8 @@ async def accept(
                 Segment.project_id == proj.id,
                 Segment.active == True,  # noqa: E712
                 Segment.source == "generated",
-                Segment.start_ts < job.end_ts,
-                Segment.end_ts > job.start_ts,
+                Segment.start_ts < accepted_range.committed_end,
+                Segment.end_ts > accepted_range.committed_start,
             )
         )
     ).scalars().all()
@@ -72,47 +88,44 @@ async def accept(
 
     seg = Segment(
         project_id=proj.id,
-        start_ts=job.start_ts,
-        end_ts=job.end_ts,
+        start_ts=accepted_range.committed_start,
+        end_ts=accepted_range.committed_end,
         source="generated",
         url=variant.url,
         variant_id=variant.id,
-        order_index=int(job.start_ts * 1000),
+        order_index=int(accepted_range.committed_start * 1000),
         active=True,
     )
     db.add(seg)
+    await db.flush()
+    record_accepted_range(job, segment_id=seg.id, accepted_range=accepted_range)
+    update_project_edl_for_acceptance(
+        proj,
+        segment_id=seg.id,
+        variant=variant,
+        accepted_range=accepted_range,
+    )
     await db.commit()
     await db.refresh(seg)
 
-    # fire an entity-search job — but only when the generation actually has a
-    # concrete entity to track. For full-frame regenerations (no bbox drawn)
-    # and for "remove" intents there's nothing meaningful to identify, and
-    # kicking the job off anyway produces a red "continuity error" chip on
-    # the frontend when Gemini inevitably fails to ID a subject. Skip those
-    # and the UI renders the idle "X tracked" pill instead.
-    bbox = job.bbox_json or {}
-    bbox_w = float(bbox.get("w", 0.0)) if isinstance(bbox, dict) else 0.0
-    bbox_h = float(bbox.get("h", 0.0)) if isinstance(bbox, dict) else 0.0
-    bbox_is_tracked = bool(bbox) and bbox_w < 0.98 and bbox_h < 0.98 and bbox_w * bbox_h > 0.0
-
     entity_job_id: str | None = None
-    if bbox_is_tracked:
-        ent_job = Job(
-            project_id=proj.id,
-            kind="entity",
-            status="pending",
-            payload={
-                "segment_id": seg.id,
-                "reference_frame_ts": job.reference_frame_ts,
-                "reference_variant_url": variant.url,
-                "bbox": job.bbox_json,
-            },
+    if body.discover_occurrences:
+        ent_job, reused = await enqueue_entity_discovery(
+            db,
+            project=proj,
+            segment=seg,
+            source_job=job,
+            reference_variant_url=variant.url,
         )
-        db.add(ent_job)
-        await db.commit()
-        await db.refresh(ent_job)
+        if ent_job is not None:
+            await db.commit()
+            if not reused:
+                runner.submit(ent_job.id, lambda: entity_job.run(ent_job.id))
+            entity_job_id = ent_job.id
 
-        runner.submit(ent_job.id, lambda: entity_job.run(ent_job.id))
-        entity_job_id = ent_job.id
-
-    return AcceptResponse(segment_id=seg.id, entity_job_id=entity_job_id)
+    await db.refresh(proj)
+    return AcceptResponse(
+        segment_id=seg.id,
+        entity_job_id=entity_job_id,
+        timeline=await build_timeline_response(db, proj),
+    )

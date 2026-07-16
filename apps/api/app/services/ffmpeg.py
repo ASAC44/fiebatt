@@ -313,6 +313,38 @@ async def simple_replace(
     return out
 
 
+async def prepend_video_handoff(
+    base: str | Path,
+    handoff: str | Path,
+    duration: float,
+    out: str | Path,
+) -> Path:
+    """Replace the beginning of a silent source clip with a prior chunk overlap."""
+    if duration <= 0:
+        raise ValueError("handoff duration must be positive")
+    out = Path(out)
+    filter_complex = (
+        f"[1:v]trim=duration={duration:.3f},setpts=PTS-STARTPTS[handoff];"
+        f"[0:v]trim=start={duration:.3f},setpts=PTS-STARTPTS[tail];"
+        "[handoff][tail]concat=n=2:v=1:a=0[v]"
+    )
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(base),
+        "-i", str(handoff),
+        "-filter_complex", filter_complex,
+        "-map", "[v]",
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-pix_fmt", "yuv420p",
+        "-an",
+        "-movflags", "+faststart",
+        str(out),
+    ]
+    await _run(cmd)
+    return out
+
+
 async def concat_mp4s(paths: Iterable[str | Path], out: str | Path) -> Path:
     """Concatenate MP4s via the concat demuxer. Inputs must share codec+fps+size."""
     out = Path(out)
@@ -338,6 +370,43 @@ async def concat_mp4s(paths: Iterable[str | Path], out: str | Path) -> Path:
             list_path.unlink()
         except FileNotFoundError:
             pass
+    return out
+
+
+async def concat_video_clips(paths: list[str | Path], out: str | Path) -> Path:
+    """Concatenate normalized video-only spans without inventing a dissolve."""
+    if not paths:
+        raise ValueError("at least one video span is required")
+    out = Path(out)
+    if len(paths) == 1:
+        metadata = await probe(paths[0])
+        return await extract_clip(
+            paths[0],
+            0.0,
+            float(metadata["duration"]),
+            out,
+            with_audio=False,
+        )
+    inputs = [item for path in paths for item in ("-i", str(path))]
+    reset = ";".join(
+        f"[{index}:v]setpts=PTS-STARTPTS[v{index}]"
+        for index in range(len(paths))
+    )
+    labels = "".join(f"[v{index}]" for index in range(len(paths)))
+    filter_complex = f"{reset};{labels}concat=n={len(paths)}:v=1:a=0[v]"
+    cmd = [
+        "ffmpeg", "-y",
+        *inputs,
+        "-filter_complex", filter_complex,
+        "-map", "[v]",
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-pix_fmt", "yuv420p",
+        "-an",
+        "-movflags", "+faststart",
+        str(out),
+    ]
+    await _run(cmd)
     return out
 
 

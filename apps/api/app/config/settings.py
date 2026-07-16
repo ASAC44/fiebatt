@@ -21,9 +21,6 @@ class Settings(BaseSettings):
     mesh_api_key: str = ""
     mesh_api_base_url: str = "https://api.meshapi.ai/v1"
     mesh_model: str = "deepseek/deepseek-v3.2"
-    # kept for older env shapes; the current real video provider path uses
-    # Gemini/Veo under the `runway.generate(...)` adapter surface.
-    runway_api_key: str = ""
     elevenlabs_api_key: str = ""
 
     auth_jwt_secret: str = "change-me"

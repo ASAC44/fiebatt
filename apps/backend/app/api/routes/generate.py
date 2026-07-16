@@ -80,7 +80,10 @@ async def generate(
     if length < MIN_SEG_LEN or length > MAX_SEG_LEN:
         raise HTTPException(
             status_code=422,
-            detail=f"segment length must be {MIN_SEG_LEN}-{MAX_SEG_LEN}s (got {length:.2f}s)",
+            detail=(
+                f"segment length must be {MIN_SEG_LEN:g}-{MAX_SEG_LEN:g}s "
+                f"(got {length:.2f}s)"
+            ),
         )
     if end_ts > proj.duration + 1e-3:
         raise HTTPException(status_code=422, detail="end_ts past project duration")
@@ -94,7 +97,7 @@ async def generate(
             status_code=422,
             detail=(
                 "generation context must be at most "
-                f"{MAX_SEG_LEN}s (got {generation_length:.2f}s)"
+                f"{MAX_SEG_LEN:g}s (got {generation_length:.2f}s)"
             ),
         )
     if video_gen_provider != "auto":

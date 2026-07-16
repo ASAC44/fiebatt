@@ -90,3 +90,14 @@ test("upload opens the authoritative project", async ({ page }) => {
   await expect(page).toHaveURL(/\/editor\?projectId=project-123$/);
   await expect(page.getByLabel("Project name")).toHaveValue("clip");
 });
+
+test("login rejects recursive return paths", async ({ page }) => {
+  await installApi(page);
+  await page.goto("/login?next=%2Flogin%3Fnext%3D%252Fprojects");
+
+  await page.getByLabel("Email").fill("editor@example.com");
+  await page.getByLabel("Password").fill("password123");
+  await page.getByRole("button", { name: "Log in" }).click();
+
+  await expect(page).toHaveURL(/\/projects$/);
+});

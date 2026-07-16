@@ -7,6 +7,7 @@ import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 
 import { login, signup } from "@/lib/api";
+import { safeAuthDestination } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,7 +25,7 @@ export function AuthForm({ mode }: AuthFormProps) {
   const [busy, setBusy] = useState(false);
 
   const isSignup = mode === "signup";
-  const next = searchParams.get("next") || "/projects";
+  const next = safeAuthDestination(searchParams.get("next"));
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();

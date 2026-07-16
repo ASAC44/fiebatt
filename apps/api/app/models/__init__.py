@@ -24,7 +24,6 @@ from app.models.integration import (
     OAuthAuthorizationCode,
     OAuthClient,
     OAuthRefreshToken,
-    ProviderCredential,
     UploadIntent,
 )
 
@@ -50,7 +49,6 @@ __all__ = [
     "GenerationChunk",
     "Conversation",
     "ChatMessage",
-    "ProviderCredential",
     "OAuthClient",
     "OAuthAuthorizationCode",
     "OAuthRefreshToken",

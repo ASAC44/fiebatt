@@ -22,305 +22,24 @@ import { ToolCallCard } from "./ToolCallCard";
 // ─── types ────────────────────────────────────────────────────────────
 
 interface AgentChatProps {
-  demoMode?: boolean;
   projectId: string | null;
 }
 
 // ─── component ────────────────────────────────────────────────────────
 
-export function AgentChat({ demoMode = false, projectId }: AgentChatProps) {
+export function AgentChat({ projectId }: AgentChatProps) {
   const {
-    messages: liveMessages,
-    streaming: liveStreaming,
+    messages,
+    streaming,
     activity,
     sendMessage,
     stopStream,
-  } = useAgentStream(demoMode ? null : projectId);
+  } = useAgentStream(projectId);
   const { state: edlState } = useEDL();
-  const { state: agentState, dispatch: agentDispatch } = useAgent();
-  const [demoBusy, setDemoBusy] = useState(false);
-  const demoTimersRef = useRef<number[]>([]);
+  const { dispatch: agentDispatch } = useAgent();
   const messagesRef = useRef<HTMLDivElement>(null);
-  const messages = demoMode ? agentState.messages : liveMessages;
-  const streaming = demoMode ? demoBusy : liveStreaming;
   const lastMessage = messages[messages.length - 1];
   const lastAgentText = lastMessage?.type === "agent" ? lastMessage.text : "";
-
-  const clearDemoTimers = useCallback(() => {
-    demoTimersRef.current.forEach((timer) => window.clearTimeout(timer));
-    demoTimersRef.current = [];
-  }, []);
-
-  const stopDemo = useCallback(() => {
-    clearDemoTimers();
-    setDemoBusy(false);
-    agentDispatch({ type: "end_stream" });
-  }, [agentDispatch, clearDemoTimers]);
-
-  useEffect(() => clearDemoTimers, [clearDemoTimers]);
-
-  useEffect(() => {
-    clearDemoTimers();
-    if (demoMode) {
-      agentDispatch({ type: "clear_messages" });
-    }
-  }, [demoMode, agentDispatch, clearDemoTimers]);
-
-  const scheduleDemo = useCallback((delay: number, fn: () => void) => {
-    const timer = window.setTimeout(fn, delay);
-    demoTimersRef.current.push(timer);
-  }, []);
-
-  const sendDemoMessage = useCallback((text: string) => {
-    clearDemoTimers();
-    setDemoBusy(true);
-    const jobId = `demo-${Date.now()}`;
-
-    agentDispatch({ type: "add_user_message", text });
-
-    scheduleDemo(900, () => {
-      agentDispatch({ type: "prompt_plan_started", jobId, userPrompt: text });
-    });
-    scheduleDemo(22000, () => {
-      agentDispatch({
-        type: "prompt_plan_ready",
-        jobId,
-        plan: {
-          description: "Create a polished before/after edit that reads clearly in a live product walkthrough.",
-          intent: "localized motion edit",
-          conditioning_strategy: "preserve subject identity, camera motion, timing continuity, and scene geometry",
-          tone: "precise, realistic, presentation-ready",
-          color_grading: "match source contrast and daylight warmth",
-          region_emphasis: edlState.bbox ? "selected region" : "full frame with subject lock",
-          prompt: "Rewrite the requested motion change into a localized video edit while keeping the subject natural, preserving the background, matching the original camera and lighting, and preparing an A/B comparison render.",
-          prompt_for_veo: null,
-        },
-      });
-    });
-    scheduleDemo(27000, () => {
-      agentDispatch({ type: "prompt_plan_dispatched", jobId, vendor: "fiebatt" });
-    });
-
-    const runTool = (
-      key: string,
-      tool: string,
-      args: unknown,
-      result: unknown,
-      duration = 12000,
-    ) => {
-      agentDispatch({
-        type: "tool_call_start",
-        id: `${jobId}-${key}`,
-        tool,
-        args,
-      });
-      scheduleDemo(duration, () => {
-        agentDispatch({
-          type: "tool_call_end",
-          id: `${jobId}-${key}`,
-          status: "done",
-          result,
-        });
-      });
-    };
-
-    scheduleDemo(30000, () => {
-      runTool(
-        "project",
-        "load_project_context",
-        {
-          project_id: projectId ?? "demo",
-          playhead_ts: Number(edlState.playhead.toFixed(2)),
-          duration_s: Number(totalDuration(edlState.clips).toFixed(2)),
-          timeline_tracks: ["V1", "A1"],
-        },
-        {
-          source_clip: edlState.clips[0]?.label ?? "london_bus",
-          fps: 25,
-          frames_indexed: 464,
-          audio_present: true,
-        },
-        9000,
-      );
-    });
-
-    scheduleDemo(43000, () => {
-      runTool(
-        "scene",
-        "analyze_video",
-        {
-          sample_window_s: [0, 18.56],
-          stride_frames: 12,
-          detect_camera_motion: true,
-        },
-        {
-          scene_count: 3,
-          subject: "red double-decker bus",
-          camera: "locked-off street view",
-          confidence: 0.94,
-        },
-        15000,
-      );
-    });
-
-    scheduleDemo(62000, () => {
-      runTool(
-        "clip",
-        "clip_retrieval",
-        {
-          query: text,
-          candidates: ["double-decker bus", "route display", "front panel", "city street"],
-          embedding_space: "visual-text",
-        },
-        {
-          best_match: "red double-decker bus front panel",
-          semantic_score: 0.91,
-          keyframes: ["00:03.18", "00:04.22", "00:05.08"],
-        },
-        15000,
-      );
-    });
-
-    scheduleDemo(81000, () => {
-      runTool(
-        "sam2",
-        "sam2_region_lock",
-        {
-          seed_region: edlState.bbox ?? "auto_subject_mask",
-          propagation: "bidirectional",
-          feather_px: 8,
-        },
-        {
-          mask_track: "bus_mask_v1",
-          occlusion_recovery: true,
-          average_iou: 0.88,
-        },
-        17000,
-      );
-    });
-
-    scheduleDemo(102000, () => {
-      runTool(
-        "continuity",
-        "continuity_pass",
-        {
-          lock_identity: true,
-          preserve_background: true,
-          match_lighting: true,
-          audio_strategy: "preserve_source",
-        },
-        {
-          identity_lock: "stable",
-          background_drift: "low",
-          color_delta: "within tolerance",
-        },
-        14000,
-      );
-    });
-
-    scheduleDemo(120000, () => {
-      runTool(
-        "generate",
-        "generate_edit",
-        {
-          prompt: text,
-          model_route: "video_generation",
-          region_lock: "bus_mask_v1",
-          variants: 3,
-          compare_ready: true,
-        },
-        {
-          render_job: `${jobId}-render`,
-          queued_variants: 3,
-          estimated_seconds: 42,
-        },
-        18000,
-      );
-    });
-
-    scheduleDemo(143000, () => {
-      runTool(
-        "render",
-        "render_variants",
-        {
-          job_id: `${jobId}-render`,
-          passes: ["motion", "mask_composite", "color_match", "preview_encode"],
-        },
-        {
-          completed_variants: 3,
-          preview_asset: "/demo-comparison.mp4",
-          encode: "h264 preview",
-        },
-        17000,
-      );
-    });
-
-    scheduleDemo(163000, () => {
-      runTool(
-        "score",
-        "score_variants",
-        {
-          criteria: ["prompt adherence", "mask stability", "temporal consistency", "source match"],
-          choose_best: true,
-        },
-        {
-          selected_variant: 0,
-          visual_coherence: 0.96,
-          prompt_adherence: 0.93,
-          temporal_consistency: 0.91,
-        },
-        10000,
-      );
-    });
-
-    scheduleDemo(176000, () => {
-      agentDispatch({
-        type: "tool_call_end",
-        id: `${jobId}-generate`,
-        status: "done",
-        result: {
-          variants: [
-            {
-              id: `${jobId}-variant-0`,
-              index: 0,
-              status: "done",
-              url: "/demo-comparison.mp4",
-              description: "Demo-ready comparison render",
-            },
-          ],
-        },
-      });
-      agentDispatch({
-        type: "add_variant_preview",
-        jobId,
-        variants: [
-          {
-            id: `${jobId}-variant-0`,
-            index: 0,
-            url: "/demo-comparison.mp4",
-            description: "Demo-ready comparison render",
-            visual_coherence: 0.96,
-            prompt_adherence: 0.93,
-          },
-        ],
-      });
-    });
-    scheduleDemo(178000, () => {
-      agentDispatch({ type: "start_stream" });
-    });
-
-    const response = "Done. I analyzed the source, locked the subject region, generated multiple localized motion variants, scored the best pass for continuity, and queued the selected render for Compare. Use Compare to review the original, edited, or side-by-side view.";
-    const responseWords = response.split(" ");
-    responseWords.forEach((word, index) => {
-      scheduleDemo(179000 + index * 280, () => {
-        agentDispatch({ type: "append_token", text: `${word}${index === responseWords.length - 1 ? "" : " "}` });
-      });
-    });
-    scheduleDemo(179000 + responseWords.length * 280 + 800, () => {
-      agentDispatch({ type: "end_stream" });
-      setDemoBusy(false);
-    });
-  }, [agentDispatch, clearDemoTimers, edlState.bbox, edlState.clips, edlState.playhead, projectId, scheduleDemo]);
 
   useEffect(() => {
     const node = messagesRef.current;
@@ -332,10 +51,6 @@ export function AgentChat({ demoMode = false, projectId }: AgentChatProps) {
 
   const handleSend = useCallback(
     (text: string) => {
-      if (demoMode) {
-        sendDemoMessage(text);
-        return;
-      }
       if (!projectId) return;
       // Snapshot the live editor state so the agent knows what "here" and
       // "now" mean. Without this the backend Gemini asks the user for
@@ -349,7 +64,7 @@ export function AgentChat({ demoMode = false, projectId }: AgentChatProps) {
         selectionId: edlState.mask?.selectionId ?? null,
       });
     },
-    [demoMode, projectId, sendMessage, sendDemoMessage, edlState.playhead, edlState.clips, edlState.bbox, edlState.mask?.selectionId],
+    [projectId, sendMessage, edlState.playhead, edlState.clips, edlState.bbox, edlState.mask?.selectionId],
   );
 
   // Suggestion cards are a "generating…" status note — the user can't
@@ -368,10 +83,6 @@ export function AgentChat({ demoMode = false, projectId }: AgentChatProps) {
   // (fiebatt:timeline-refresh) and re-hydrates the EDL from the server.
   const handleApplyVariant = useCallback(
     (jobId: string, variantIndex: number) => {
-      if (demoMode) {
-        sendDemoMessage(`Apply variant ${variantIndex} from ${jobId}.`);
-        return;
-      }
       if (!projectId) return;
       void sendMessage({
         projectId,
@@ -382,7 +93,7 @@ export function AgentChat({ demoMode = false, projectId }: AgentChatProps) {
         selectionId: edlState.mask?.selectionId ?? null,
       });
     },
-    [demoMode, projectId, sendMessage, sendDemoMessage, edlState.playhead, edlState.clips, edlState.bbox, edlState.mask?.selectionId],
+    [projectId, sendMessage, edlState.playhead, edlState.clips, edlState.bbox, edlState.mask?.selectionId],
   );
 
   return (
@@ -702,10 +413,10 @@ export function AgentChat({ demoMode = false, projectId }: AgentChatProps) {
         {/* input */}
         <AgentInput
           onSend={handleSend}
-          disabled={!demoMode && !projectId}
+          disabled={!projectId}
           streaming={streaming}
           activity={activity}
-          onStop={demoMode ? stopDemo : stopStream}
+          onStop={stopStream}
         />
       </div>
     </>

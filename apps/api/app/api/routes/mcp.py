@@ -9,7 +9,6 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.services.config import set_settings_overrides
 from app.api.routes.agent import OPENAI_TOOLS
 from app.auth.jwt import decode_access_token, extract_bearer
 from app.config.settings import get_settings
@@ -18,7 +17,6 @@ from app.models.project import Project
 from app.models.segment import Segment
 from app.models.entity import Entity
 from app.services import agent_tools, storage
-from app.services.credentials import list_provider_status, provider_overrides
 from app.services.hosted_uploads import complete_upload, prepare_upload, receive_local_upload
 
 router = APIRouter(tags=["mcp"])
@@ -29,7 +27,7 @@ REQUIRED_SCOPE = "fiebatt:edit"
 SPECIAL_TOOLS = [
     {
         "name": "account_status",
-        "description": "Check the connected Fiebatt account and configured AI provider keys.",
+        "description": "Check the connected Fiebatt account and service status.",
         "inputSchema": {"type": "object", "properties": {}},
         "annotations": {"readOnlyHint": True},
     },
@@ -120,7 +118,7 @@ async def _execute_special(
     if name == "account_status":
         return {
             "connected": True,
-            "providers": await list_provider_status(db, user_id),
+            "generation": "managed",
             "settings_url": f"{get_settings().app_url.rstrip('/')}/settings",
         }
     if name == "prepare_upload":
@@ -232,7 +230,6 @@ async def mcp(request: Request, db: AsyncSession = Depends(get_db)):
 
     user_id = str(claims["sub"])
     try:
-        set_settings_overrides(await provider_overrides(db, user_id))
         result = await _execute_special(name, args, db, user_id)
         if result is None:
             result = await agent_tools.execute_tool(

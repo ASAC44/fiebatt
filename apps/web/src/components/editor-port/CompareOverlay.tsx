@@ -11,13 +11,7 @@ import {
   type MediaAsset,
 } from "@/stores/edl";
 
-export function CompareOverlay({
-  demoModifiedUrl,
-  onClose,
-}: {
-  demoModifiedUrl?: string;
-  onClose: () => void;
-}) {
+export function CompareOverlay({ onClose }: { onClose: () => void }) {
   const { state } = useEDL();
   const original = state.sources.find((asset) => asset.kind === "source") ?? state.sources[0] ?? null;
   const total = totalDuration(state.clips);
@@ -50,17 +44,7 @@ export function CompareOverlay({
     }
 
     if (editedVideo) {
-      if (demoModifiedUrl) {
-        if (editedClipIdRef.current !== "demo") {
-          editedClipIdRef.current = "demo";
-          editedVideo.src = demoModifiedUrl;
-          editedVideo.load();
-        }
-        const demoTime = Math.min(targetPlayhead, Math.max(0, (editedVideo.duration || total) - 0.001));
-        if (Number.isFinite(demoTime) && (force || Math.abs(editedVideo.currentTime - demoTime) > 0.12)) {
-          editedVideo.currentTime = demoTime;
-        }
-      } else if (clip && hit) {
+      if (clip && hit) {
         const wantedTime = sourceTimeFor(clip, hit.offsetInClip);
         if (editedClipIdRef.current !== clip.id) {
           editedClipIdRef.current = clip.id;
@@ -74,7 +58,7 @@ export function CompareOverlay({
         editedVideo.pause();
       }
     }
-  }, [demoModifiedUrl, original, state.clips, total]);
+  }, [original, state.clips]);
 
   useEffect(() => {
     syncVideos(playhead);
@@ -206,7 +190,7 @@ export function CompareOverlay({
         <ComparePane label="Original" asset={original} hidden={!showOriginal}>
           <video ref={originalRef} src={original.url} muted playsInline className="h-full w-full bg-black object-contain" />
         </ComparePane>
-        <ComparePane label="Modified" clip={demoModifiedUrl ? null : activeClip} hidden={!showEdited}>
+        <ComparePane label="Modified" clip={activeClip} hidden={!showEdited}>
           <video ref={editedRef} muted playsInline className="h-full w-full bg-black object-contain" />
         </ComparePane>
       </main>

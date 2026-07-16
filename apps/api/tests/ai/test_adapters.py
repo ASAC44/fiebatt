@@ -297,6 +297,14 @@ def test_vision_worker_url_accepts_legacy_environment_name():
     assert legacy.vision_worker_url == "https://legacy.example.test"
 
 
+def test_segmentation_worker_can_be_configured_separately():
+    from app.ai.services.config import Settings
+
+    settings = Settings(SAM_SEGMENTATION_URL="https://segment.hf.space")
+
+    assert settings.sam_segmentation_url == "https://segment.hf.space"
+
+
 def test_veo_reference_images_include_style_and_asset(tmp_path):
     from app.ai.services.veo import _build_reference_images
 

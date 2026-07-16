@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, JSON, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -11,22 +11,6 @@ from app.db.base import Base
 
 def _uuid() -> str:
     return str(uuid.uuid4())
-
-
-class ProviderCredential(Base):
-    __tablename__ = "provider_credentials"
-    __table_args__ = (UniqueConstraint("user_id", "provider", name="uq_provider_credential_user"),)
-
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
-    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    provider: Mapped[str] = mapped_column(String, index=True)
-    encrypted_value: Mapped[str] = mapped_column(Text)
-    key_hint: Mapped[str] = mapped_column(String, default="")
-    validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
 
 
 class OAuthClient(Base):

@@ -7,7 +7,7 @@ running server it grows forever until the disk fills.
 
 This script walks the scratch tree and deletes files older than
 --max-age-hours (default 48h). It's safe to run while the server is up:
-every file here can be re-derived either from S3
+every file here can be re-derived either from object storage
 (uploads, variants, stitched, exports) or from re-running ffmpeg.
 
 The `uploads/` directory is excluded by default because that's the only
@@ -47,8 +47,7 @@ log = logging.getLogger("fiebatt.clean_scratch")
 
 
 def _resolve_scratch_root(explicit: Path | None) -> Path:
-    """Find the scratch dir. Prefer --root, else apps/api/storage relative
-    to the script, else $PWD/apps/api/storage."""
+    """Find the scratch dir under the repository's canonical API app."""
     if explicit is not None:
         return explicit.resolve()
     here = Path(__file__).resolve().parent.parent

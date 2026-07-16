@@ -6,7 +6,6 @@ import {
   useEffect,
   useRef,
   useState,
-  useSyncExternalStore,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
@@ -40,7 +39,6 @@ import {
 import { ContinuityStatusBadge } from "@/features/continuity/ContinuityStatusBadge";
 import { useContinuityDashboard } from "@/features/continuity/useContinuityDashboard";
 import { useAgentEdlBridge } from "@/hooks/useAgentEdlBridge";
-import { getSettings, subscribeToSettings } from "@/lib/settings";
 import { EditorTopbar } from "@/components/editor-topbar";
 import "./studio.css";
 
@@ -198,16 +196,17 @@ function buildGeneratedAssets(project: StudioInitialProject, segments: TimelineS
 
 export function Studio({
   initialProject,
+  onProjectCreated,
 }: {
-  onExit: () => void;
-  onLibrary?: () => void;
   initialProject?: StudioInitialProject;
+  onProjectCreated: (projectId: string) => void;
 }) {
   return (
     <EDLProvider>
       <AgentProvider>
         <StudioInner
           initialProject={initialProject}
+          onProjectCreated={onProjectCreated}
         />
       </AgentProvider>
     </EDLProvider>
@@ -216,16 +215,19 @@ export function Studio({
 
 function StudioInner({
   initialProject,
+  onProjectCreated,
 }: {
   initialProject?: StudioInitialProject;
+  onProjectCreated: (projectId: string) => void;
 }) {
   const { state, dispatch } = useEDL();
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [hydrateError, setHydrateError] = useState<string | null>(null);
+  const [hydrateAttempt, setHydrateAttempt] = useState(0);
   const [mode, setMode] = useState<'vibe' | 'pro'>('vibe');
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
-  const settings = useSyncExternalStore(subscribeToSettings, getSettings, getSettings);
-  const demoMode = settings.demoMode;
   const [hydratingProject, setHydratingProject] = useState(Boolean(initialProject));
   const rootRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -284,6 +286,7 @@ function StudioInner({
   useEffect(() => {
     if (!projectId) return;
     setHydratingProject(true);
+    setHydrateError(null);
 
     let cancelled = false;
     (async () => {
@@ -341,37 +344,14 @@ function StudioInner({
         dispatch({ type: "hydrate", sources, clips });
       } catch (err) {
         if (cancelled) return;
-        console.warn("[studio] timeline fetch failed, falling back to single-clip:", err);
-        const snap = initialProjectRef.current;
-        if (!snap || snap.projectId !== projectId) return;
-        const sourceAsset = buildSourceAsset({
-          projectId,
-          videoUrl: snap.videoUrl,
-          duration: snap.duration,
-          fps: snap.fps,
-          label: snap.label,
-        });
-        const fallback: Clip = {
-          id: crypto.randomUUID(),
-          kind: "source",
-          url: sourceAsset.url,
-          sourceStart: 0,
-          sourceEnd: sourceAsset.duration,
-          mediaDuration: sourceAsset.duration,
-          volume: 1,
-          projectId: sourceAsset.projectId,
-          sourceAssetId: sourceAsset.id,
-          label: sourceAsset.label,
-        };
-        lastSavedSigRef.current = edlSignature([fallback], [sourceAsset]);
-        dispatch({ type: "hydrate", sources: [sourceAsset], clips: [fallback] });
+        setHydrateError(err instanceof Error ? err.message : "Could not load the timeline.");
       } finally {
         if (!cancelled) setHydratingProject(false);
       }
     })();
 
     return () => { cancelled = true; };
-  }, [projectId, dispatch]);
+  }, [projectId, dispatch, hydrateAttempt]);
 
   // ─── silent re-hydrate on agent-driven timeline mutations ─────────
   //
@@ -544,28 +524,12 @@ function StudioInner({
 
   async function handleFile(file: File) {
     setUploading(true);
+    setUploadError(null);
     try {
       const res = await upload(file);
-      // Drop imported media into the library pool. The user chooses when
-      // it lands on the timeline via the plus button in the Library.
-      const asset = newMediaAsset({
-        url: res.video_url,
-        duration: res.duration,
-        fps: res.fps,
-        projectId: res.project_id,
-        label: file.name.replace(/\.[^.]+$/, ""),
-        kind: "source",
-      });
-      dispatch({ type: "add_source", asset });
-      // Vibe mode hides the Library sidebar entirely, so the usual plus-
-      // button affordance is gone. Auto-drop new imports straight onto
-      // the timeline there — otherwise the clip would just vanish into
-      // a pool the user can't see.
-      if (mode === "vibe") {
-        dispatch({ type: "add_to_timeline", assetId: asset.id });
-      }
+      onProjectCreated(res.project_id);
     } catch (e) {
-      alert(`upload failed: ${e}`);
+      setUploadError(e instanceof Error ? e.message : "Upload failed.");
     } finally {
       setUploading(false);
     }
@@ -708,10 +672,11 @@ function StudioInner({
         }}
       />
       <EditorTopbar
-        projectName={projectLabel ? `reel · ${projectLabel}` : "Untitled video"}
+        projectId={projectId ?? null}
+        projectName={projectLabel || "Untitled video"}
         mode={mode}
         onModeChange={setMode}
-        onImport={() => fileInputRef.current?.click()}
+        onImport={projectId ? undefined : () => fileInputRef.current?.click()}
         onCompare={() => {
           dispatch({ type: "set_playing", playing: false });
           setShowCompare(true);
@@ -728,6 +693,11 @@ function StudioInner({
           </>
         }
       />
+      {uploadError ? (
+        <div className="fixed left-1/2 top-14 z-[10020] -translate-x-1/2 rounded-lg border border-red-500/30 bg-red-950 px-4 py-3 text-sm text-red-100 shadow-xl" role="alert">
+          Could not upload this video. {uploadError}
+        </div>
+      ) : null}
 
       {showShortcuts && (
         <div
@@ -779,10 +749,7 @@ function StudioInner({
       )}
 
       {showCompare && (
-        <CompareOverlay
-          demoModifiedUrl={demoMode ? "/demo-comparison.mp4" : undefined}
-          onClose={() => setShowCompare(false)}
-        />
+        <CompareOverlay onClose={() => setShowCompare(false)} />
       )}
 
       {(exportStatus === "done" || exportStatus === "error" || (exporting && exportStatus)) && (
@@ -901,7 +868,7 @@ function StudioInner({
 
       <section className="studio__body">
         <aside className="studio__left">
-          <Library onUpload={handleFile} uploading={uploading} />
+          <Library />
         </aside>
 
         <Splitter
@@ -931,6 +898,20 @@ function StudioInner({
             >
               reopening reel…
             </div>
+          ) : hydrateError && projectId ? (
+            <div className="grid h-full place-items-center px-6 text-center">
+              <div className="max-w-sm">
+                <p className="text-sm font-medium text-white">Could not reopen this timeline</p>
+                <p className="mt-2 text-xs text-white/55">{hydrateError}</p>
+                <button
+                  className="mt-4 rounded-md border border-white/20 px-3 py-2 text-xs text-white hover:bg-white/10"
+                  onClick={() => setHydrateAttempt((value) => value + 1)}
+                  type="button"
+                >
+                  Try again
+                </button>
+              </div>
+            </div>
           ) : (
             <UploadDrop onFile={handleFile} busy={uploading} />
           )}
@@ -947,7 +928,7 @@ function StudioInner({
 
         <aside className="studio__right">
           {mode === 'vibe' ? (
-            <AgentChat demoMode={demoMode} projectId={continuityProjectId} />
+            <AgentChat projectId={continuityProjectId} />
           ) : (
             <Inspector
               mode={mode}

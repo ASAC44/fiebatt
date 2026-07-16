@@ -1,4 +1,5 @@
 import base64
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -15,6 +16,7 @@ async def test_track_frames_sends_bounded_tracking_contract(tmp_path, monkeypatc
         frames.append(str(path))
 
     async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "tracking.example.test"
         assert request.url.path == "/sam/track"
         body = __import__("json").loads(request.content)
         assert base64.b64decode(body["frames_b64"][1]) == b"frame-1"
@@ -38,6 +40,14 @@ async def test_track_frames_sends_bounded_tracking_contract(tmp_path, monkeypatc
     def client_factory(*args, **kwargs):
         return original_client(*args, transport=httpx.MockTransport(handler), **kwargs)
 
+    monkeypatch.setattr(
+        sam,
+        "get_settings",
+        lambda: SimpleNamespace(
+            vision_worker_url="https://tracking.example.test",
+            sam_segmentation_url="https://segment.hf.space",
+        ),
+    )
     monkeypatch.setattr(httpx, "AsyncClient", client_factory)
     result = await sam.track_frames(
         frames,
@@ -49,3 +59,34 @@ async def test_track_frames_sends_bounded_tracking_contract(tmp_path, monkeypatc
     assert result.tracker == "sam2_video"
     assert result.processed_end_index == 2
     assert result.frames[0]["state"] == "tracked"
+
+
+@pytest.mark.asyncio
+async def test_huggingface_override_is_only_used_for_segmentation(tmp_path, monkeypatch):
+    frame = tmp_path / "frame.jpg"
+    frame.write_bytes(b"frame")
+    captured: dict = {}
+
+    monkeypatch.setattr(
+        sam,
+        "get_settings",
+        lambda: SimpleNamespace(
+            vision_worker_url="https://tracking.example.test",
+            sam_segmentation_url="https://segment.hf.space",
+        ),
+    )
+
+    def segment(worker_url: str, payload: dict) -> dict:
+        captured.update(worker_url=worker_url, payload=payload)
+        return {"mask_b64": base64.b64encode(b"mask").decode(), "score": 0.9}
+
+    monkeypatch.setattr(sam, "_call_huggingface_space", segment)
+    result = await sam.bbox_to_mask_result(
+        str(frame),
+        {"x": 0.1, "y": 0.2, "w": 0.3, "h": 0.4},
+    )
+
+    assert captured["worker_url"] == "https://segment.hf.space"
+    assert base64.b64decode(captured["payload"]["image_b64"]) == b"frame"
+    assert result.score == 0.9
+    assert (tmp_path / "frame.mask.png").read_bytes() == b"mask"

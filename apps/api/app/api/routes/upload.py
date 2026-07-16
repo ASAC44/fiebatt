@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,6 +39,7 @@ async def upload(
 
     project = Project(
         session_id=session.id,
+        name=(Path(file.filename or "").stem.strip() or "Untitled video")[:120],
         video_path=str(path),
         video_url=url,
         duration=info["duration"],

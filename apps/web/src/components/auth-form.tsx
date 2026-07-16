@@ -7,7 +7,6 @@ import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 
 import { login, signup } from "@/lib/api";
-import { setAuthToken } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,11 +14,6 @@ import { Label } from "@/components/ui/label";
 type AuthFormProps = {
   mode: "login" | "signup";
 };
-
-const CREDITS_EXHAUSTED =
-  process.env.NEXT_PUBLIC_AI_CREDITS_EXHAUSTED === "true";
-const CREDITS_MESSAGE =
-  "Sorry, our AI models ran out of backend credits. It will be back up soon.";
 
 export function AuthForm({ mode }: AuthFormProps) {
   const router = useRouter();
@@ -34,18 +28,12 @@ export function AuthForm({ mode }: AuthFormProps) {
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (isSignup && CREDITS_EXHAUSTED) {
-      setError(CREDITS_MESSAGE);
-      return;
-    }
     setBusy(true);
     setError(null);
 
     try {
-      const response = isSignup
-        ? await signup(email, password)
-        : await login(email, password);
-      setAuthToken(response.access_token);
+      if (isSignup) await signup(email, password);
+      else await login(email, password);
       router.replace(next);
     } catch (err) {
       setError(err instanceof Error ? cleanError(err.message) : "Something went wrong");
@@ -101,12 +89,6 @@ export function AuthForm({ mode }: AuthFormProps) {
               : "Log in to open your projects and continue editing."}
           </p>
 
-          {CREDITS_EXHAUSTED ? (
-            <p className="mt-6 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-medium leading-6 text-destructive">
-              {CREDITS_MESSAGE}
-            </p>
-          ) : null}
-
           <form className="mt-10 space-y-6" onSubmit={handleSubmit}>
             <div className="space-y-2.5">
               <Label htmlFor="email">Email</Label>
@@ -143,7 +125,7 @@ export function AuthForm({ mode }: AuthFormProps) {
 
             <Button
               className="h-12 w-full rounded-xl text-base"
-              disabled={busy || (isSignup && CREDITS_EXHAUSTED)}
+              disabled={busy}
               type="submit"
             >
               {busy ? "Please wait" : isSignup ? "Sign up" : "Log in"}

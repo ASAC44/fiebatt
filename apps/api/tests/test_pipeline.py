@@ -97,6 +97,15 @@ async def test_upload_and_project(client: AsyncClient):
     assert proj_res.status_code == 200
     proj = proj_res.json()
     assert proj["project_id"] == body["project_id"]
+    assert proj["name"] == "test"
+
+    renamed = await client.patch(
+        f"/api/projects/{body['project_id']}",
+        json={"name": "Launch cut"},
+        headers=headers(),
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["name"] == "Launch cut"
 
 
 @pytest.mark.asyncio

@@ -96,7 +96,7 @@ Selection should be locked to its seed source timestamp. Scrubbing after selecti
 
 ### SAM2
 
-Reuse current single-frame SAM2 mask instead of running segmentation again in generation worker. Current vision worker uses SAM2 image prediction, not video tracking. Add a video-tracking endpoint/capability for adaptive bounds and optional mask propagation; do not assume this functionality already exists.
+Reuse the current single-frame SAM2 mask instead of running segmentation again in the generation worker. The full vision worker now exposes bounded video tracking for adaptive bounds and optional mask propagation; the Hugging Face segmentation-only worker does not.
 
 Wan VACE already accepts one seed mask plus `mask_frame_id` and performs provider-native target tracking. Prefer that native path when available. Do not generate dense masks merely to duplicate provider tracking.
 
@@ -588,7 +588,7 @@ Each commit should remain reviewable, tested, and safe to revert. Feature flags 
 
 #### Commit 5 — add SAM2 video-tracking capability
 
-- Add bounded video-tracking endpoint to vision worker, distinct from existing image segmentation.
+- Harden the bounded video-tracking endpoint in the full vision worker, keeping it distinct from image-only segmentation workers.
 - Seed from persisted selection mask/bbox.
 - Return per-frame boxes/masks, confidence, lost/occluded states, and processed range.
 - Support cancellation and maximum-frame/time budgets.

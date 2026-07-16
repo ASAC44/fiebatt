@@ -409,44 +409,15 @@ function AudioRow({ pps }: { pps: number }) {
             width: duration(c) * pps,
           }}
         >
-          {/* fake waveform — a set of vertical bars whose height
-              modulates pseudo-randomly but scaled by clip volume */}
-          <Wave volume={c.volume} seed={c.id} width={duration(c) * pps} />
+          <div
+            aria-label={`Audio volume ${Math.round(c.volume * 100)}%`}
+            className="aud__level"
+            style={{ opacity: Math.max(0.15, c.volume) }}
+          />
         </div>
       ))}
     </div>
   );
-}
-
-function Wave({ volume, seed, width }: { volume: number; seed: string; width: number }) {
-  const barCount = Math.max(8, Math.floor(width / 4));
-  const bars = useMemo(() => {
-    const h = hash(seed);
-    return Array.from({ length: barCount }, (_, i) => {
-      const n = ((h ^ (i * 2654435761)) >>> 0) / 0xffffffff;
-      return 0.15 + n * 0.85;
-    });
-  }, [seed, barCount]);
-  return (
-    <div className="wv">
-      {bars.map((v, i) => (
-        <span
-          key={i}
-          className="wv__b"
-          style={{ height: `${Math.min(100, v * volume * 100)}%` }}
-        />
-      ))}
-    </div>
-  );
-}
-
-function hash(s: string) {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
 }
 
 // ─── playhead ───────────────────────────────────────────────────────

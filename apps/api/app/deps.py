@@ -7,6 +7,7 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt import extract_bearer, verify_access_token
+from app.config.settings import get_settings
 from app.db.session import get_db
 from app.models.project import Project
 from app.models.session import Session as SessionModel
@@ -66,7 +67,9 @@ async def get_session(
     any projects under that anon session get re-parented onto the user
     session so the user doesn't lose anonymous work on sign-in.
     """
-    user = verify_access_token(extract_bearer(authorization) or "")
+    bearer = extract_bearer(authorization)
+    cookie_token = request.cookies.get(get_settings().auth_cookie_name)
+    user = verify_access_token(bearer or cookie_token or "")
 
     if user is not None:
         sid = f"user:{user.id}"

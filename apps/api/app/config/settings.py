@@ -1,17 +1,18 @@
 from pathlib import Path
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    app_env: str = "development"
     # database url. defaults to local sqlite so the app boots without postgres.
     # for real deploys set DATABASE_URL=postgresql+asyncpg://fiebatt:fiebatt@host:5432/fiebatt
     database_url: str = "sqlite+aiosqlite:///./fiebatt.db"
 
     # local scratch dir — ffmpeg needs real file paths, so we write here first
-    # and upload to S3 on publish(). once s3 is wired this is just a cache,
+    # and upload to S3 on publish(). once S3 is wired this is just a cache,
     # never user-facing.
     storage_path: Path = Path("./storage")
 
@@ -20,18 +21,16 @@ class Settings(BaseSettings):
     mesh_api_key: str = ""
     mesh_api_base_url: str = "https://api.meshapi.ai/v1"
     mesh_model: str = "deepseek/deepseek-v3.2"
-    # kept for older env shapes; the current real video provider path uses
-    # Gemini/Veo under the `runway.generate(...)` adapter surface.
-    runway_api_key: str = ""
     elevenlabs_api_key: str = ""
 
     auth_jwt_secret: str = "change-me"
     auth_jwt_expires_minutes: int = 7 * 24 * 60
+    auth_cookie_name: str = "fiebatt_session"
+    auth_cookie_secure: bool = False
     oauth_access_token_minutes: int = 60
     oauth_refresh_token_days: int = 30
     public_api_url: str = "http://localhost:8000"
     app_url: str = "http://localhost:3001"
-    credential_encryption_key: str = ""
     upload_intent_expiry_seconds: int = 15 * 60
     max_upload_bytes: int = 500 * 1024 * 1024
 
@@ -58,18 +57,18 @@ class Settings(BaseSettings):
     # Emergency operator escape hatch; request must also explicitly opt in.
     allow_hard_failed_acceptance: bool = False
 
-    # ── object storage ─────────────────────────────────────────────────
-    # Amazon S3. Setting a bucket enables the integration. Credentials are
-    # optional so boto3 can use its normal environment or workload-role chain.
-    # S3_ENDPOINT_URL is only needed for a custom endpoint.
+    # ── object storage ──────────────────────────────────────────────
+    # Setting a bucket enables S3. Credentials are optional so boto3 can
+    # use its normal environment or workload-role credential chain.
+    # S3_ENDPOINT_URL is only needed for an S3-compatible custom endpoint.
     s3_bucket: str = ""
     aws_region: str = "us-east-1"
     aws_access_key_id: str = ""
     aws_secret_access_key: str = ""
     aws_session_token: str = ""
     s3_endpoint_url: str = ""
-    # "presigned" → bucket stays private, API mints GET urls
-    # "public"    → urls use the bucket's public S3 endpoint (requires
+    # "presigned" → bucket stays private, API mints GET URLs
+    # "public"    → URLs use the bucket's public endpoint (requires
     #               bucket read policy set to public-read)
     media_url_mode: str = "presigned"
     presign_expiry: int = 7 * 24 * 3600  # 7 days, max for sigv4
@@ -83,6 +82,31 @@ class Settings(BaseSettings):
         if normalized not in {"presigned", "public"}:
             raise ValueError("MEDIA_URL_MODE must be 'presigned' or 'public'")
         return normalized
+
+    @field_validator("app_env", mode="before")
+    @classmethod
+    def _normalize_app_env(cls, value: object) -> str:
+        normalized = str(value or "development").strip().lower()
+        if normalized not in {"development", "test", "production"}:
+            raise ValueError("APP_ENV must be development, test, or production")
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_production_settings(self):
+        if self.app_env != "production":
+            return self
+        errors: list[str] = []
+        if self.use_ai_stubs:
+            errors.append("USE_AI_STUBS must be false")
+        if len(self.auth_jwt_secret.strip()) < 32 or self.auth_jwt_secret == "change-me":
+            errors.append("AUTH_JWT_SECRET must be a strong secret")
+        if not self.auth_cookie_secure:
+            errors.append("AUTH_COOKIE_SECURE must be true")
+        if not self.real_ai_ready:
+            errors.append("at least one platform AI key must be configured")
+        if errors:
+            raise ValueError("Invalid production configuration: " + "; ".join(errors))
+        return self
 
     @field_validator("database_url", mode="before")
     @classmethod

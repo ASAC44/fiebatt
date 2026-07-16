@@ -2,81 +2,33 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowLeft, Check, Loader2, Trash2 } from "lucide-react";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useRouter } from "next/navigation";
+import { ArrowLeft, CheckCircle2, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import {
-  deleteProviderKey,
-  listProviderKeys,
-  saveProviderKey,
-  type ProviderStatus,
-} from "@/lib/api";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import {
-  getSettings,
-  subscribeToSettings,
-  updateSettings,
-  VIDEO_PROVIDERS,
-  type VideoProvider,
-} from "@/lib/settings";
+import { getHealth, me, type HealthResp, type Me } from "@/lib/api";
 
 export default function SettingsPage() {
-  const settings = useSyncExternalStore(
-    subscribeToSettings,
-    getSettings,
-    getSettings,
-  );
-  const [providers, setProviders] = useState<ProviderStatus[]>([]);
-  const [keys, setKeys] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState<string | null>(null);
-  const [providerMessage, setProviderMessage] = useState("");
+  const router = useRouter();
+  const [profile, setProfile] = useState<Me | null>(null);
+  const [health, setHealth] = useState<HealthResp | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    listProviderKeys()
-      .then(setProviders)
-      .catch(() => setProviderMessage("Sign in to manage provider keys."));
-  }, []);
-
-  async function saveProvider(provider: ProviderStatus["provider"]) {
-    const value = keys[provider]?.trim();
-    if (!value) return;
-    setBusy(provider);
-    setProviderMessage("");
-    try {
-      await saveProviderKey(provider, value);
-      setKeys((current) => ({ ...current, [provider]: "" }));
-      setProviders(await listProviderKeys());
-      setProviderMessage(`${provider} key saved securely.`);
-    } catch (error) {
-      setProviderMessage(error instanceof Error ? error.message : "Could not save key.");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function removeProvider(provider: ProviderStatus["provider"]) {
-    setBusy(provider);
-    setProviderMessage("");
-    try {
-      await deleteProviderKey(provider);
-      setProviders(await listProviderKeys());
-      setProviderMessage(`${provider} key removed.`);
-    } catch (error) {
-      setProviderMessage(error instanceof Error ? error.message : "Could not remove key.");
-    } finally {
-      setBusy(null);
-    }
-  }
+    Promise.all([me(), getHealth()])
+      .then(([currentUser, serviceHealth]) => {
+        if (!currentUser.signed_in) {
+          router.replace("/login?next=/settings");
+          return;
+        }
+        setProfile(currentUser);
+        setHealth(serviceHealth);
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Could not load settings.");
+      });
+  }, [router]);
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -94,97 +46,44 @@ export default function SettingsPage() {
         </div>
       </header>
 
-      <section className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-6 py-12">
+      <section className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 py-12">
         <div>
-          <h1 className="text-4xl font-semibold tracking-normal">Settings</h1>
+          <h1 className="text-4xl font-semibold">Settings</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Generation is configured and routed automatically by Fiebatt.
+          </p>
         </div>
 
-        <div className="grid gap-8">
-          <section className="rounded-2xl border border-border bg-card/40 p-6">
-            <div className="flex items-center justify-between gap-5">
-              <div>
-                <Label htmlFor="demo-mode" className="text-lg font-medium">
-                  Mode
-                </Label>
-              </div>
-              <Switch
-                id="demo-mode"
-                checked={settings.demoMode}
-                onCheckedChange={(demoMode) => updateSettings({ demoMode })}
-              />
-            </div>
-          </section>
+        {error ? (
+          <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+            {error}
+          </div>
+        ) : null}
 
-          <section className="rounded-2xl border border-border bg-card/40 p-6">
-            <div className="grid gap-5">
-              <div>
-                <Label htmlFor="video-provider" className="text-lg font-medium">
-                  Video provider
-                </Label>
-              </div>
+        <section className="rounded-2xl border border-border bg-card/40 p-6">
+          <h2 className="text-lg font-medium">Account</h2>
+          {profile ? (
+            <p className="mt-3 text-sm text-muted-foreground">{profile.email}</p>
+          ) : (
+            <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" /> Loading account
+            </p>
+          )}
+        </section>
 
-              <Select
-                value={settings.videoProvider}
-                onValueChange={(value) => updateSettings({ videoProvider: value as VideoProvider })}
-              >
-                <SelectTrigger id="video-provider" className="h-12 rounded-xl text-base">
-                  <SelectValue placeholder="Choose provider" />
-                </SelectTrigger>
-                <SelectContent>
-                  {VIDEO_PROVIDERS.map((provider) => (
-                    <SelectItem key={provider.value} value={provider.value}>
-                      {provider.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </section>
-
-          <section className="rounded-2xl border border-border bg-card/40 p-6">
-            <div className="grid gap-5">
-              <div>
-                <h2 className="text-lg font-medium">AI provider keys</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Keys are encrypted at rest and are never shown again. Codex uses them only for your Fiebatt jobs.
-                </p>
-              </div>
-
-              {providers.map((provider) => (
-                <div className="grid gap-2 sm:grid-cols-[130px_1fr_auto] sm:items-end" key={provider.provider}>
-                  <div>
-                    <Label className="capitalize" htmlFor={`key-${provider.provider}`}>{provider.provider}</Label>
-                    <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                      {provider.configured && <Check className="size-3" />}
-                      {provider.configured ? `Saved ••••${provider.key_hint}` : "Not configured"}
-                    </div>
-                  </div>
-                  <Input
-                    autoComplete="off"
-                    className="h-10"
-                    id={`key-${provider.provider}`}
-                    onChange={(event) => setKeys((current) => ({ ...current, [provider.provider]: event.target.value }))}
-                    placeholder={provider.configured ? "Enter a replacement key" : "Paste API key"}
-                    type="password"
-                    value={keys[provider.provider] ?? ""}
-                  />
-                  <div className="flex gap-2">
-                    <Button disabled={busy === provider.provider || !keys[provider.provider]?.trim()} onClick={() => saveProvider(provider.provider)}>
-                      {busy === provider.provider ? <Loader2 className="size-4 animate-spin" /> : "Save"}
-                    </Button>
-                    {provider.configured && (
-                      <Button aria-label={`Remove ${provider.provider} key`} disabled={busy === provider.provider} onClick={() => removeProvider(provider.provider)} size="icon" variant="outline">
-                        <Trash2 className="size-4" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              ))}
-
-              {providerMessage && <p className="text-sm text-muted-foreground" role="status">{providerMessage}</p>}
-            </div>
-          </section>
-        </div>
+        <section className="rounded-2xl border border-border bg-card/40 p-6">
+          <h2 className="text-lg font-medium">Service</h2>
+          {health ? (
+            <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+              <CheckCircle2 className="size-4 text-emerald-500" />
+              {health.ok ? "Ready" : "Temporarily unavailable"}
+            </p>
+          ) : (
+            <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" /> Checking service
+            </p>
+          )}
+        </section>
       </section>
     </main>
   );

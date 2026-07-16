@@ -44,8 +44,6 @@ from app.ai.services.provider_capabilities import (
 from app.db.session import AsyncSessionLocal
 from app.models.job import Job, Variant
 from app.models.project import Project
-from app.models.session import Session as SessionModel
-from app.services.credentials import provider_overrides
 from app.services import ffmpeg, job_events, storage
 from app.services.continuity_validator import (
     ContinuityReport,
@@ -323,14 +321,6 @@ async def run(job_id: str) -> None:
             await _update_job(db, job_id, status="error", error="project missing")
             await _emit_terminal(job_id, "error", "project missing")
             return
-
-        owner_session = await db.get(SessionModel, proj.session_id)
-        if owner_session is not None and owner_session.user_id:
-            from app.ai.services.config import set_settings_overrides
-
-            set_settings_overrides(
-                await provider_overrides(db, owner_session.user_id)
-            )
 
         await _update_job(db, job_id, status="processing")
 

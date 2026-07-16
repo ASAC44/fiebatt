@@ -21,6 +21,7 @@ class Project(Base):
     )
     video_path: Mapped[str] = mapped_column(String)
     video_url: Mapped[str] = mapped_column(String)
+    name: Mapped[str] = mapped_column(String(120), default="Untitled video")
     duration: Mapped[float] = mapped_column(Float)
     fps: Mapped[float] = mapped_column(Float)
     width: Mapped[int] = mapped_column(default=0)

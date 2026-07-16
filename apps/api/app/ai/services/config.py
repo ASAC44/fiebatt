@@ -4,7 +4,6 @@ Keeps the mode switch and provider credentials in one place so the stub/real
 boundary stays explicit.
 """
 
-from contextvars import ContextVar
 from functools import lru_cache
 
 from pydantic import AliasChoices, Field
@@ -26,6 +25,7 @@ class Settings(BaseSettings):
         "http://localhost:8001",
         validation_alias=AliasChoices("VISION_WORKER_URL", "GPU_WORKER_URL"),
     )
+    sam_segmentation_url: str = Field("", alias="SAM_SEGMENTATION_URL")
     video_gen_provider: str = Field("auto", alias="VIDEO_GEN_PROVIDER")
     veo_model: str = Field("veo-3.1-fast-generate-preview", alias="VEO_MODEL")
     video_generation_timeout: int = Field(
@@ -81,26 +81,5 @@ class Settings(BaseSettings):
 
 
 @lru_cache
-def _base_settings() -> Settings:
-    return Settings()
-
-
-_settings_overrides: ContextVar[dict[str, str]] = ContextVar(
-    "fiebatt_ai_settings_overrides",
-    default={},
-)
-
-
-def set_settings_overrides(values: dict[str, str]) -> None:
-    """Apply request/job-scoped provider credentials to the current task."""
-    _settings_overrides.set(dict(values))
-
-
-def clear_settings_overrides() -> None:
-    _settings_overrides.set({})
-
-
 def get_settings() -> Settings:
-    base = _base_settings()
-    overrides = _settings_overrides.get()
-    return base.model_copy(update=overrides) if overrides else base
+    return Settings()

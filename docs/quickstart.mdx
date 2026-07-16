@@ -29,7 +29,7 @@ description: "Run fiebatt locally, verify the stack, and make your first localiz
 </div>
 
 <Tip>
-  The happy path is: install web dependencies, start the web app, start the backend, verify health, then upload a clip and test one localized edit.
+  The happy path is: install web dependencies, start the web app, start the API, verify health, then upload a clip and test one localized edit.
 </Tip>
 
 <div className="docs-card-grid">
@@ -38,7 +38,7 @@ description: "Run fiebatt locally, verify the stack, and make your first localiz
     <p>Next.js app for landing, projects, and the active editing surface.</p>
   </div>
   <div className="docs-card">
-    <h3>Backend</h3>
+    <h3>API</h3>
     <p>FastAPI service for uploads, projects, generation, masking, narration, and export.</p>
   </div>
   <div className="docs-card">
@@ -60,8 +60,8 @@ The repo is split by responsibility:
   <div className="docs-section__eyebrow">boot sequence</div>
   <h2 className="docs-section__title">Start fiebatt locally</h2>
   <p className="docs-section__lead">
-    Keep the frontend and backend as separate processes. The frontend renders the
-    editor. The backend handles uploads, jobs, metadata, and AI-heavy routes.
+    Keep the web app and API as separate processes. The web app renders the
+    editor. The API handles uploads, jobs, metadata, and AI-heavy routes.
   </p>
 
   <Steps>
@@ -81,15 +81,15 @@ npm run dev
 The web app runs on `http://localhost:3001`.
 
   </Step>
-  <Step title="Start the backend">
+  <Step title="Start the API">
 
-Run the FastAPI backend with the repo-root environment loaded.
+Run FastAPI with the repo-root environment loaded.
 
 ```bash
 cd apps/api && PYTHONPATH=$(pwd) uvicorn app.main:app --reload --port 8000
 ```
 
-The backend serves uploads, projects, generation, identify, mask, propagation, narration, and export on `http://localhost:8000`.
+The API serves uploads, projects, generation, identify, mask, propagation, narration, and export on `http://localhost:8000`.
 
   </Step>
   <Step title="Verify health">
@@ -122,7 +122,7 @@ Create an account at `/signup`, then open `/projects` to start a reel.
 <div className="docs-flow-grid">
   <div className="docs-flow">
     <h3>Environment</h3>
-    <p>The repo-root <code>.env</code> powers both browser and backend behavior.</p>
+    <p>The repo-root <code>.env</code> powers both web and API behavior.</p>
   </div>
   <div className="docs-flow">
     <h3>AI mode</h3>

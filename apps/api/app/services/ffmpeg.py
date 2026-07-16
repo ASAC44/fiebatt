@@ -436,7 +436,22 @@ async def concat_clips(\
     xd = transitions if transitions is not None else [0.0] * (n - 1)
     assert len(xd) == n - 1, "transitions must have len(paths)-1 entries"
 
-    durations = [await _probe_duration(p) for p in paths]
+    metadata = [await probe(path) for path in paths]
+    durations = [float(item["duration"]) for item in metadata]
+    target_fps = next(
+        (float(item["fps"]) for item in metadata if float(item.get("fps") or 0.0) > 0.0),
+        30.0,
+    )
+
+    def normalized_inputs(index: int) -> str:
+        # FFmpeg 7 requires both xfade inputs to advertise an explicit,
+        # matching constant frame rate and time base. Provider output can
+        # omit either even when ffprobe reports a nominal FPS.
+        return (
+            f"[{index}:v]settb=AVTB,setpts=PTS-STARTPTS,"
+            f"fps={target_fps:.6f}[v_in_{index}];"
+            f"[{index}:a]asetpts=PTS-STARTPTS[a_in_{index}]"
+        )
 
     # clamp each dissolve to at most half the shorter adjacent clip
     xd = [
@@ -448,11 +463,7 @@ async def concat_clips(\
     # The demuxer can preserve packet-duration leftovers at joins, creating a
     # small audio tail even when each rendered part is correctly bounded.
     if all(x == 0.0 for x in xd):
-        input_filters = [
-            f"[{i}:v]setpts=PTS-STARTPTS[v_in_{i}];"
-            f"[{i}:a]asetpts=PTS-STARTPTS[a_in_{i}]"
-            for i in range(n)
-        ]
+        input_filters = [normalized_inputs(i) for i in range(n)]
         concat_inputs = "".join(
             f"[v_in_{i}][a_in_{i}]" for i in range(n)
         )
@@ -487,10 +498,7 @@ async def concat_clips(\
     # frame jumps at the seam.
     input_filters: list[str] = []
     for i in range(n):
-        input_filters.append(
-            f"[{i}:v]setpts=PTS-STARTPTS[v_in_{i}];"
-            f"[{i}:a]asetpts=PTS-STARTPTS[a_in_{i}]"
-        )
+        input_filters.append(normalized_inputs(i))
 
     video_labels: list[str] = []
     audio_labels: list[str] = []

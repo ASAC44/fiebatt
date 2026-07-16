@@ -14,7 +14,7 @@ import {
   type Variant,
   type BBox,
 } from "@/lib/api";
-import { newClip, useEDL, type Clip } from "@/stores/edl";
+import type { Clip } from "@/stores/edl";
 
 type GenerationTarget = Pick<
   Clip,
@@ -49,7 +49,6 @@ export function useGenerationSession({
   previewFrameTs,
   onAccepted,
 }: UseGenerationSessionArgs) {
-  const { dispatch } = useEDL();
   const [prompt, setPrompt] = useState("");
   const [plan, setPlan] = useState<EditPlanResp | null>(null);
   const [planning, setPlanning] = useState(false);
@@ -63,9 +62,6 @@ export function useGenerationSession({
   const jobIdRef = useRef<string | null>(null);
   const generationTargetRef = useRef<GenerationTarget | null>(null);
   const streamCtlRef = useRef<AbortController | null>(null);
-  // authoritative edit end_ts returned by the job
-  const actualEndTsRef = useRef<number | null>(null);
-  const actualStartTsRef = useRef<number | null>(null);
 
   const canGenerate =
     !!clip &&
@@ -95,8 +91,6 @@ export function useGenerationSession({
     setLogs([]);
     jobIdRef.current = null;
     generationTargetRef.current = null;
-    actualEndTsRef.current = null;
-    actualStartTsRef.current = null;
     setPlan(null);
     setPlanning(false);
     setFallbackNotice(null);
@@ -143,6 +137,7 @@ export function useGenerationSession({
     try {
       const { job_id } = await generate({
         project_id: clip.projectId,
+        target_clip_id: baseClip.id,
         plan_id: plan?.plan_id,
         start_ts: clip.sourceStart,
         end_ts: clip.sourceEnd,
@@ -180,9 +175,6 @@ export function useGenerationSession({
       if (final.status !== "done" || !final.variants.length) {
         throw new Error(final.error || "generation failed");
       }
-      // capture the authoritative edit window returned by the backend
-      actualEndTsRef.current = final.end_ts ?? null;
-      actualStartTsRef.current = final.start_ts ?? null;
       setVariants(final.variants);
       return true;
     } catch (e) {
@@ -238,32 +230,11 @@ export function useGenerationSession({
       if (!variant?.url) throw new Error("variant has no url");
       const accepted = await accept(jobIdRef.current, idx);
       const trimmedPrompt = prompt.trim();
-      // Use the backend's authoritative end_ts. Fall back to the originally
-      // requested range if the server did not return it.
-      const actualStart = actualStartTsRef.current ?? target.sourceStart;
-      const actualEnd = actualEndTsRef.current ?? target.sourceEnd;
-      const duration = actualEnd - actualStart;
-      const replacement = newClip({
-        url: variant.url,
-        sourceStart: 0,
-        sourceEnd: duration,
-        mediaDuration: duration,
-        kind: "generated",
-        label: trimmedPrompt.slice(0, 28) || "ai edit",
-        projectId: target.projectId,
-        generatedFromClipId: target.id,
-        volume: target.volume,
-      });
-      // always use replace_range so the rest of the clip is preserved.
-      // Split at the backend's accepted edit end so the right clip resumes
-      // at the same source timestamp where the AI replacement ends.
-      dispatch({
-        type: "replace_range",
-        id: target.id,
-        start: actualStart,
-        end: actualEnd,
-        with: replacement,
-      });
+      window.dispatchEvent(
+        new CustomEvent("fiebatt:timeline-refresh", {
+          detail: { tool: "accept_variant", timeline: accepted.timeline },
+        }),
+      );
       setPrompt("");
       clearSession({ keepPrompt: false });
       if (onAccepted) {

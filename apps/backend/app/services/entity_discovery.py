@@ -59,6 +59,8 @@ async def enqueue_entity_discovery(
             "reference_frame_ts": source_job.reference_frame_ts,
             "reference_variant_url": reference_variant_url,
             "bbox": source_job.bbox_json,
+            "source_start_ts": source_job.start_ts,
+            "source_end_ts": source_job.end_ts,
         },
     )
     db.add(job)

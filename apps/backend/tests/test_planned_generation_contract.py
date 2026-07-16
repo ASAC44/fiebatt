@@ -8,8 +8,13 @@ from app.services.agent_tools import TOOL_HANDLERS
 
 
 def test_generate_request_accepts_authoritative_plan_id():
-    request = GenerateRequest(project_id="project-1", plan_id="plan-1")
+    request = GenerateRequest(
+        project_id="project-1",
+        plan_id="plan-1",
+        target_clip_id="clip-1",
+    )
     assert request.plan_id == "plan-1"
+    assert request.target_clip_id == "clip-1"
 
 
 def test_generate_request_keeps_complete_legacy_shape():

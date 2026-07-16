@@ -12,6 +12,7 @@ from app.models.selection import SelectionArtifact
 from app.models.session import Session as SessionModel
 from app.schemas.edit_plan import LocalRangeResolution
 from app.schemas.generate import GenerateRequest, GenerateResponse
+from app.services.accepted_generation import resolve_committed_timeline_range
 from app.workers import generate_job
 
 router = APIRouter(tags=["generate"])
@@ -103,6 +104,15 @@ async def generate(
     # bbox sanity: x+w and y+h in [0,1]
     if bbox["x"] + bbox["w"] > 1.0001 or bbox["y"] + bbox["h"] > 1.0001:
         raise HTTPException(status_code=422, detail="bbox extends outside the frame")
+    try:
+        committed_start, committed_end = resolve_committed_timeline_range(
+            proj.timeline_edl,
+            target_clip_id=body.target_clip_id,
+            source_start=start_ts,
+            source_end=end_ts,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     job = Job(
         project_id=proj.id,
@@ -118,6 +128,11 @@ async def generate(
             "plan_id": plan.id if plan else None,
             "planned_context": plan.range_json if plan else None,
             "adaptive_context_enabled": use_plan_range,
+            "target_clip_id": body.target_clip_id,
+            "committed_timeline_range": {
+                "start": committed_start,
+                "end": committed_end,
+            },
         },
     )
     db.add(job)

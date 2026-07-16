@@ -20,7 +20,13 @@ from app.models.segment import Segment
 from app.models.session import Session as SessionModel
 from app.schemas.accept import AcceptRequest, AcceptResponse
 from app.services.entity_discovery import enqueue_entity_discovery
+from app.services.accepted_generation import (
+    accepted_generation_range,
+    record_accepted_range,
+    update_project_edl_for_acceptance,
+)
 from app.services.generation_quality import acceptance_allowed, acceptance_block_reason
+from app.services.timeline_response import build_timeline_response
 from app.workers import entity_job
 
 router = APIRouter(tags=["accept"])
@@ -61,6 +67,7 @@ async def accept(
 
     if job.start_ts is None or job.end_ts is None:
         raise HTTPException(status_code=422, detail="job has no segment range")
+    accepted_range = accepted_generation_range(job)
 
     # deactivate any existing generated segments that overlap this range.
     # the newest accept wins on overlap. we don't delete rows so we keep
@@ -71,8 +78,8 @@ async def accept(
                 Segment.project_id == proj.id,
                 Segment.active == True,  # noqa: E712
                 Segment.source == "generated",
-                Segment.start_ts < job.end_ts,
-                Segment.end_ts > job.start_ts,
+                Segment.start_ts < accepted_range.committed_end,
+                Segment.end_ts > accepted_range.committed_start,
             )
         )
     ).scalars().all()
@@ -81,15 +88,23 @@ async def accept(
 
     seg = Segment(
         project_id=proj.id,
-        start_ts=job.start_ts,
-        end_ts=job.end_ts,
+        start_ts=accepted_range.committed_start,
+        end_ts=accepted_range.committed_end,
         source="generated",
         url=variant.url,
         variant_id=variant.id,
-        order_index=int(job.start_ts * 1000),
+        order_index=int(accepted_range.committed_start * 1000),
         active=True,
     )
     db.add(seg)
+    await db.flush()
+    record_accepted_range(job, segment_id=seg.id, accepted_range=accepted_range)
+    update_project_edl_for_acceptance(
+        proj,
+        segment_id=seg.id,
+        variant=variant,
+        accepted_range=accepted_range,
+    )
     await db.commit()
     await db.refresh(seg)
 
@@ -108,4 +123,9 @@ async def accept(
                 runner.submit(ent_job.id, lambda: entity_job.run(ent_job.id))
             entity_job_id = ent_job.id
 
-    return AcceptResponse(segment_id=seg.id, entity_job_id=entity_job_id)
+    await db.refresh(proj)
+    return AcceptResponse(
+        segment_id=seg.id,
+        entity_job_id=entity_job_id,
+        timeline=await build_timeline_response(db, proj),
+    )

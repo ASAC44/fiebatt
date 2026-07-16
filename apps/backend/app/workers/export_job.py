@@ -107,6 +107,8 @@ async def _render_span(
     target_fps: float,
     out: Path,
     is_generated: bool,
+    media_start: float,
+    media_end: float,
 ) -> None:
     """Render one timeline span to a normalized unit-codec MP4.
 
@@ -116,8 +118,8 @@ async def _render_span(
     Original spans seek into the source video with full audio.
     """
     if is_generated:
-        source_start = 0.0
-        source_end = max(0.0, span_end - span_start)
+        source_start = media_start
+        source_end = media_end
         volume = 0.0
     else:
         source_start = span_start
@@ -222,6 +224,8 @@ async def _render_timeline(
             target_fps=proj.fps or 24.0,
             out=part_path,
             is_generated=is_generated,
+            media_start=item.media_start_ts,
+            media_end=item.media_end_ts,
         )
 
         # color-match generated clips to the original footage at their

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -189,7 +190,10 @@ async def _run_variant(
             mask_image_url=conditioning.mask_image_url,
             mask_frame_id=conditioning.mask_frame_id,
             on_tick=tick,
-            duration=round(duration),
+            # Providers render whole seconds. Round upward so fractional
+            # adaptive context is never shorter than the source window;
+            # conform_generated_edit trims the result back exactly.
+            duration=math.ceil(duration - 1e-6),
             resolution=resolution,
         )
         log.info(

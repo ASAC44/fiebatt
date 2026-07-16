@@ -50,8 +50,12 @@ async def run(job_id: str) -> None:
         job.status = "processing"
         source_video_path = proj.video_path
         source_video_url = proj.video_url
-        source_segment_start = source_segment.start_ts if source_segment else None
-        source_segment_end = source_segment.end_ts if source_segment else None
+        source_segment_start = payload.get("source_start_ts")
+        source_segment_end = payload.get("source_end_ts")
+        if source_segment_start is None and source_segment is not None:
+            source_segment_start = source_segment.start_ts
+        if source_segment_end is None and source_segment is not None:
+            source_segment_end = source_segment.end_ts
         await db.commit()
 
     # pull the reference frame crop now (was previously done synchronously

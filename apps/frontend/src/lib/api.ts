@@ -141,6 +141,7 @@ export type JobResponse = JobResp;
 
 export type GenerateReq = {
   project_id: string;
+  target_clip_id?: string;
   plan_id?: string;
   start_ts: number;
   end_ts: number;
@@ -198,6 +199,7 @@ export type CreateEditPlanReq = {
 export type AcceptResp = {
   segment_id: string;
   entity_job_id: string | null;
+  timeline: TimelineResp;
 };
 
 export type AcceptResponse = AcceptResp;
@@ -238,6 +240,10 @@ export type TimelineSegment = {
   source: "original" | "generated";
   url: string;
   audio: boolean;
+  segment_id?: string | null;
+  media_start_ts?: number;
+  media_end_ts?: number;
+  media_duration?: number;
 };
 
 /** One clip in a saved EDL snapshot. Mirrors the frontend's Clip shape

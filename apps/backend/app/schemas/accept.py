@@ -1,5 +1,7 @@
 from pydantic import BaseModel
 
+from app.schemas.timeline import TimelineOut
+
 
 class AcceptRequest(BaseModel):
     job_id: str
@@ -14,3 +16,4 @@ class AcceptRequest(BaseModel):
 class AcceptResponse(BaseModel):
     segment_id: str
     entity_job_id: str | None = None
+    timeline: TimelineOut

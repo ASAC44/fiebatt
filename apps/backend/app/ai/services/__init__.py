@@ -39,6 +39,7 @@ from app.ai.services.conditioning import (
     route_provider_conditioning,
 )
 from app.ai.services.config import get_settings as _get_ai_settings
+from app.ai.services.provider_capabilities import select_source_edit_mode
 
 
 def _load_backend_stub_mode() -> bool | None:
@@ -270,6 +271,12 @@ else:
             source_video=effective_source_video_url is not None,
             duration=duration,
         )
+        edit_mode = select_source_edit_mode(
+            provider,
+            duration=duration,
+            source_video=effective_source_video_url is not None,
+            mask_available=mask_image_url is not None,
+        )
 
         if provider == "wan":
             if style_ref:
@@ -280,7 +287,7 @@ else:
                     duration=duration,
                     resolution=resolution,
                 )
-            elif effective_source_video_url and mask_image_url and duration <= 5.001:
+            elif edit_mode == "tracked_mask":
                 # Wan 2.7 has no mask field. VACE is the native local-edit path:
                 # it tracks the SAM target while preserving pixels outside it.
                 out_path = await _wan.generate_local_edit_variant(
@@ -290,7 +297,7 @@ else:
                     mask_frame_id=mask_frame_id,
                     on_tick=on_tick,
                 )
-            elif effective_source_video_url:
+            elif edit_mode == "source_video":
                 # Wan's video-edit model receives the real source clip. This keeps
                 # the surrounding motion and temporal context instead of falling
                 # back to an unrelated text-only generation.

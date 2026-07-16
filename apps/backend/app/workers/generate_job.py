@@ -36,6 +36,7 @@ from app.ai.services.conditioning import (
 )
 from app.ai.services.provider_capabilities import (
     normalize_video_provider,
+    select_source_edit_mode,
     select_video_provider,
 )
 from app.db.session import AsyncSessionLocal
@@ -44,6 +45,10 @@ from app.models.project import Project
 from app.models.session import Session as SessionModel
 from app.services.credentials import provider_overrides
 from app.services import ffmpeg, job_events, storage
+from app.services.generation_window import (
+    protected_context_prompt,
+    resolve_generation_window,
+)
 
 log = logging.getLogger("fiebatt.jobs.generate")
 
@@ -319,19 +324,26 @@ async def run(job_id: str) -> None:
         prompt = job.prompt or ""
         reference_frame_ts = float(job.reference_frame_ts or start_ts)
         payload = dict(job.payload or {})
+        generation_window = resolve_generation_window(
+            start_ts,
+            end_ts,
+            payload=payload,
+            project_duration=float(proj.duration),
+        )
         requested_provider = _normalize_provider(str(payload.get("video_gen_provider") or ""))
         video_provider = select_video_provider(
             requested_provider,
             source_video=True,
-            duration=end_ts - start_ts,
+            duration=generation_window.context_duration,
         )
         video_provider_label = _provider_label(video_provider)
         _, sequenced_motion, _ = ai._rewrite_motion_prompt(prompt)  # type: ignore[attr-defined]
-        requested_end_ts = end_ts
-        clip_end_ts = requested_end_ts
+        requested_end_ts = generation_window.core_end
+        clip_start_ts = generation_window.context_start
+        clip_end_ts = generation_window.context_end
         project_fps = float(proj.fps or 1.0)
         start_anchor_ts, end_anchor_ts = boundary_anchor_timestamps(
-            start_ts,
+            clip_start_ts,
             clip_end_ts,
             project_fps,
         )
@@ -339,6 +351,7 @@ async def run(job_id: str) -> None:
             "requested_provider": requested_provider,
             "selected_provider": video_provider,
             "selected_model": _provider_model(video_provider),
+            "execution_window": generation_window.metadata(),
             "warnings": [],
         })
         job.payload = payload
@@ -355,6 +368,7 @@ async def run(job_id: str) -> None:
         project_id=proj.id,
         start_ts=start_ts,
         end_ts=requested_end_ts,
+        context_start_ts=clip_start_ts,
         context_end_ts=clip_end_ts,
         requested_provider=requested_provider,
         selected_provider=video_provider,
@@ -386,13 +400,19 @@ async def run(job_id: str) -> None:
     await _emit(
         job_id,
         "extract_clip",
-        f"slicing source context {start_ts:.2f}s→{clip_end_ts:.2f}s",
+        f"slicing source context {clip_start_ts:.2f}s→{clip_end_ts:.2f}s",
+        requested_start_ts=start_ts,
         requested_end_ts=requested_end_ts,
     )
     await _emit(job_id, "extract_frame", f"grabbing reference frame @ {reference_frame_ts:.2f}s")
 
     async def _do_extract_clip() -> tuple[Path, str]:
-        await ffmpeg.extract_clip(proj.video_path, start_ts, clip_end_ts, clip_tmp_path)
+        await ffmpeg.extract_clip(
+            proj.video_path,
+            clip_start_ts,
+            clip_end_ts,
+            clip_tmp_path,
+        )
         clip_url = await storage.publish(clip_tmp_path, content_type="video/mp4")
         return clip_tmp_path, clip_url
 
@@ -480,8 +500,8 @@ async def run(job_id: str) -> None:
             )
             crop_path = None
 
-    edit_duration = requested_end_ts - start_ts
-    segment_duration = round(edit_duration)
+    generation_duration = generation_window.context_duration
+    segment_duration = round(generation_duration)
     generation_resolution = "720P"
 
     # Derive generation conditioning from the actual SAM pixels, not merely
@@ -508,7 +528,15 @@ async def run(job_id: str) -> None:
                     job_id,
                     "sam_mask",
                     "SAM isolated the selected subject for localized generation",
-                    native_tracking_candidate=video_provider == "wan" and edit_duration <= 5.001,
+                    native_tracking_candidate=(
+                        select_source_edit_mode(
+                            video_provider,
+                            duration=generation_duration,
+                            source_video=True,
+                            mask_available=True,
+                        )
+                        == "tracked_mask"
+                    ),
                 )
             else:
                 await _emit(job_id, "sam_unavailable", "SAM unavailable; using bbox crop fallback")
@@ -560,7 +588,7 @@ async def run(job_id: str) -> None:
     )
     if video_provider in {"wan", "happyhorse"}:
         strategy = "source_video_with_subject_reference"
-    elif video_provider == "veo" and abs(edit_duration - 8.0) <= 0.05:
+    elif video_provider == "veo" and abs(generation_duration - 8.0) <= 0.05:
         strategy = "first_last_boundary_frames"
     else:
         strategy = "start_boundary_frame"
@@ -592,20 +620,25 @@ async def run(job_id: str) -> None:
 
     source_video_url = _public_url_or_none(clip_url)
     mask_public_url = _public_url_or_none(mask_image_url or "")
+    edit_mode = select_source_edit_mode(
+        video_provider,
+        duration=generation_duration,
+        source_video=source_video_url is not None,
+        mask_available=mask_public_url is not None,
+    )
     mask_frame_id = min(
-        round(edit_duration * project_fps) + 1,
-        max(1, round(max(0.0, reference_frame_ts - start_ts) * project_fps) + 1),
+        round(generation_duration * project_fps) + 1,
+        max(
+            1,
+            round(max(0.0, reference_frame_ts - clip_start_ts) * project_fps) + 1,
+        ),
     )
     generation_conditioning = GenerationConditioning(
         subject_reference_path=subject_reference_effective,
         subject_reference_timestamp=(
             reference_frame_ts if subject_reference_effective else None
         ),
-        mask_image_url=(
-            mask_public_url
-            if video_provider == "wan" and edit_duration <= 5.001
-            else None
-        ),
+        mask_image_url=mask_public_url if edit_mode == "tracked_mask" else None,
         mask_frame_id=mask_frame_id,
         start_anchor_path=conditioning_start_anchor,
         start_anchor_timestamp=(start_anchor_ts if conditioning_start_anchor else None),
@@ -623,7 +656,7 @@ async def run(job_id: str) -> None:
         warnings.append(
             f"{video_provider} could not access a public source clip; using frame-conditioned generation"
         )
-    if mask_path and video_provider == "wan" and edit_duration > 5.001:
+    if mask_path and video_provider == "wan" and edit_mode == "source_video":
         warnings.append(
             "Wan native tracked-mask edits are limited to 5 seconds; using the isolated SAM subject reference"
         )
@@ -644,6 +677,12 @@ async def run(job_id: str) -> None:
             current_job.payload = current_payload
             await db.commit()
 
+    provider_prompt = (
+        protected_context_prompt(prompt, generation_window)
+        if video_provider in {"wan", "happyhorse"} and source_video_url is not None
+        else prompt
+    )
+
     await _emit(
         job_id,
         "gen_start",
@@ -661,9 +700,9 @@ async def run(job_id: str) -> None:
         variant_id=variant_id,
         clip_path=clip_path,
         clip_url=clip_url,
-        plan={**plan, "_edit_prompt": prompt},
+        plan={**plan, "_edit_prompt": provider_prompt},
         conditioning=generation_conditioning,
-        duration=edit_duration,
+        duration=generation_duration,
         resolution=generation_resolution,
         source_video_url=source_video_url,
     )
@@ -729,9 +768,9 @@ async def run(job_id: str) -> None:
             variant_id=variant_id,
             clip_path=clip_path,
             clip_url=clip_url,
-            plan={**plan, "_edit_prompt": prompt + correction},
+            plan={**plan, "_edit_prompt": provider_prompt + correction},
             conditioning=generation_conditioning,
-            duration=edit_duration,
+            duration=generation_duration,
             resolution=generation_resolution,
             source_video_url=source_video_url,
         )

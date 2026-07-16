@@ -33,6 +33,7 @@ async def generate(
         raise HTTPException(status_code=404, detail="project not found")
 
     plan: EditPlanRecord | None = None
+    resolution: LocalRangeResolution | None = None
     if body.plan_id:
         plan = await db.get(EditPlanRecord, body.plan_id)
         if plan is None or plan.project_id != proj.id:
@@ -82,8 +83,21 @@ async def generate(
         )
     if end_ts > proj.duration + 1e-3:
         raise HTTPException(status_code=422, detail="end_ts past project duration")
+    generation_length = (
+        resolution.generation_context.duration
+        if use_plan_range and resolution is not None
+        else length
+    )
+    if generation_length > MAX_SEG_LEN:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "generation context must be at most "
+                f"{MAX_SEG_LEN}s (got {generation_length:.2f}s)"
+            ),
+        )
     if video_gen_provider != "auto":
-        provider_error = validate_provider_duration(video_gen_provider, length)
+        provider_error = validate_provider_duration(video_gen_provider, generation_length)
         if provider_error:
             raise HTTPException(status_code=422, detail=provider_error)
     # bbox sanity: x+w and y+h in [0,1]
@@ -103,6 +117,7 @@ async def generate(
             "video_gen_provider": video_gen_provider,
             "plan_id": plan.id if plan else None,
             "planned_context": plan.range_json if plan else None,
+            "adaptive_context_enabled": use_plan_range,
         },
     )
     db.add(job)

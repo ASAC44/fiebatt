@@ -577,6 +577,8 @@ async def _generate_edit(
 
     proj = await _get_project_or_error(db, project_id, session_id)
     plan: EditPlanRecord | None = None
+    resolution: LocalRangeResolution | None = None
+    use_plan_range = False
     if plan_id:
         plan = await db.get(EditPlanRecord, plan_id)
         if plan is None or plan.project_id != proj.id:
@@ -586,7 +588,8 @@ async def _generate_edit(
         selection = await db.get(SelectionArtifact, plan.selection_id)
         if selection is None or selection.project_id != proj.id:
             raise ValueError("edit plan selection is unavailable")
-        if _get_backend_settings().adaptive_edit_planning:
+        use_plan_range = _get_backend_settings().adaptive_edit_planning
+        if use_plan_range:
             resolution = LocalRangeResolution.model_validate(plan.range_json)
             start_ts = resolution.edit_core.start_ts
             end_ts = resolution.edit_core.end_ts
@@ -615,10 +618,23 @@ async def _generate_edit(
         raise ValueError(f"segment length must be {MIN_SEG_LEN}-{MAX_SEG_LEN}s (got {length:.2f}s)")
     if end_ts > proj.duration + 1e-3:
         raise ValueError("end_ts past project duration")
+    generation_length = (
+        resolution.generation_context.duration
+        if use_plan_range and resolution is not None
+        else length
+    )
+    if generation_length > MAX_SEG_LEN:
+        raise ValueError(
+            "generation context must be at most "
+            f"{MAX_SEG_LEN}s (got {generation_length:.2f}s)"
+        )
     if video_gen_provider and video_gen_provider != "auto":
         from app.ai.services.provider_capabilities import validate_provider_duration
 
-        provider_error = validate_provider_duration(video_gen_provider, length)
+        provider_error = validate_provider_duration(
+            video_gen_provider,
+            generation_length,
+        )
         if provider_error:
             raise ValueError(provider_error)
     if bbox.get("x", 0) + bbox.get("w", 0) > 1.0001 or bbox.get("y", 0) + bbox.get("h", 0) > 1.0001:
@@ -637,6 +653,7 @@ async def _generate_edit(
             "video_gen_provider": video_gen_provider or "auto",
             "plan_id": plan.id if plan else None,
             "planned_context": plan.range_json if plan else None,
+            "adaptive_context_enabled": use_plan_range,
         },
     )
     db.add(job)

@@ -89,6 +89,29 @@ def select_video_provider(
     return "veo"
 
 
+def select_source_edit_mode(
+    provider: str,
+    *,
+    duration: float,
+    source_video: bool,
+    mask_available: bool,
+) -> str:
+    """Choose the least destructive edit path supported by the provider."""
+    capabilities = VIDEO_PROVIDER_CAPABILITIES.get(provider)
+    if capabilities is None or not source_video:
+        return "image_conditioned"
+    if (
+        provider == "wan"
+        and mask_available
+        and capabilities.max_mask_duration is not None
+        and duration <= capabilities.max_mask_duration + 0.05
+    ):
+        return "tracked_mask"
+    if capabilities.source_video_edit:
+        return "source_video"
+    return "image_conditioned"
+
+
 def validate_provider_duration(provider: str, duration: float) -> str | None:
     capabilities = VIDEO_PROVIDER_CAPABILITIES.get(provider)
     if capabilities is None:

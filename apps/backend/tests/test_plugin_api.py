@@ -13,17 +13,26 @@ os.environ["AUTH_JWT_SECRET"] = "plugin-test-secret"
 os.environ["PUBLIC_API_URL"] = "https://api.example.test"
 
 from app.db.init import create_all  # noqa: E402
+from app.db.session import engine  # noqa: E402
 from app.main import app  # noqa: E402
 
 
-@pytest_asyncio.fixture(autouse=True)
-async def setup_db():
-    await create_all()
-    yield
+async def _remove_test_database():
+    # SQLite keeps deleted files alive through pooled connections. Dispose the
+    # pool first so every test really starts with an empty database.
+    await engine.dispose()
     try:
         os.unlink("./test_plugin_api.db")
     except FileNotFoundError:
         pass
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def setup_db():
+    await _remove_test_database()
+    await create_all()
+    yield
+    await _remove_test_database()
 
 
 @pytest_asyncio.fixture

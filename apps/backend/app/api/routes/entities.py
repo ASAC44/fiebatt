@@ -15,6 +15,7 @@ from app.schemas.entity import (
     DiscoveryJobOut,
     EntityOut,
     OccurrenceCandidateOut,
+    OccurrenceTrackOut,
 )
 from app.services.entity_discovery import enqueue_entity_discovery
 from app.workers import entity_job
@@ -73,6 +74,7 @@ async def get_entity(
             .options(
                 selectinload(Entity.appearances),
                 selectinload(Entity.occurrence_candidates),
+                selectinload(Entity.occurrence_tracks),
             )
         )
     ).scalar_one_or_none()
@@ -111,5 +113,19 @@ async def get_entity(
                 status=candidate.status,
             )
             for candidate in entity.occurrence_candidates
+        ],
+        occurrence_tracks=[
+            OccurrenceTrackOut(
+                id=track.id,
+                candidate_id=track.candidate_id,
+                seed_ts=track.seed_ts,
+                start_ts=track.start_ts,
+                end_ts=track.end_ts,
+                confidence=track.confidence,
+                tracker=track.tracker,
+                status=track.status,
+                reason=track.reason,
+            )
+            for track in entity.occurrence_tracks
         ],
     )

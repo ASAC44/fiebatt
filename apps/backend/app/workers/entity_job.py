@@ -24,6 +24,11 @@ from app.services.coarse_occurrence import (
     search_coarse_occurrences,
     source_revision_cache_dir,
 )
+from app.services.dense_occurrence import (
+    DenseTrackEvidence,
+    persist_dense_tracks,
+    refine_occurrence_candidate,
+)
 
 log = logging.getLogger("fiebatt.jobs.entity")
 
@@ -212,7 +217,7 @@ async def run(job_id: str) -> None:
             return
 
         async with AsyncSessionLocal() as db:
-            _, cache_hits = await persist_coarse_candidates(
+            candidate_rows, cache_hits = await persist_coarse_candidates(
                 db,
                 entity_id=entity_id,
                 candidates=browser_candidates,
@@ -227,6 +232,63 @@ async def run(job_id: str) -> None:
                         "coarse_cache_hits": cache_hits,
                         "coarse_analysis_mode": coarse.analysis_mode,
                         "coarse_frames_inspected": coarse.frames_inspected,
+                    }
+                )
+                j.payload = next_payload
+            await db.commit()
+
+        if reference_crop_path is None:
+            async with AsyncSessionLocal() as db:
+                j = await db.get(Job, job_id)
+                if j:
+                    j.status = "error"
+                    j.error = "dense occurrence tracking requires a reference crop"
+                    await db.commit()
+            return
+        dense_source = Path(source_video_path)
+        if not dense_source.exists():
+            dense_source = await storage.path_from_url(source_video_url)
+        tracks: list[DenseTrackEvidence] = []
+        for candidate in candidate_rows:
+            try:
+                tracks.append(
+                    await refine_occurrence_candidate(
+                        source_path=dense_source,
+                        project_duration=float(proj.duration),
+                        candidate=candidate,
+                        reference_crop_path=reference_crop_path,
+                    )
+                )
+            except Exception as exc:
+                log.exception("dense occurrence tracking failed for %s", candidate.id)
+                tracks.append(
+                    DenseTrackEvidence(
+                        candidate_id=candidate.id,
+                        passed=False,
+                        reason=f"dense tracking failed: {type(exc).__name__}",
+                        seed_ts=candidate.keyframe_ts,
+                        start_ts=candidate.keyframe_ts,
+                        end_ts=candidate.keyframe_ts,
+                        confidence=0.0,
+                        tracker="unavailable",
+                        frames=(),
+                    )
+                )
+
+        async with AsyncSessionLocal() as db:
+            occurrence_count, rejected_count = await persist_dense_tracks(
+                db,
+                entity_id=entity_id,
+                source_revision=proj.video_url,
+                tracks=tracks,
+            )
+            j = await db.get(Job, job_id)
+            if j:
+                next_payload = dict(j.payload or {})
+                next_payload.update(
+                    {
+                        "dense_occurrence_count": occurrence_count,
+                        "dense_rejected_count": rejected_count,
                     }
                 )
                 j.payload = next_payload

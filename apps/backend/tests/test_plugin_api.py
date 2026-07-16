@@ -1,38 +1,52 @@
 import base64
 import hashlib
-import os
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-os.environ["USE_AI_STUBS"] = "true"
-os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./test_plugin_api.db"
-os.environ["AUTH_JWT_SECRET"] = "plugin-test-secret"
-os.environ["PUBLIC_API_URL"] = "https://api.example.test"
-
-from app.db.init import create_all  # noqa: E402
-from app.db.session import engine  # noqa: E402
+from app import models as _models  # noqa: E402, F401
+from app.config.settings import get_settings  # noqa: E402
+from app.db.base import Base  # noqa: E402
+from app.db.session import get_db  # noqa: E402
 from app.main import app  # noqa: E402
 
 
-async def _remove_test_database():
-    # SQLite keeps deleted files alive through pooled connections. Dispose the
-    # pool first so every test really starts with an empty database.
-    await engine.dispose()
-    try:
-        os.unlink("./test_plugin_api.db")
-    except FileNotFoundError:
-        pass
-
-
 @pytest_asyncio.fixture(autouse=True)
-async def setup_db():
-    await _remove_test_database()
-    await create_all()
+async def setup_db(tmp_path, monkeypatch):
+    # Collection order may import the application before this module sets its
+    # settings. Install test configuration at fixture time and clear the shared
+    # cache so these tests do not inherit configuration from another module.
+    monkeypatch.setenv("USE_AI_STUBS", "true")
+    monkeypatch.setenv("AUTH_JWT_SECRET", "plugin-test-secret")
+    monkeypatch.setenv("PUBLIC_API_URL", "https://api.example.test")
+    get_settings.cache_clear()
+
+    # Override the dependency so these tests always use their own database and
+    # never inherit state from another module or a developer DB.
+    test_engine = create_async_engine(
+        f"sqlite+aiosqlite:///{tmp_path / 'plugin_api.db'}"
+    )
+    test_sessions = async_sessionmaker(
+        test_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+    )
+    async with test_engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async def override_get_db():
+        async with test_sessions() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_get_db
     yield
-    await _remove_test_database()
+    app.dependency_overrides.pop(get_db, None)
+    await test_engine.dispose()
+    get_settings.cache_clear()
 
 
 @pytest_asyncio.fixture

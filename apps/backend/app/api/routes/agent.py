@@ -294,6 +294,10 @@ TOOL_DECLARATIONS = [
                     type=types.Type.INTEGER,
                     description="Which variant to accept (default 0)",
                 ),
+                "discover_occurrences": types.Schema(
+                    type=types.Type.BOOLEAN,
+                    description="Search the full reel only when the user explicitly asks to find other occurrences",
+                ),
             },
             required=["job_id"],
         ),

@@ -749,6 +749,7 @@ async def _accept_variant(
 
     job_id: str = args["job_id"]
     variant_index: int = args.get("variant_index", 0)
+    discover_occurrences: bool = bool(args.get("discover_occurrences", False))
 
     job = (
         await db.execute(
@@ -800,28 +801,30 @@ async def _accept_variant(
     await db.commit()
     await db.refresh(seg)
 
-    # fire entity-search background job
-    ent_job = Job(
-        project_id=proj.id,
-        kind="entity",
-        status="pending",
-        payload={
-            "segment_id": seg.id,
-            "reference_frame_ts": job.reference_frame_ts,
-            "reference_variant_url": variant.url,
-            "bbox": job.bbox_json,
-        },
-    )
-    db.add(ent_job)
-    await db.commit()
-    await db.refresh(ent_job)
+    entity_job_id: str | None = None
+    if discover_occurrences:
+        ent_job = Job(
+            project_id=proj.id,
+            kind="entity",
+            status="pending",
+            payload={
+                "segment_id": seg.id,
+                "reference_frame_ts": job.reference_frame_ts,
+                "reference_variant_url": variant.url,
+                "bbox": job.bbox_json,
+            },
+        )
+        db.add(ent_job)
+        await db.commit()
+        await db.refresh(ent_job)
+        entity_job_id = ent_job.id
 
-    if runner is not None:
-        runner.submit(ent_job.id, lambda: entity_job.run(ent_job.id))
+        if runner is not None:
+            runner.submit(ent_job.id, lambda: entity_job.run(ent_job.id))
 
     return {
         "segment_id": seg.id,
-        "entity_job_id": ent_job.id,
+        "entity_job_id": entity_job_id,
         "message": f"Variant {variant_index} accepted and applied to timeline",
     }
 

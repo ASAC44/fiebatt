@@ -56,6 +56,7 @@ class BatchGenerateResponse(BaseModel):
 class BatchAcceptItem(BaseModel):
     job_id: str
     variant_index: int
+    discover_occurrences: bool = False
 
 
 class BatchAcceptRequest(BaseModel):
@@ -109,6 +110,7 @@ async def _accept_variant_for_job(
     proj: Project,
     job: Job,
     variant: Variant,
+    discover_occurrences: bool = False,
 ) -> tuple[str, str | None]:
     if job.start_ts is None or job.end_ts is None:
         raise HTTPException(status_code=422, detail="job has no segment range")
@@ -141,7 +143,7 @@ async def _accept_variant_for_job(
     await db.flush()
 
     entity_job_id: str | None = None
-    if _is_tracked_bbox(job.bbox_json):
+    if discover_occurrences and _is_tracked_bbox(job.bbox_json):
         ent_job = Job(
             project_id=proj.id,
             kind="entity",
@@ -297,6 +299,7 @@ async def batch_accept(
             proj=proj,
             job=job,
             variant=variant,
+            discover_occurrences=item.discover_occurrences,
         )
         segment_ids.append(segment_id)
         entity_job_ids.append(entity_job_id)

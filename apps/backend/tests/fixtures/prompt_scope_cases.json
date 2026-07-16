@@ -1,0 +1,23 @@
+[
+  {
+    "prompt": "make this person jump",
+    "scope": "local",
+    "change_type": "motion",
+    "analysis_mode": "lazy_local",
+    "global": false
+  },
+  {
+    "prompt": "change this person's shirt to red while they are visible",
+    "scope": "local",
+    "change_type": "appearance",
+    "analysis_mode": "complete_local_occurrence",
+    "global": false
+  },
+  {
+    "prompt": "make this person's shirt red everywhere",
+    "scope": "all_occurrences",
+    "change_type": "appearance",
+    "analysis_mode": "coarse_global_then_dense_candidates",
+    "global": true
+  }
+]

@@ -1,0 +1,150 @@
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+
+from app.schemas.edit_plan import ChangeType, EditIntent, EditScope
+
+
+_GLOBAL_RE = re.compile(
+    r"\b(everywhere|throughout|every time|each time|all occurrences?|whole (video|reel))\b",
+    re.IGNORECASE,
+)
+_PERSISTENT_RE = re.compile(
+    r"\b(while (they|he|she|it|this|the .+) (is |are )?visible|"
+    r"while visible|for (the )?(whole|entire) (shot|appearance)|"
+    r"as long as .+ visible)\b",
+    re.IGNORECASE,
+)
+_MOTION_RE = re.compile(
+    r"\b(jump|run|walk|dance|wave|turn|spin|sit|stand|kick|throw|catch|"
+    r"clap|nod|bow|fall|leap)(s|ed|ing)?\b",
+    re.IGNORECASE,
+)
+_REMOVAL_RE = re.compile(r"\b(remove|erase|delete|make .+ disappear)\b", re.IGNORECASE)
+_REPLACEMENT_RE = re.compile(r"\b(replace|swap|turn .+ into)\b", re.IGNORECASE)
+_APPEARANCE_RE = re.compile(
+    r"\b(color|shirt|clothes?|hair|style|look|wear|red|blue|green|black|white)\b",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class PlanningEstimate:
+    analysis_mode: str
+    expected_tracking_seconds: float | None
+    expected_generation_calls: int
+    expected_generated_seconds: float
+    requires_global_discovery: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ScopeGateResult:
+    intent: EditIntent
+    estimate: PlanningEstimate
+    reason: str
+
+
+def _change_type(prompt: str) -> ChangeType:
+    if _REMOVAL_RE.search(prompt):
+        return "removal"
+    if _REPLACEMENT_RE.search(prompt):
+        return "replacement"
+    if _MOTION_RE.search(prompt):
+        return "motion"
+    if _APPEARANCE_RE.search(prompt):
+        return "appearance"
+    return "scene"
+
+
+def _motion_contract(prompt: str) -> tuple[list[str], float, bool]:
+    lowered = prompt.lower()
+    if not _MOTION_RE.search(prompt):
+        return [], 2.0, False
+    phases = ["prepare", "perform action"]
+    recovery = bool(re.search(r"\b(land|resume|continue|recover|then)\b", lowered))
+    if "jump" in lowered or "leap" in lowered:
+        phases.extend(["land", "stabilize"])
+        recovery = True
+        return phases, 3.5, recovery
+    if recovery:
+        phases.append("recover original motion")
+    return phases, 3.0, recovery
+
+
+def plan_prompt_intent(
+    prompt: str,
+    *,
+    explicit_range: bool = False,
+    selected_occurrences: bool = False,
+    requested_scope: EditScope | None = None,
+    structured_intent: EditIntent | None = None,
+) -> ScopeGateResult:
+    """Cheap scope gate; a supplied structured interpretation is never recomputed."""
+    if structured_intent is not None:
+        intent = structured_intent
+        reason = "reused structured intent"
+    else:
+        if requested_scope is not None:
+            scope = requested_scope
+            reason = "explicit scope"
+        elif explicit_range:
+            scope = "explicit_range"
+            reason = "explicit timeline range"
+        elif selected_occurrences:
+            scope = "selected_occurrences"
+            reason = "selected occurrences"
+        elif _GLOBAL_RE.search(prompt):
+            scope = "all_occurrences"
+            reason = "explicit global language"
+        else:
+            scope = "local"
+            reason = "ambiguous requests default to local"
+
+        change_type = _change_type(prompt)
+        phases, action_seconds, recovery = _motion_contract(prompt)
+        persistent = bool(_PERSISTENT_RE.search(prompt))
+        preservation = ["preserve unedited subjects", "preserve camera and background"]
+        if persistent:
+            preservation.append("apply change for complete visible occurrence")
+        intent = EditIntent(
+            raw_prompt=prompt,
+            scope=scope,
+            change_type=change_type,
+            action_phases=phases,
+            estimated_action_seconds=action_seconds,
+            requires_recovery_motion=recovery,
+            preservation_requirements=preservation,
+        )
+
+    global_search = intent.scope == "all_occurrences"
+    persistent_local = intent.scope == "local" and bool(_PERSISTENT_RE.search(intent.raw_prompt))
+    if global_search:
+        mode = "coarse_global_then_dense_candidates"
+        tracking_seconds = None
+    elif intent.scope == "selected_occurrences":
+        mode = "selected_occurrences_only"
+        tracking_seconds = None
+    elif persistent_local:
+        mode = "complete_local_occurrence"
+        tracking_seconds = None
+    elif intent.scope == "explicit_range":
+        mode = "explicit_range_with_handles"
+        tracking_seconds = intent.estimated_action_seconds + 2.0
+    else:
+        mode = "lazy_local"
+        tracking_seconds = intent.estimated_action_seconds + 2.0
+
+    estimate = PlanningEstimate(
+        analysis_mode=mode,
+        expected_tracking_seconds=tracking_seconds,
+        expected_generation_calls=1,
+        expected_generated_seconds=intent.estimated_action_seconds + 2.0,
+        requires_global_discovery=global_search,
+    )
+    return ScopeGateResult(intent=intent, estimate=estimate, reason=reason)
+
+
+def should_discover_occurrences(*, scope: EditScope, explicitly_requested: bool) -> bool:
+    """Full-reel work requires explicit global intent or explicit user action."""
+    return explicitly_requested or scope == "all_occurrences"

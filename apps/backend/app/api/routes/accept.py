@@ -1,7 +1,7 @@
 """Accept a generated variant.
 
-Lazy-render model: accepting a variant writes a Segment row + enqueues
-the entity-search background job. That's it. No ffmpeg, no stitching, no
+Lazy-render model: accepting a variant writes a Segment row. Entity search
+is separately opt-in. No ffmpeg, no stitching, no
 full-project re-encode, no proj.video_url mutation. The timeline is
 reconstructed on read by walking Segment rows, and the final MP4 is
 rendered exactly once when the user hits Export.
@@ -96,7 +96,7 @@ async def accept(
     bbox_is_tracked = bool(bbox) and bbox_w < 0.98 and bbox_h < 0.98 and bbox_w * bbox_h > 0.0
 
     entity_job_id: str | None = None
-    if bbox_is_tracked:
+    if bbox_is_tracked and body.discover_occurrences:
         ent_job = Job(
             project_id=proj.id,
             kind="entity",

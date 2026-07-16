@@ -18,8 +18,6 @@ from app.models.propagation import (
     PropagationJob,
     PropagationResult,
 )
-from app.models.session import Session as SessionModel
-from app.services.credentials import provider_overrides
 from app.services.global_chunk_execution import (
     PreviousChunk,
     execute_global_chunk,
@@ -318,24 +316,4 @@ async def _run(job_id: str, plan_id: str) -> None:
 
 
 async def run(job_id: str, plan_id: str) -> None:
-    async with AsyncSessionLocal() as db:
-        job = await db.get(PropagationJob, job_id)
-        project = await db.get(Project, job.project_id) if job is not None else None
-        owner = (
-            await db.get(SessionModel, project.session_id)
-            if project is not None
-            else None
-        )
-        overrides = (
-            await provider_overrides(db, owner.user_id)
-            if owner is not None and owner.user_id
-            else {}
-        )
-
-    from app.ai.services.config import clear_settings_overrides, set_settings_overrides
-
-    set_settings_overrides(overrides)
-    try:
-        await _run(job_id, plan_id)
-    finally:
-        clear_settings_overrides()
+    await _run(job_id, plan_id)

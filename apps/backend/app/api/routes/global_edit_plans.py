@@ -79,6 +79,9 @@ async def _plan_response(
                         provider=chunk.provider,
                         split_reason=chunk.split_reason,
                         status=chunk.status,
+                        attempts=chunk.attempts,
+                        output_url=chunk.output_url,
+                        error=chunk.error,
                     )
                     for chunk in occurrence_plan.chunks
                 ],
@@ -212,6 +215,8 @@ async def create_global_edit_plan(
         db.add(occurrence_plan)
         await db.flush()
         for chunk in chunks:
+            first_chunk = chunk.index == 0
+            last_chunk = chunk.index == len(chunks) - 1
             chunk_frames = [
                 frame
                 for frame in track_frames
@@ -232,6 +237,12 @@ async def create_global_edit_plan(
                     payload_json={
                         "track_ids": [track.id for track in matching_tracks],
                         "track_frames": chunk_frames,
+                        "boundary_contract": {
+                            "protect_source_before": first_chunk,
+                            "protect_source_after": last_chunk,
+                            "handoff_from_previous": not first_chunk,
+                            "handoff_to_next": not last_chunk,
+                        },
                     },
                     status="planned",
                 )

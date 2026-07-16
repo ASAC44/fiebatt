@@ -169,7 +169,12 @@ class GlobalGenerationChunk(Base):
     provider: Mapped[str] = mapped_column(String)
     split_reason: Mapped[str] = mapped_column(String, default="provider_limit")
     payload_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    input_revision: Mapped[str | None] = mapped_column(Text, nullable=True)
+    output_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    execution_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String, default="planned")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     occurrence_plan: Mapped["GlobalOccurrencePlan"] = relationship(
         back_populates="chunks"

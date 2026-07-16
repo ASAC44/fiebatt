@@ -179,6 +179,7 @@ async def test_global_plan_is_non_generating_and_estimates_selected_work(global_
     assert chunk["provider"] == "wan"
     assert chunk["edit_start"] == 18.0
     assert chunk["edit_end"] == 22.0
+    assert chunk["attempts"] == 0
     assert runner.submissions == []
 
     async with sessions() as db:
@@ -188,6 +189,12 @@ async def test_global_plan_is_non_generating_and_estimates_selected_work(global_
         chunks = (await db.execute(select(GlobalGenerationChunk))).scalars().all()
         assert len(occurrence_plans) == 1
         assert len(chunks) == 1
+        assert chunks[0].payload_json["boundary_contract"] == {
+            "protect_source_before": True,
+            "protect_source_after": True,
+            "handoff_from_previous": False,
+            "handoff_to_next": False,
+        }
 
 
 @pytest.mark.asyncio

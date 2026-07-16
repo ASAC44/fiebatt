@@ -54,6 +54,9 @@ class PlannedChunkOut(BaseModel):
     provider: str
     split_reason: str
     status: str
+    attempts: int
+    output_url: str | None = None
+    error: str | None = None
 
 
 class PlannedOccurrenceOut(BaseModel):

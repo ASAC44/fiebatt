@@ -119,4 +119,3 @@ def test_plans_remain_valid_across_occurrence_lengths(duration: float):
     )
 
     _assert_valid_coverage(chunks, start, end)
-

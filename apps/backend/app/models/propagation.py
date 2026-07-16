@@ -134,7 +134,11 @@ class GlobalOccurrencePlan(Base):
     edit_start: Mapped[float] = mapped_column(Float)
     edit_end: Mapped[float] = mapped_column(Float)
     estimate_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    output_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    seams_json: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    continuity_json: Mapped[dict] = mapped_column(JSON, default=dict)
     status: Mapped[str] = mapped_column(String, default="planned")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     global_plan: Mapped["GlobalEditPlan"] = relationship(
         back_populates="occurrence_plans"

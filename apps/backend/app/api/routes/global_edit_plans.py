@@ -68,6 +68,9 @@ async def _plan_response(
                 start_ts=appearance_by_id[occurrence_plan.appearance_id].start_ts,
                 end_ts=appearance_by_id[occurrence_plan.appearance_id].end_ts,
                 confidence=appearance_by_id[occurrence_plan.appearance_id].confidence,
+                status=occurrence_plan.status,
+                output_url=occurrence_plan.output_url,
+                error=occurrence_plan.error,
                 chunks=[
                     PlannedChunkOut(
                         chunk_id=chunk.id,

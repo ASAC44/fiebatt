@@ -22,6 +22,7 @@ from app.models.propagation import (
 )
 from app.models.segment import Segment
 from app.services.global_chunk_sequence import ChunkExecution
+from app.services.global_seam import AssemblyResult
 from app.workers import global_edit_job, propagate_job
 
 
@@ -317,6 +318,13 @@ async def test_global_worker_persists_generated_chunk_state(
             metadata={"provider": chunk.provider},
         )
 
+    async def assemble_global_occurrence(**kwargs):
+        return AssemblyResult(
+            output_url="/media/occurrence.mp4",
+            seams=(),
+            continuity={"entry": {"passed": True}, "exit": {"passed": True}},
+        )
+
     monkeypatch.setattr(
         global_edit_job,
         "prepare_reference_subject",
@@ -326,6 +334,11 @@ async def test_global_worker_persists_generated_chunk_state(
         global_edit_job,
         "execute_global_chunk",
         execute_global_chunk,
+    )
+    monkeypatch.setattr(
+        global_edit_job,
+        "assemble_global_occurrence",
+        assemble_global_occurrence,
     )
     await runner.submissions[0][1]()
 
@@ -347,8 +360,18 @@ async def test_global_worker_persists_generated_chunk_state(
                 )
             )
         ).scalar_one()
-        assert plan.status == "generated"
-        assert occurrence.status == "generated"
+        result = (
+            await db.execute(
+                select(PropagationResult).where(
+                    PropagationResult.propagation_job_id == plan.propagation_job_id
+                )
+            )
+        ).scalar_one()
+        assert plan.status == "done"
+        assert occurrence.status == "done"
+        assert occurrence.output_url == "/media/occurrence.mp4"
         assert chunk.status == "generated"
         assert chunk.attempts == 1
         assert chunk.output_url == "/media/chunk-0.mp4"
+        assert result.status == "done"
+        assert result.variant_url == "/media/occurrence.mp4"

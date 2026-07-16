@@ -64,6 +64,9 @@ class PlannedOccurrenceOut(BaseModel):
     start_ts: float
     end_ts: float
     confidence: float
+    status: str
+    output_url: str | None = None
+    error: str | None = None
     chunks: list[PlannedChunkOut] = Field(default_factory=list)
 
 

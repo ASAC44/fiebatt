@@ -32,7 +32,7 @@ def _is_public_http_url(url: str) -> bool:
     )
 
 
-def _target_bbox(payload: dict, timestamp: float) -> dict[str, float]:
+def target_bbox(payload: dict, timestamp: float) -> dict[str, float]:
     frames = payload.get("track_frames")
     candidates = [
         frame
@@ -199,7 +199,7 @@ async def execute_global_chunk(
 
     duration = chunk.context_end - chunk.context_start
     midpoint = (chunk.edit_start + chunk.edit_end) / 2
-    bbox = _target_bbox(chunk.payload_json or {}, midpoint)
+    bbox = target_bbox(chunk.payload_json or {}, midpoint)
     target_frame_path, _ = storage.new_path("keyframes", "jpg")
     seed_offset = min(max(0.0, midpoint - chunk.context_start), duration)
     await ffmpeg.extract_frame(source_path, seed_offset, target_frame_path)

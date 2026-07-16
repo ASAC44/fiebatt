@@ -30,6 +30,7 @@ from app.services.global_chunk_sequence import (
     ChunkState,
     run_chunk_sequence,
 )
+from app.services.global_seam import assemble_global_occurrence
 
 
 log = logging.getLogger("fiebatt.jobs.global_edit")
@@ -163,14 +164,39 @@ async def _run_occurrence(
     )
     if not outcome.completed:
         return False
+    try:
+        assembly = await assemble_global_occurrence(
+            project=project,
+            occurrence=occurrence,
+            chunks=chunks,
+        )
+    except Exception as exc:
+        error = str(exc).strip() or type(exc).__name__
+        log.exception("global occurrence assembly failed")
+        async with AsyncSessionLocal() as db:
+            occurrence_row = await db.get(GlobalOccurrencePlan, occurrence_plan_id)
+            result_row = await db.get(PropagationResult, result_id)
+            if occurrence_row is not None:
+                occurrence_row.status = "error"
+                occurrence_row.error = error[:500]
+            if result_row is not None:
+                result_row.status = "error"
+                result_row.error = error[:500]
+            await db.commit()
+        return False
     async with AsyncSessionLocal() as db:
         occurrence = await db.get(GlobalOccurrencePlan, occurrence_plan_id)
         result = await db.get(PropagationResult, result_id)
         if occurrence is not None:
-            occurrence.status = "generated"
+            occurrence.status = "done"
+            occurrence.output_url = assembly.output_url
+            occurrence.seams_json = [seam.metadata() for seam in assembly.seams]
+            occurrence.continuity_json = assembly.continuity
+            occurrence.error = None
         if result is not None:
-            # Assembly and seam acceptance run before this becomes terminal.
-            result.status = "processing"
+            result.status = "done"
+            result.variant_url = assembly.output_url
+            result.error = None
         await db.commit()
     return True
 
@@ -255,9 +281,8 @@ async def _run(job_id: str, plan_id: str) -> None:
             job.error = "one or more global occurrences failed"
             plan.status = "error"
         else:
-            # Generated overlaps still need seam selection before acceptance.
-            job.status = "processing"
-            plan.status = "generated"
+            job.status = "done"
+            plan.status = "done"
         await db.commit()
 
 

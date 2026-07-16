@@ -3,23 +3,40 @@ import os
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 os.environ["USE_AI_STUBS"] = "true"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./test_auth.db"
 os.environ["AUTH_JWT_SECRET"] = "test-secret"
 
-from app.db.init import create_all  # noqa: E402
+from app import models as _models  # noqa: E402, F401
+from app.db.base import Base  # noqa: E402
+from app.db.session import get_db  # noqa: E402
 from app.main import app  # noqa: E402
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def setup_db():
-    await create_all()
+async def setup_db(tmp_path):
+    test_engine = create_async_engine(
+        f"sqlite+aiosqlite:///{tmp_path / 'auth.db'}"
+    )
+    test_sessions = async_sessionmaker(
+        test_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+    )
+    async with test_engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async def override_get_db():
+        async with test_sessions() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_get_db
     yield
-    try:
-        os.unlink("./test_auth.db")
-    except FileNotFoundError:
-        pass
+    app.dependency_overrides.pop(get_db, None)
+    await test_engine.dispose()
 
 
 @pytest_asyncio.fixture

@@ -61,6 +61,7 @@ async def enqueue_entity_discovery(
             "bbox": source_job.bbox_json,
             "source_start_ts": source_job.start_ts,
             "source_end_ts": source_job.end_ts,
+            "discovery_scope": "all_occurrences",
         },
     )
     db.add(job)

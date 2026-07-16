@@ -41,6 +41,9 @@ export function ContinuityPanel({
   continuity: ContinuityDashboardController;
 }) {
   const {
+    globalEnabled,
+    globalPlan,
+    selectedAppearanceIds,
     latestEntity,
     acceptedEdit,
     discovery,
@@ -48,7 +51,9 @@ export function ContinuityPanel({
     propagationCounts,
     hasPropagatableAppearances,
     startDiscovery,
+    prepareGlobalPlan,
     startPropagation,
+    toggleAppearance,
     applyPropagation,
     applyAllPropagation,
     clearLatestEntity,
@@ -57,6 +62,8 @@ export function ContinuityPanel({
   const readyToApply = propagation.results.filter(
     (result) => result.status === "done" && !result.applied,
   );
+  const globalChunks = globalPlan?.occurrences.flatMap((occurrence) => occurrence.chunks) ?? [];
+  const generatedChunks = globalChunks.filter((chunk) => chunk.status === "generated").length;
 
   const isActive = discovery.status !== "idle" || latestEntity !== null;
 
@@ -234,10 +241,10 @@ export function ContinuityPanel({
             </div>
           </div>
 
-          {/* propagate CTA */}
+          {/* propagation plan */}
           {hasPropagatableAppearances && propagation.status === "idle" && (
             <button
-              onClick={() => void startPropagation()}
+              onClick={() => void (globalEnabled ? prepareGlobalPlan() : startPropagation())}
               style={{
                 width: "100%",
                 padding: "12px 16px",
@@ -252,8 +259,49 @@ export function ContinuityPanel({
                 transition: "all 0.2s",
               }}
             >
-              propagate change across {latestEntity.appearances.length} appearance{latestEntity.appearances.length !== 1 ? "s" : ""}
+              {globalEnabled
+                ? `review plan for ${selectedAppearanceIds.length} selected appearance${selectedAppearanceIds.length !== 1 ? "s" : ""}`
+                : `propagate change across ${latestEntity.appearances.length} appearance${latestEntity.appearances.length !== 1 ? "s" : ""}`}
             </button>
+          )}
+
+          {globalEnabled && globalPlan && propagation.status === "planned" && (
+            <div
+              style={{
+                display: "grid",
+                gap: 10,
+                padding: 12,
+                borderRadius: 10,
+                border: "1px solid rgba(126, 231, 135, 0.2)",
+                background: "rgba(126, 231, 135, 0.05)",
+              }}
+            >
+              <div className="mono" style={{ fontSize: 11, color: "var(--ink)" }}>
+                {globalPlan.estimate.occurrence_count} appearance{globalPlan.estimate.occurrence_count !== 1 ? "s" : ""}
+                {" · "}{globalPlan.estimate.expected_generation_calls} generation call{globalPlan.estimate.expected_generation_calls !== 1 ? "s" : ""}
+                {" · "}{globalPlan.estimate.expected_generated_seconds.toFixed(1)} generated seconds
+              </div>
+              <div className="mono" style={{ fontSize: 10, color: "var(--ink-fade)", lineHeight: 1.5 }}>
+                uses the accepted edit as the visual reference, carries edited motion between long chunks,
+                and validates every boundary before results can be applied.
+              </div>
+              <button
+                onClick={() => void startPropagation()}
+                style={{
+                  width: "100%",
+                  padding: "10px 14px",
+                  borderRadius: 9,
+                  border: "1px solid rgba(126, 231, 135, 0.3)",
+                  background: "rgba(126, 231, 135, 0.1)",
+                  color: "rgba(126, 231, 135, 0.95)",
+                  fontSize: 11,
+                  fontFamily: "var(--font-mono, monospace)",
+                  cursor: "pointer",
+                }}
+              >
+                generate reviewed plan
+              </button>
+            </div>
           )}
 
           {/* appearances list */}
@@ -269,7 +317,7 @@ export function ContinuityPanel({
               <div className="mono" style={{ fontSize: 10, letterSpacing: "0.12em", color: "var(--ink-fade)", textTransform: "uppercase" }}>
                 appearances
               </div>
-              {hasPropagatableAppearances && propagation.status !== "idle" && (
+              {hasPropagatableAppearances && propagation.status !== "idle" && !globalEnabled && (
                 <button
                   className="mono"
                   onClick={() => void startPropagation()}
@@ -302,8 +350,11 @@ export function ContinuityPanel({
               </div>
             ) : (
               <div style={{ display: "grid", gap: 4 }}>
-                {latestEntity.appearances.slice(0, 8).map((appearance) => (
-                  <div
+                {latestEntity.appearances.slice(0, 8).map((appearance) => {
+                  const selected = selectedAppearanceIds.includes(appearance.id);
+                  const selectionLocked = propagation.status === "pending" || propagation.status === "processing" || propagation.status === "ready";
+                  return (
+                  <label
                     key={appearance.id}
                     className="mono"
                     style={{
@@ -315,12 +366,24 @@ export function ContinuityPanel({
                       padding: "6px 9px",
                       borderRadius: 6,
                       background: "rgba(255,255,255,0.03)",
+                      cursor: globalEnabled && !selectionLocked ? "pointer" : "default",
                     }}
                   >
-                    <span>{fmtTime(appearance.start_ts)}-{fmtTime(appearance.end_ts)}</span>
+                    <span style={{ display: "flex", gap: 7, alignItems: "center" }}>
+                      {globalEnabled && (
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          disabled={selectionLocked}
+                          onChange={() => toggleAppearance(appearance.id)}
+                        />
+                      )}
+                      {fmtTime(appearance.start_ts)}-{fmtTime(appearance.end_ts)}
+                    </span>
                     <span>{Math.round(appearance.confidence * 100)}%</span>
-                  </div>
-                ))}
+                  </label>
+                  );
+                })}
                 {latestEntity.appearances.length > 8 && (
                   <div className="mono" style={{ fontSize: 10, color: "var(--ink-fade)", paddingLeft: 4 }}>
                     +{latestEntity.appearances.length - 8} more
@@ -352,9 +415,12 @@ export function ContinuityPanel({
               </div>
               <div style={{ fontSize: 12, color: "var(--ink)", marginTop: 2 }}>
                 {propagation.status === "pending" && "queueing propagation jobs..."}
+                {propagation.status === "planned" && "plan ready for review"}
                 {propagation.status === "processing" && (
                   <>
-                    processing {propagationCounts.processing}/{propagationCounts.total || latestEntity?.appearances.length || 0}
+                    {globalEnabled && globalChunks.length > 0
+                      ? `generated ${generatedChunks}/${globalChunks.length} chunks`
+                      : `processing ${propagationCounts.processing}/${propagationCounts.total || latestEntity?.appearances.length || 0}`}
                     <span style={{ display: "inline-block", marginLeft: 8 }}>
                       <ProgressDots />
                     </span>
@@ -366,7 +432,7 @@ export function ContinuityPanel({
               </div>
             </div>
 
-            {readyToApply.length > 1 && (
+            {readyToApply.length > 0 && (globalEnabled || readyToApply.length > 1) && (
               <button
                 className="mono"
                 onClick={() => void applyAllPropagation()}
@@ -383,7 +449,7 @@ export function ContinuityPanel({
                   flexShrink: 0,
                 }}
               >
-                apply all ({readyToApply.length})
+                {globalEnabled ? `apply reviewed results (${readyToApply.length})` : `apply all (${readyToApply.length})`}
               </button>
             )}
           </div>
@@ -409,18 +475,38 @@ export function ContinuityPanel({
           )}
 
           {propagation.error && (
-            <div
-              className="mono"
-              style={{
-                fontSize: 11,
-                color: "#ff9b9b",
-                borderRadius: 8,
-                border: "1px solid rgba(255, 107, 107, 0.2)",
-                background: "rgba(255, 107, 107, 0.06)",
-                padding: 10,
-              }}
-            >
-              {propagation.error}
+            <div style={{ display: "grid", gap: 8 }}>
+              <div
+                className="mono"
+                style={{
+                  fontSize: 11,
+                  color: "#ff9b9b",
+                  borderRadius: 8,
+                  border: "1px solid rgba(255, 107, 107, 0.2)",
+                  background: "rgba(255, 107, 107, 0.06)",
+                  padding: 10,
+                }}
+              >
+                {propagation.error}
+              </div>
+              {globalEnabled && (
+                <button
+                  className="mono"
+                  onClick={() => void (globalPlan ? startPropagation() : prepareGlobalPlan())}
+                  style={{
+                    justifySelf: "start",
+                    borderRadius: 999,
+                    border: "1px solid rgba(255, 196, 87, 0.25)",
+                    background: "rgba(255, 196, 87, 0.08)",
+                    color: "rgba(255, 196, 87, 0.9)",
+                    fontSize: 10,
+                    padding: "6px 12px",
+                    cursor: "pointer",
+                  }}
+                >
+                  {globalPlan ? "retry failed work" : "review plan again"}
+                </button>
+              )}
             </div>
           )}
 
@@ -495,7 +581,7 @@ export function ContinuityPanel({
                       />
                     )}
 
-                    {result.status === "done" && !result.applied && (
+                    {result.status === "done" && !result.applied && !globalEnabled && (
                       <button
                         className="mono"
                         onClick={() => void applyPropagation(result.id)}
@@ -524,8 +610,9 @@ export function ContinuityPanel({
 
           {propagation.results.length > 0 && (
             <div className="mono" style={{ fontSize: 10, color: "var(--ink-fade)", lineHeight: 1.5 }}>
-              applied results are written to backend segment rows for export. the live editor
-              timeline is left alone so local edits stay intact.
+              {globalEnabled
+                ? "review every result first. applying writes the complete set to the saved EDL in one operation and refreshes this editor."
+                : "apply only the results you want. each accepted result is added to the saved timeline."}
             </div>
           )}
         </div>

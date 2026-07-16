@@ -109,18 +109,48 @@ def splice_accepted_clip_into_edl(
     accepted_range: AcceptedGenerationRange,
 ) -> PersistedEDL:
     """Replace one timeline interval without discarding manual EDL edits."""
-    start = accepted_range.committed_start
-    end = accepted_range.committed_end
+    return splice_generated_clip_into_edl(
+        edl,
+        project_id=project_id,
+        project_fps=project_fps,
+        segment_id=segment_id,
+        asset_id=variant.id,
+        url=variant.url or "",
+        timeline_start=accepted_range.committed_start,
+        timeline_end=accepted_range.committed_end,
+        media_start=accepted_range.media_start,
+        media_end=accepted_range.media_end,
+        media_duration=accepted_range.media_duration,
+    )
+
+
+def splice_generated_clip_into_edl(
+    edl: PersistedEDL,
+    *,
+    project_id: str,
+    project_fps: float,
+    segment_id: str,
+    asset_id: str,
+    url: str,
+    timeline_start: float,
+    timeline_end: float,
+    media_start: float,
+    media_end: float,
+    media_duration: float,
+) -> PersistedEDL:
+    """Replace an exact timeline interval with generated media."""
+    start = timeline_start
+    end = timeline_end
     if end <= start:
         raise ValueError("accepted range must have positive duration")
 
     generated = PersistedClip(
         id=segment_id,
         kind="generated",
-        url=variant.url or "",
-        source_start=accepted_range.media_start,
-        source_end=accepted_range.media_end,
-        media_duration=accepted_range.media_duration,
+        url=url,
+        source_start=media_start,
+        source_end=media_end,
+        media_duration=media_duration,
         volume=0.0,
         label="ai edit",
         project_id=project_id,
@@ -165,13 +195,13 @@ def splice_accepted_clip_into_edl(
     if not inserted:
         output.append(generated)
 
-    assets = [asset for asset in edl.sources if asset.id != variant.id]
+    assets = [asset for asset in edl.sources if asset.id != asset_id]
     assets.append(
         PersistedAsset(
-            id=variant.id,
+            id=asset_id,
             kind="generated",
-            url=variant.url or "",
-            duration=accepted_range.media_duration,
+            url=url,
+            duration=media_duration,
             fps=project_fps,
             project_id=project_id,
             label="ai edit",

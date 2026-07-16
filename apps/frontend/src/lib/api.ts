@@ -226,6 +226,7 @@ export type HealthResp = {
   ok: boolean;
   features?: {
     adaptive_edit_planning?: boolean;
+    global_edit_planning?: boolean;
     hard_failed_acceptance_override?: boolean;
   };
 };
@@ -375,15 +376,20 @@ export type DiscoveryJobResp = {
   reused: boolean;
 };
 
-export type PropagateReq = {
-  entity_id: string;
-  source_variant_url: string;
-  prompt: string;
-  auto_apply?: boolean;
-};
+export type PropagateReq =
+  | {
+      global_plan_id: string;
+    }
+  | {
+      entity_id: string;
+      source_variant_url: string;
+      prompt: string;
+      auto_apply?: boolean;
+    };
 
 export type PropagateResp = {
   propagation_job_id: string;
+  global_plan_id?: string | null;
 };
 
 export type PropagationResultResp = {
@@ -400,6 +406,57 @@ export type PropagationStatusResp = {
   status: JobStatus;
   error: string | null;
   results: PropagationResultResp[];
+};
+
+export type GlobalEditChunkResp = {
+  chunk_id: string;
+  index: number;
+  edit_start: number;
+  edit_end: number;
+  context_start: number;
+  context_end: number;
+  provider: string;
+  split_reason: string;
+  status: string;
+  attempts: number;
+  output_url: string | null;
+  error: string | null;
+};
+
+export type GlobalEditOccurrenceResp = {
+  appearance_id: string;
+  start_ts: number;
+  end_ts: number;
+  confidence: number;
+  status: string;
+  output_url: string | null;
+  error: string | null;
+  chunks: GlobalEditChunkResp[];
+};
+
+export type GlobalEditPlanResp = {
+  plan_id: string;
+  project_id: string;
+  entity_id: string;
+  reference_segment_id: string;
+  scope: "selected_occurrences" | "all_occurrences";
+  requested_provider: string;
+  prompt: string;
+  occurrences: GlobalEditOccurrenceResp[];
+  estimate: {
+    occurrence_count: number;
+    expected_generation_calls: number;
+    expected_generated_seconds: number;
+    mean_track_confidence: number;
+    reference_accepted: boolean;
+  };
+  status: string;
+};
+
+export type GlobalEditApplyResp = {
+  plan_id: string;
+  segment_ids: string[];
+  timeline: TimelineResp;
 };
 
 // ─── endpoints ────────────────────────────────────────────────────────
@@ -496,6 +553,31 @@ export function propagate(req: PropagateReq): Promise<PropagateResp> {
   return request<PropagateResp>("/api/propagate", {
     method: "POST",
     body: JSON.stringify(req),
+  });
+}
+
+export function createGlobalEditPlan(req: {
+  entity_id: string;
+  reference_segment_id: string;
+  scope: "selected_occurrences" | "all_occurrences";
+  occurrence_ids?: string[];
+}): Promise<GlobalEditPlanResp> {
+  return request<GlobalEditPlanResp>("/api/global-edit-plans", {
+    method: "POST",
+    body: JSON.stringify({
+      video_gen_provider: getSettings().videoProvider,
+      ...req,
+    }),
+  });
+}
+
+export function getGlobalEditPlan(planId: string): Promise<GlobalEditPlanResp> {
+  return request<GlobalEditPlanResp>(`/api/global-edit-plans/${planId}`);
+}
+
+export function applyGlobalEditPlan(planId: string): Promise<GlobalEditApplyResp> {
+  return request<GlobalEditApplyResp>(`/api/global-edit-plans/${planId}/apply`, {
+    method: "POST",
   });
 }
 

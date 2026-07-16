@@ -37,6 +37,7 @@ def test_generate_request_rejects_partial_legacy_shape():
 
 def test_adaptive_generation_is_rollout_gated_by_default():
     assert Settings().adaptive_edit_planning is False
+    assert Settings().global_edit_planning is False
 
 
 def test_generation_job_exposes_continuity_and_core_preview_metadata():

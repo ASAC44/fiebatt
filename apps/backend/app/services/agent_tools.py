@@ -194,7 +194,8 @@ def _validate_segment_length(start_ts: float, end_ts: float) -> None:
     length = end_ts - start_ts
     if length < MIN_SEG_LEN or length > MAX_SEG_LEN:
         raise ValueError(
-            f"segment length must be {MIN_SEG_LEN}-{MAX_SEG_LEN}s (got {length:.2f}s)"
+            f"segment length must be {MIN_SEG_LEN:g}-{MAX_SEG_LEN:g}s "
+            f"(got {length:.2f}s)"
         )
 
 
@@ -615,7 +616,10 @@ async def _generate_edit(
 
     length = end_ts - start_ts
     if length < MIN_SEG_LEN or length > MAX_SEG_LEN:
-        raise ValueError(f"segment length must be {MIN_SEG_LEN}-{MAX_SEG_LEN}s (got {length:.2f}s)")
+        raise ValueError(
+            f"segment length must be {MIN_SEG_LEN:g}-{MAX_SEG_LEN:g}s "
+            f"(got {length:.2f}s)"
+        )
     if end_ts > proj.duration + 1e-3:
         raise ValueError("end_ts past project duration")
     generation_length = (
@@ -626,7 +630,7 @@ async def _generate_edit(
     if generation_length > MAX_SEG_LEN:
         raise ValueError(
             "generation context must be at most "
-            f"{MAX_SEG_LEN}s (got {generation_length:.2f}s)"
+            f"{MAX_SEG_LEN:g}s (got {generation_length:.2f}s)"
         )
     if video_gen_provider and video_gen_provider != "auto":
         from app.ai.services.provider_capabilities import validate_provider_duration

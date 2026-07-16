@@ -2,10 +2,10 @@
 
 fiebatt is a prompt-driven video editor for precise, localized edits. It is built for the moment when you do not want to regenerate an entire video, but you do want to change one object, one action, or one short range inside an existing reel.
 
-The product has three surfaces that all talk to the same backend:
+The product has three surfaces that all talk to the same API:
 
 - a Next.js web editor for reviewing projects, editing timelines, chatting with the agent, comparing variants, and exporting the final reel
-- a FastAPI backend that owns uploads, projects, timelines, jobs, generation, scoring, propagation, and exports
+- a FastAPI API that owns uploads, projects, timelines, jobs, generation, scoring, propagation, and exports
 - a CLI/agent workflow so Codex, Claude, or shell scripts can drive the same editing loop from the terminal
 
 ## What fiebatt does
@@ -143,7 +143,7 @@ docs/
   reference/    API and architecture docs
 
 compose.yaml     Local and self-hosted service orchestration
-scripts/         Development, deployment, and smoke-test scripts
+scripts/         Development, maintenance, and smoke-test scripts
 storage/         Local development media storage
 ```
 
@@ -154,7 +154,7 @@ storage/         Local development media storage
 - Node 20+
 - Python 3.11+
 - ffmpeg on your PATH
-- backend dependencies installed in your Python environment
+- API dependencies installed in your Python environment
 
 ### Install web dependencies
 
@@ -180,17 +180,17 @@ From the repository root:
 ./scripts/dev_api.sh
 ```
 
-The backend runs on port `8000` by default.
+The API runs on port `8000` by default.
 
 ### Run the full local stack
 
-After installing the frontend, backend, and vision-worker dependencies:
+After installing the web, API, and vision-worker dependencies:
 
 ```bash
 bash scripts/dev_all.sh
 ```
 
-This starts the frontend, backend, and vision worker together and writes their
+This starts the web app, API, and vision worker together and writes their
 logs to `.dev-logs/`.
 
 ## Codex plugin
@@ -206,8 +206,8 @@ codex plugin add fiebatt@fiebatt
 
 Start a new Codex thread after installation, then ask to edit a video or invoke
 `$fiebatt-edit` explicitly. Codex opens the Fiebatt browser sign-in flow when
-authentication is required. Configure personal model-provider credentials only
-through the HTTPS Fiebatt settings page; never paste credentials into chat.
+authentication is required. Generation credentials remain managed by the
+service and are never requested from users.
 
 To refresh an existing installation:
 
@@ -247,7 +247,7 @@ Important environment groups:
 
 - database: `DATABASE_URL`
 - auth: `AUTH_JWT_SECRET`, `AUTH_JWT_EXPIRES_MINUTES`
-- media storage: `S3_BUCKET`, `AWS_REGION`, and the standard AWS credential chain, or local media fallback
+- media storage: `S3_BUCKET` and standard AWS settings, or local media fallback
 - AI mode: `USE_AI_STUBS`
 - local edit rollout: `ADAPTIVE_EDIT_PLANNING` (defaults off; fixed-window fallback stays available)
 - emergency continuity override: `ALLOW_HARD_FAILED_ACCEPTANCE` (keep off during normal rollout)
@@ -255,8 +255,8 @@ Important environment groups:
 - generation provider: `VIDEO_GEN_PROVIDER`, `VEO_MODEL`, `VIDEO_GENERATION_TIMEOUT`
 
 The web app uses first-party email/password auth. Create an account at
-`/signup`, then log in at `/login`; the browser stores a JWT and sends it to
-the backend as `Authorization: Bearer <token>`.
+`/signup`, then log in at `/login`; the API stores the session in an HttpOnly
+cookie rather than exposing the token to browser JavaScript.
 - vision worker: `VISION_WORKER_URL` (`GPU_WORKER_URL` remains a compatibility fallback)
 - provider keys: Mesh API / qwen / Gemini / DashScope / ElevenLabs keys depending on the path being tested
 
@@ -341,7 +341,7 @@ These are useful for local testing, docs, and repeatable demos.
 
 ## Notes for contributors
 
-- Keep the web app in `apps/web`; this is the only supported frontend.
+- Keep the Next.js app in `apps/web`; this is the only supported web app.
 - Prefer backend API changes that preserve the same editor and CLI flow.
 - Keep generated media, debug frames, and scratch files out of the repository unless they are intentional documentation assets.
 - If you add a new backend capability, update the Excalidraw flow diagram and this README so the product story stays accurate.

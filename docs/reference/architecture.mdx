@@ -5,7 +5,7 @@ description: "A high-level map of the fiebatt codebase and the responsibilities 
 
 # Architecture
 
-fiebatt is organized as a multi-surface application with a Next.js editor, a backend API with internal AI adapters, and an optional vision worker.
+fiebatt is organized as a multi-surface application with a Next.js editor, a FastAPI service with internal AI adapters, and an optional vision worker.
 
 ## Repository map
 
@@ -70,8 +70,7 @@ The CLI also includes a multi-agent video analysis mode where multiple AI agents
 
 ## CI/CD
 
-The project uses GitHub Actions for continuous integration and deployment:
+The project uses GitHub Actions for continuous integration:
 
 - **Typecheck/build** — runs the Next.js production build
 - **Tests** — runs backend and CLI test suites
-- **Auto-deploy** — pushes to Vultr on merge to main

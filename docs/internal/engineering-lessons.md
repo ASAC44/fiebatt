@@ -1,6 +1,6 @@
 # Engineering lessons
 
-- when the repo has a real web app, keep it inside `apps/web/` and leave the repo root as orchestration, docs, and config only.
+- keep the Next.js app inside `apps/web/` and leave the repo root for orchestration, docs, and shared configuration.
 - if a route should only exist for signed-in users, gate it explicitly at the route layer and preserve intent through auth. don't let anonymous fallthrough create fake "works sometimes" navigation.
 - when cleaning up visuals during a merge, verify whether a weird-looking landing element is intentional product direction before deleting it. hero pieces like the `ascii` landing effect are allowed to be opinionated on purpose.
 - if a visual spacing tweak changes basically nothing, stop nudging outer wrappers and inspect the actual rendered composition. the gap may be coming from the asset/layout model itself, not the nearest css margin.

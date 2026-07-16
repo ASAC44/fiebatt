@@ -17,7 +17,7 @@
 - [completed] add an in-studio checklist / next-step guide so the dashboard teaches the core loop instead of dumping controls all at once
 - [completed] verify the revised onboarding flow against web interface / onboarding best practices and document the remaining gaps
 - [pending] reorg the editor frontend around feature folders instead of dumping everything into `apps/web/src/components`
-- [pending] split `apps/web/src/pages/Studio.tsx` into dashboard shell pieces (`topbar`, workspace layout, keyboard shortcuts, upload/export controls)
+- [pending] split `apps/web/src/app/editor/Studio.tsx` into dashboard shell pieces (`topbar`, workspace layout, keyboard shortcuts, upload/export controls)
 - [pending] pull ai edit flow ui into a shared editor module so `Inspector` and `VibePrompt` stop feeling like two separate dashboards
 - [pending] reduce inline styles in `VibePrompt` and move editor-specific styling next to the feature it belongs to
 - [completed] unify the duplicated generation session hooks into one canonical edit-session controller with optional continuity callbacks
@@ -37,14 +37,14 @@
 - [completed] add full pipeline integration tests: upload → generate → accept → entity search → export (7 tests, all passing)
 - [pending] mount and surface ai observability/admin plumbing so live demos show provider health, latency, and cost
 - [pending] make the live-ai story explicit: remove accidental stub ambiguity in demo-critical paths and document the real-provider path
-- [pending] align the repo/infra story with prizes: gpu worker wiring, vultr-backed storage/db story, and judge-facing product evidence
+- [pending] align the repo and infrastructure story with GPU worker wiring, hosted storage/database support, and judge-facing product evidence
 - [completed] align the live-ai wiring slice so stub vs real mode resolve from one config story
 - [completed] make backend local startup/install less misleading for real ai usage
 - [completed] tighten safe config mismatches in backend/ai wiring without adding network assumptions
 - [completed] run targeted verification for provider mode imports and dev startup checks
 - [completed] mount `ai.services.health` into the backend under `/api/ai` so observability is reachable from the main app
-- [completed] wire an optional gpu worker path into local compose without breaking the default apps/web + apps/api + db loop
-- [completed] tighten docs and env examples for the S3 + database + gpu worker + ai observability demo story
+- [completed] wire an optional GPU worker path into local compose without breaking the default apps/web + apps/api + db loop
+- [completed] tighten docs and environment examples for object storage, PostgreSQL, the GPU worker, and AI observability
 - [completed] run targeted verification for backend route mounting, compose validity, and docs accuracy
 
 # review
@@ -69,10 +69,10 @@
 - live-ai prereqs: real mode now fails fast with a clear `GEMINI_API_KEY` message, `elevenlabs` errors clearly when its key is missing, and the dev backend script prints whether it is booting stub or real mode before uvicorn starts.
 - local install path: `apps/api/requirements.txt` now includes `google-genai` and `python-dotenv`, which were already assumed by the real-provider code path and infra docker image but missing from the API's local install story.
 - config tightening: `MEDIA_URL_MODE` now normalizes case and validates allowed values, backend settings expose `ai_mode` / readiness helpers, and `/api/health` now reports ai mode plus storage mode so the running app advertises what it's actually wired to.
-- verification: `bash -n scripts/dev_api.sh` passed, `apps/api/.venv/bin/python -m py_compile ...` passed for the touched python files, stub-mode import plus `/api/health` check passed, explicit real-mode import without `GEMINI_API_KEY` now fails with the expected clear runtime error, and `PYTHONPATH=\"$PWD/apps:$PWD/apps/api\" USE_AI_STUBS=true apps/api/.venv/bin/python -m pytest apps/ai/tests/test_adapters.py -q` passed (`6 passed, 2 skipped`).
+- verification: `bash -n scripts/dev_api.sh` passed, the API modules compiled, stub-mode health passed, and real mode without the required key failed clearly.
 - observability slice: `apps/api/app/main.py` now mounts `ai.services.health` at `/api/ai`, so the main API serves `/api/ai/health`, `/api/ai/timeline`, and `/api/ai/stream` without a sidecar app.
-- local infra slice: `infra/docker-compose.yml` now defaults compose-backend traffic to local postgres and adds a profile-gated `gpu-worker` service. default `frontend + backend + db` still stays lightweight; gpu startup is opt-in.
-- docs slice: `README.md` and `.env.example` now spell out the demo path clearly: `USE_AI_STUBS=false`, hosted postgres for state, S3 for media, `GPU_WORKER_URL` for sam/clip, and observability endpoints to keep open during the demo.
+- local infra slice: `compose.yaml` defaults API traffic to local PostgreSQL and adds a profile-gated vision worker. The default `web + api + db` stack stays lightweight; GPU startup is opt-in.
+- docs slice: `README.md` and `.env.example` describe real AI mode, PostgreSQL state, S3 media, the vision worker, and observability endpoints.
 - verification: backend route smoke passed with `TestClient` for `/api/health`, `/api/ai/health`, and `/api/ai/timeline?last_n=2`. compose verification was limited to yaml parsing because `docker` is not installed in this sandbox, so i could not run `docker compose config` or boot the gpu profile here.
 - onboarding flow cleanup: landing now routes into a dedicated `/start` hub, `projects` and `editor` now hard-gate anonymous users back into sign-in, and first-time signed-in users get a short orientation screen before the full studio.
 - flow simplification pass: `open studio` now defaults to the library instead of a start hub, `new reel` jumps straight into the editor, and `/start` is reduced to auth/onboarding-only instead of a general-purpose intermediary page.
@@ -84,7 +84,7 @@
 - vibe/pro convergence pass: `useGenerationSession` is now the one real generation controller, continuity callbacks hang off that shared hook, and vibe accepts now kick off the same entity-discovery flow the pro inspector uses.
 - studio shell cleanup: the right rail no longer collapses into a disconnected chat-only pane in vibe mode. checklist + inspector stay mounted, and the agent lives as a tab inside the same rail so clip context, continuity state, and chat stop competing as separate products.
 - agent surface cleanup: agent history now preserves prior assistant/model turns instead of downgrading them to user messages, export now has a dedicated `get_export_status` tool, and the agent system prompt reflects the actual preview/snapshot/score/remix workflow instead of pretending the product ends at generate-and-accept.
-- verification: `bun run lint` passed, `bun run build` passed twice after the refactor, and `python3 -m py_compile apps/api/app/api/routes/agent.py apps/api/app/services/agent_tools.py` passed.
+- verification: lint and build passed after the refactor, and the touched API modules compiled.
 - vibe edit flow cleanup: both `VibePrompt` and the inspector ai tab now derive a real playhead-centered edit window, pass that exact window through generation, and preserve the original source clip separately so accept can patch the right range back into the timeline.
 - vibe timeline integrity: generated accepts now use `replace_range` when the ai target is only a subrange, which stops vibe edits from nuking an entire source clip just because the user paused on one moment.
 - scrubber truthfulness: vibe scrubber segment markers now come from accumulated timeline spans rather than `sourceStart/sourceEnd`, so the scrubber finally reflects where clips actually sit in the edited reel.

@@ -12,13 +12,13 @@ REQUIRED = (
     Path("apps/web/src/app"),
     Path("apps/api/app/main.py"),
     Path("apps/api/tests"),
-    Path("apps/vision-worker/main.py"),
+    Path("apps/api/vision-worker/main.py"),
     Path("scripts/dev_api.sh"),
 )
 FORBIDDEN_DIRS = (
     Path("apps") / "frontend",
     Path("apps") / "backend",
-    Path("apps") / "api" / "vision-worker",
+    Path("apps") / "vision-worker",
 )
 FORBIDDEN_TEXT = (
     "apps/" + "frontend",

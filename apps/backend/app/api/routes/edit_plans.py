@@ -60,6 +60,7 @@ def _response(plan: EditPlanRecord) -> EditPlanResponse:
         warnings=list(plan.warnings_json or []),
         chunks=chunks,
         status=plan.status,
+        adaptive_generation_enabled=get_settings().adaptive_edit_planning,
     )
 
 

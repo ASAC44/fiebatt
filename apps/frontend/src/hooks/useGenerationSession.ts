@@ -5,6 +5,7 @@ import {
   accept,
   createEditPlan,
   generate,
+  getHealth,
   pollJob,
   streamJobEvents,
   type AcceptResp,
@@ -53,12 +54,14 @@ export function useGenerationSession({
   const [plan, setPlan] = useState<EditPlanResp | null>(null);
   const [planning, setPlanning] = useState(false);
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
+  const [adaptivePlanningEnabled, setAdaptivePlanningEnabled] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [variants, setVariants] = useState<Variant[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [acceptingIdx, setAcceptingIdx] = useState<number | null>(null);
   const [logs, setLogs] = useState<GenerationLogEntry[]>([]);
+  const [result, setResult] = useState<JobResp | null>(null);
   const jobIdRef = useRef<string | null>(null);
   const generationTargetRef = useRef<GenerationTarget | null>(null);
   const streamCtlRef = useRef<AbortController | null>(null);
@@ -69,7 +72,8 @@ export function useGenerationSession({
     !!clip.projectId &&
     !!prompt.trim() &&
     !planning &&
-    !busy;
+    !busy &&
+    adaptivePlanningEnabled !== null;
 
   function updatePrompt(value: string) {
     setPrompt(value);
@@ -89,6 +93,7 @@ export function useGenerationSession({
     setErr(null);
     setAcceptingIdx(null);
     setLogs([]);
+    setResult(null);
     jobIdRef.current = null;
     generationTargetRef.current = null;
     setPlan(null);
@@ -102,12 +107,31 @@ export function useGenerationSession({
   }, [clip?.id, selectionId]);
 
   useEffect(() => {
+    let cancelled = false;
+    void getHealth()
+      .then((health) => {
+        if (!cancelled) {
+          setAdaptivePlanningEnabled(
+            health.features?.adaptive_edit_planning === true,
+          );
+        }
+      })
+      .catch(() => {
+        // An older/unavailable backend must retain the known-safe legacy path.
+        if (!cancelled) setAdaptivePlanningEnabled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     return () => closeStream();
   }, []);
 
   async function run(): Promise<boolean> {
     if (!canGenerate || !clip || !clip.projectId) return false;
-    if (bbox && !plan) {
+    if (bbox && adaptivePlanningEnabled && !plan) {
       if (selectionId) {
         const planned = await preparePlan(undefined, true);
         if (planned) return true;
@@ -116,6 +140,10 @@ export function useGenerationSession({
           "Precise selection unavailable. Rendering with legacy fixed window.",
         );
       }
+    } else if (bbox && adaptivePlanningEnabled === false) {
+      setFallbackNotice(
+        "Adaptive planning is disabled by the backend. Rendering with the legacy fixed window.",
+      );
     }
     const baseClip = sourceClip ?? clip;
     closeStream();
@@ -123,6 +151,7 @@ export function useGenerationSession({
     setErr(null);
     setStatus("queued");
     setVariants([]);
+    setResult(null);
     setAcceptingIdx(null);
     setLogs([]);
     generationTargetRef.current = {
@@ -175,6 +204,7 @@ export function useGenerationSession({
       if (final.status !== "done" || !final.variants.length) {
         throw new Error(final.error || "generation failed");
       }
+      setResult(final);
       setVariants(final.variants);
       return true;
     } catch (e) {
@@ -203,6 +233,18 @@ export function useGenerationSession({
         explicit_start_ts: explicitRange?.start,
         explicit_end_ts: explicitRange?.end,
       });
+      if (!next.adaptive_generation_enabled) {
+        setPlan(null);
+        setAdaptivePlanningEnabled(false);
+        if (allowLegacyFallback) {
+          setFallbackNotice(
+            "Adaptive planning is disabled by the backend. Rendering with the legacy fixed window.",
+          );
+        } else {
+          setErr("Adaptive planning was disabled before this plan could be used.");
+        }
+        return false;
+      }
       setPlan(next);
       setFallbackNotice(null);
       return true;
@@ -261,6 +303,7 @@ export function useGenerationSession({
     plan,
     planning,
     fallbackNotice,
+    adaptivePlanningEnabled,
     busy,
     status,
     variants,
@@ -269,6 +312,7 @@ export function useGenerationSession({
     acceptingIdx,
     canGenerate,
     logs,
+    result,
     run,
     adjustPlan: (start: number, end: number) => preparePlan({ start, end }),
     acceptVariant,

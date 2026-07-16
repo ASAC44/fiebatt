@@ -67,3 +67,4 @@ class EditPlanResponse(BaseModel):
     warnings: list[str]
     chunks: list[GenerationChunkResponse]
     status: str
+    adaptive_generation_enabled: bool

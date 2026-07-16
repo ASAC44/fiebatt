@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from app.schemas.common import JobStatus
@@ -26,3 +28,11 @@ class JobOut(BaseModel):
     provider: str | None = None
     model: str | None = None
     warnings: list[str] = Field(default_factory=list)
+    execution_window: dict[str, Any] | None = None
+    continuity_validation: dict[str, Any] | None = None
+    generation_quality_state: str | None = None
+    generation_quality_evidence: list[str] = Field(default_factory=list)
+    generation_attempts: int | None = None
+    generated_seconds: float | None = None
+    provider_attempts: list[str] = Field(default_factory=list)
+    localized_compositing: list[dict[str, Any]] = Field(default_factory=list)

@@ -129,6 +129,7 @@ function AiTab({
     plan,
     planning,
     fallbackNotice,
+    adaptivePlanningEnabled,
     busy,
     status,
     variants,
@@ -137,6 +138,7 @@ function AiTab({
     acceptingIdx,
     canGenerate,
     logs,
+    result,
     run,
     adjustPlan,
     acceptVariant,
@@ -157,6 +159,11 @@ function AiTab({
     },
   });
   const activeSession = busy || planning || !!plan || variants.length > 0 || acceptingIdx != null;
+  const displayedWindowLabel = plan
+    ? `${formatPlanTime(plan.edit_core.start_ts)}–${formatPlanTime(plan.edit_core.end_ts)} core`
+    : bbox && adaptivePlanningEnabled
+      ? "adaptive range pending"
+      : activeWindowLabel;
 
   useEffect(() => {
     if (!activeSession) {
@@ -219,7 +226,7 @@ function AiTab({
           entity={entity}
           identifying={identifying}
           layout="panel"
-          windowLabel={activeWindowLabel}
+          windowLabel={displayedWindowLabel}
           session={{
             prompt,
             setPrompt,
@@ -231,11 +238,14 @@ function AiTab({
             acceptingIdx,
             canGenerate,
             logs,
+            result,
             runLabel: plan
               ? "generate planned edit"
-              : bbox
+              : bbox && adaptivePlanningEnabled
                 ? "preview adaptive plan"
-                : "generate variants",
+                : adaptivePlanningEnabled === null
+                  ? "checking generation mode"
+                  : "generate variants",
             notice: fallbackNotice,
             run: runReveal,
             acceptVariant: acceptReveal,

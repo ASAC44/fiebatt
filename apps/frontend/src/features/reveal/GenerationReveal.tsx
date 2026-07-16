@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { narrate, type Variant } from "@/lib/api";
+import { narrate, type JobResp, type Variant } from "@/lib/api";
 import type { GenerationLogEntry } from "@/hooks/useGenerationSession";
 import {
   duration,
@@ -35,6 +35,7 @@ export type RevealSession = {
   acceptingIdx: number | null;
   canGenerate: boolean;
   logs: GenerationLogEntry[];
+  result?: JobResp | null;
   runLabel?: string;
   notice?: string | null;
   run: () => Promise<boolean>;
@@ -64,6 +65,7 @@ export function GenerationReveal({
     acceptingIdx,
     canGenerate,
     logs,
+    result,
     runLabel,
     notice,
     run,
@@ -77,6 +79,12 @@ export function GenerationReveal({
       ? variants[activeVariantIdx]
       : null;
   const promptLocked = busy || hasVariants || acceptingIdx != null;
+  const acceptanceBlocked = result?.generation_quality_state === "hard_fail";
+  const sourcePreviewStart = result?.execution_window?.core_start ?? clip.sourceStart;
+  const sourcePreviewEnd = result?.execution_window?.core_end ?? clip.sourceEnd;
+  const generatedPreviewStart = result?.execution_window?.edit_start_offset ?? 0;
+  const generatedPreviewEnd =
+    result?.execution_window?.edit_end_offset ?? duration(clip);
   const regionSummary = describeRegion(bbox);
   const subjectSummary = identifying
     ? "identifying subject..."
@@ -264,6 +272,7 @@ export function GenerationReveal({
 
       {hasVariants && activeVariant && (
         <div className="reveal__review">
+          {result ? <GenerationOutcome result={result} /> : null}
           <div className="reveal__review-head">
             <div>
               <p className="reveal__eyebrow mono">hero compare</p>
@@ -325,8 +334,8 @@ export function GenerationReveal({
             >
               <SegmentVideo
                 src={clip.url}
-                start={clip.sourceStart}
-                end={clip.sourceEnd}
+                start={sourcePreviewStart}
+                end={sourcePreviewEnd}
                 shouldPlay
               />
             </CompareCard>
@@ -340,8 +349,8 @@ export function GenerationReveal({
               {activeVariant.url ? (
                 <SegmentVideo
                   src={activeVariant.url}
-                  start={0}
-                  end={duration(clip)}
+                  start={generatedPreviewStart}
+                  end={generatedPreviewEnd}
                   shouldPlay
                 />
               ) : (
@@ -368,9 +377,11 @@ export function GenerationReveal({
             <button
               className="reveal__primary"
               onClick={() => void handleAccept(activeVariantIdx ?? 0)}
-              disabled={acceptingIdx != null || !activeVariant.url}
+              disabled={acceptingIdx != null || !activeVariant.url || acceptanceBlocked}
             >
-              {acceptingIdx != null
+              {acceptanceBlocked
+                ? "blocked: continuity validation failed"
+                : acceptingIdx != null
                 ? "applying variant..."
                 : `apply variant ${variantLetter(activeVariantIdx ?? 0)}`}
             </button>
@@ -460,6 +471,43 @@ function ContextPill({ k, v }: { k: string; v: string }) {
         {v}
       </span>
     </div>
+  );
+}
+
+function GenerationOutcome({ result }: { result: JobResp }) {
+  const validation = result.continuity_validation;
+  const composite = result.localized_compositing?.at(-1);
+  const quality = result.generation_quality_state ?? "not reported";
+  const providers = result.provider_attempts?.length
+    ? result.provider_attempts.join(" → ")
+    : result.provider ?? "unknown";
+
+  return (
+    <section
+      className={`reveal__outcome ${quality === "hard_fail" ? "reveal__outcome--blocked" : ""}`}
+      aria-label="generation validation result"
+    >
+      <div className="reveal__outcome-pills mono">
+        <span>quality {quality.replaceAll("_", " ")}</span>
+        <span>seams {validation ? (validation.passed ? "passed" : "failed") : "unavailable"}</span>
+        <span>{result.generation_attempts ?? 1} attempt(s)</span>
+        {result.generated_seconds != null ? (
+          <span>{result.generated_seconds.toFixed(1)} generated seconds</span>
+        ) : null}
+        <span>provider {providers}</span>
+        {composite ? (
+          <span>local composite {composite.applied ? "applied" : "skipped"}</span>
+        ) : null}
+      </div>
+      {result.generation_quality_evidence?.length ? (
+        <p className="reveal__outcome-detail mono">
+          {result.generation_quality_evidence.join(" · ")}
+        </p>
+      ) : null}
+      {result.warnings?.map((warning) => (
+        <p className="reveal__outcome-detail mono" key={warning}>{warning}</p>
+      ))}
+    </section>
   );
 }
 

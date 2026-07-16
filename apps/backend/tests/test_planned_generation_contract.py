@@ -4,6 +4,7 @@ from pydantic import ValidationError
 from app.api.routes.agent import SYSTEM_PROMPT, TOOL_DECLARATIONS
 from app.config.settings import Settings
 from app.schemas.generate import GenerateRequest
+from app.schemas.job import JobOut
 from app.services.agent_tools import TOOL_HANDLERS
 
 
@@ -36,6 +37,34 @@ def test_generate_request_rejects_partial_legacy_shape():
 
 def test_adaptive_generation_is_rollout_gated_by_default():
     assert Settings().adaptive_edit_planning is False
+
+
+def test_generation_job_exposes_continuity_and_core_preview_metadata():
+    response = JobOut(
+        job_id="job-1",
+        kind="generate",
+        status="done",
+        execution_window={
+            "adaptive": True,
+            "core_start": 4.0,
+            "core_end": 6.0,
+            "context_start": 3.0,
+            "context_end": 7.0,
+            "edit_start_offset": 1.0,
+            "edit_end_offset": 3.0,
+            "pre_handle": 1.0,
+            "post_handle": 1.0,
+        },
+        continuity_validation={"passed": True, "issues": [], "sampled_frames": 12},
+        generation_quality_state="pass",
+        generation_attempts=2,
+        generated_seconds=8.0,
+        provider_attempts=["wan", "veo"],
+    )
+
+    assert response.execution_window["edit_start_offset"] == 1.0
+    assert response.continuity_validation["passed"] is True
+    assert response.provider_attempts == ["wan", "veo"]
 
 
 def test_agent_defaults_to_local_plan_not_full_timeline():

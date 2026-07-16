@@ -1,4 +1,4 @@
-# lessons
+# Engineering lessons
 
 - when the repo has a real frontend app, keep it inside `apps/frontend/` and leave the repo root as orchestration, docs, and config only.
 - if a route should only exist for signed-in users, gate it explicitly at the route layer and preserve intent through auth. don't let anonymous fallthrough create fake "works sometimes" navigation.

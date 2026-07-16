@@ -1,4 +1,4 @@
-# todo
+# Project notes
 
 - [completed] inspect sam bbox bugs across the preview overlay and identify/generate frame selection
 - [completed] patch the preview/bounding box overlay so normalized coords map to the actual visible video area

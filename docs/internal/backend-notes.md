@@ -1,3 +1,5 @@
+# Backend notes
+
 - [x] inspect existing route, storage, ffmpeg, and timeline patterns
 - [x] add preview response schemas
 - [x] add preview route with frame, strip, and range endpoints

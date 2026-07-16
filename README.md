@@ -137,6 +137,8 @@ apps/
 docs/
   demo-clips/   Demo source clips
   images/       Documentation images
+  internal/     Engineering notes and completed task records
+  plans/        Architecture plans
   product/      Product docs
   reference/    API and architecture docs
 
@@ -179,6 +181,17 @@ From the repository root:
 ```
 
 The backend runs on port `8000` by default.
+
+### Run the full local stack
+
+After installing the frontend, backend, and vision-worker dependencies:
+
+```bash
+bash scripts/dev_all.sh
+```
+
+This starts the frontend, backend, and vision worker together and writes their
+logs to `.dev-logs/`.
 
 ## Codex plugin
 

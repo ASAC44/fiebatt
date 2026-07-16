@@ -1,4 +1,4 @@
-# todo
+# CLI notes
 
 - [x] inspect existing cli patterns in `fiebatt_cli/client.py`, `fiebatt_cli/main.py`, and `fiebatt_cli/commands/generate.py`
 - [x] add new api endpoint wrappers to `FiebattClient`

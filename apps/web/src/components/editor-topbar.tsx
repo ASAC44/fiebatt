@@ -10,6 +10,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProjectNameEditor } from "@/components/project-name-editor";
 
 export function EditorTopbar({
+  projectId,
   projectName,
   mode = "vibe",
   onModeChange,
@@ -22,6 +23,7 @@ export function EditorTopbar({
   canExport = true,
   statusSlot,
 }: {
+  projectId: string | null;
   projectName: string;
   mode?: "vibe" | "pro";
   onModeChange?: (mode: "vibe" | "pro") => void;
@@ -47,7 +49,7 @@ export function EditorTopbar({
             src="/logo.png"
             width={28}
           />
-          feibatt
+          fiebatt
         </Link>
         <div className="h-5 w-px bg-border" />
         <Button asChild aria-label="Back to projects" size="icon-sm" variant="ghost">
@@ -56,22 +58,11 @@ export function EditorTopbar({
           </Link>
         </Button>
         <div className="flex items-center gap-1">
-          <Button className="h-8 px-2.5 text-xs" onClick={onImport} variant="ghost">
-            Files
-          </Button>
-          <Button className="h-8 px-2.5 text-xs" variant="ghost">
-            Edit
-          </Button>
-          <Button
-            className="h-8 px-2.5 text-xs"
-            onClick={() => onModeChange?.(mode === "vibe" ? "pro" : "vibe")}
-            variant="ghost"
-          >
-            View
-          </Button>
-          <Button className="h-8 px-2.5 text-xs" onClick={onShowShortcuts} variant="ghost">
-            Help
-          </Button>
+          {onImport ? (
+            <Button className="h-8 px-2.5 text-xs" onClick={onImport} variant="ghost">
+              Upload
+            </Button>
+          ) : null}
           <Button className="h-8 px-2.5 text-xs" onClick={onCompare} variant="ghost">
             Compare
           </Button>
@@ -81,7 +72,7 @@ export function EditorTopbar({
         </div>
       </div>
 
-      <ProjectNameEditor initialName={projectName} />
+      <ProjectNameEditor initialName={projectName} key={projectId ?? "new"} projectId={projectId} />
 
       <div className="flex items-center justify-end gap-1.5">
         {statusSlot}

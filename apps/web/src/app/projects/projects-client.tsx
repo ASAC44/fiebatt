@@ -9,56 +9,30 @@ import { Loader2, Plus } from "lucide-react";
 import {
   deleteProject,
   listProjects,
+  logout,
   me,
   type Me,
   type ProjectListItem,
 } from "@/lib/api";
-import { clearAuthToken, hasAuthToken } from "@/lib/auth";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { ProjectCard } from "@/components/project-card";
-
-const MOCK_PROJECTS = [
-  {
-    id: "mock-001",
-    title: "court energy",
-    meta: "0:18 · draft",
-    lastEdited: "2h ago",
-    imageUrl: "/mock-project-1.jpg",
-  },
-  {
-    id: "mock-002",
-    title: "halftime cut",
-    meta: "0:42 · concept",
-    lastEdited: "yesterday",
-    imageUrl: "/mock-project-2.jpg",
-  },
-  {
-    id: "mock-003",
-    title: "final buzzer",
-    meta: "1:06 · placeholder",
-    lastEdited: "3d ago",
-    imageUrl: "/mock-project-3.jpg",
-  },
-];
 
 export function ProjectsClient() {
   const router = useRouter();
   const [items, setItems] = useState<ProjectListItem[] | null>(null);
   const [profile, setProfile] = useState<Me | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
     let alive = true;
-    if (!hasAuthToken()) {
-      router.replace("/login?next=/projects");
-      return () => {
-        alive = false;
-      };
-    }
-
     Promise.all([me(), listProjects()])
       .then(([currentUser, projects]) => {
+        if (!currentUser.signed_in) {
+          router.replace("/login?next=/projects");
+          return;
+        }
         if (alive) setProfile(currentUser);
         if (alive) setItems(projects);
       })
@@ -69,10 +43,10 @@ export function ProjectsClient() {
     return () => {
       alive = false;
     };
-  }, [router]);
+  }, [router, loadAttempt]);
 
-  function handleLogout() {
-    clearAuthToken();
+  async function handleLogout() {
+    await logout().catch(() => undefined);
     router.replace("/login");
   }
 
@@ -80,6 +54,10 @@ export function ProjectsClient() {
   const avatarLetter = (profile?.email?.[0] || "V").toUpperCase();
 
   async function handleDelete(projectId: string) {
+    const project = items?.find((item) => item.project_id === projectId);
+    if (!window.confirm(`Delete ${project?.name || "this project"}? This cannot be undone.`)) {
+      return;
+    }
     const previous = items;
     setItems((current) =>
       current ? current.filter((item) => item.project_id !== projectId) : current,
@@ -115,7 +93,6 @@ export function ProjectsClient() {
             <Button asChild className="h-10 px-4 text-sm" variant="ghost">
               <Link href="/settings">Settings</Link>
             </Button>
-            <Button className="h-10 px-4 text-sm">Go premium</Button>
             <Button className="h-10 px-4 text-sm" onClick={handleLogout} variant="ghost">
               Log out
             </Button>
@@ -149,19 +126,38 @@ export function ProjectsClient() {
         </div>
 
         {error ? (
-          <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-            {error}
+          <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-5 text-sm text-destructive">
+            <p>{error}</p>
+            <Button
+              className="mt-4"
+              onClick={() => {
+                setError(null);
+                setItems(null);
+                setLoadAttempt((value) => value + 1);
+              }}
+              variant="outline"
+            >
+              Try again
+            </Button>
           </div>
-        ) : null}
-
-        {items === null ? (
+        ) : items === null ? (
           <div className="flex min-h-64 items-center justify-center rounded-lg border border-border bg-card text-sm text-muted-foreground">
             <Loader2 className="mr-2 animate-spin" />
             Loading projects
           </div>
+        ) : items.length === 0 ? (
+          <div className="flex min-h-64 flex-col items-center justify-center rounded-lg border border-dashed border-border bg-card/40 px-6 text-center">
+            <h2 className="text-lg font-medium">No projects yet</h2>
+            <p className="mt-2 max-w-md text-sm text-muted-foreground">
+              Upload a video to create your first project.
+            </p>
+            <Button asChild className="mt-5">
+              <Link href="/editor"><Plus />New video</Link>
+            </Button>
+          </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {(items.length ? items : []).map((project) => (
+            {items.map((project) => (
               <ProjectCard
                 href={`/editor?projectId=${project.project_id}`}
                 id={project.project_id}
@@ -169,22 +165,11 @@ export function ProjectsClient() {
                 lastEdited={formatRelative(project.created_at)}
                 meta={`${formatDuration(project.duration)} · ${project.width}x${project.height}`}
                 onDelete={() => handleDelete(project.project_id)}
-                title={project.project_id.slice(0, 8)}
+                title={project.name}
                 videoUrl={project.video_url}
               />
             ))}
 
-            {MOCK_PROJECTS.map((project) => (
-              <ProjectCard
-                href="/editor"
-                id={project.id}
-                imageUrl={project.imageUrl}
-                key={project.id}
-                lastEdited={project.lastEdited}
-                meta={project.meta}
-                title={project.title}
-              />
-            ))}
           </div>
         )}
       </section>

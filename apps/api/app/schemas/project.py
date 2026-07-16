@@ -22,6 +22,7 @@ class EntitySummary(BaseModel):
 
 class ProjectOut(BaseModel):
     project_id: str
+    name: str
     video_url: str
     duration: float
     fps: float

@@ -5,8 +5,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { getProject, listProjects, type ProjectDetail } from "@/lib/api";
-import { hasAuthToken } from "@/lib/auth";
+import { getProject, listProjects, me, type ProjectDetail } from "@/lib/api";
 import { Studio, type StudioInitialProject } from "./Studio";
 
 function toInitialProject(project: ProjectDetail): StudioInitialProject {
@@ -15,7 +14,7 @@ function toInitialProject(project: ProjectDetail): StudioInitialProject {
     videoUrl: project.video_url,
     duration: project.duration,
     fps: project.fps,
-    label: project.project_id.slice(0, 8),
+    label: project.name,
   };
 }
 
@@ -27,32 +26,29 @@ export function EditorClient({ initialProjectId }: { initialProjectId?: string }
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!hasAuthToken()) {
-      const next = initialProjectId
-        ? `/editor?projectId=${encodeURIComponent(initialProjectId)}`
-        : "/editor";
-      router.replace(`/login?next=${encodeURIComponent(next)}`);
-      return;
-    }
-    setAuthAllowed(true);
-
-    if (!initialProjectId) {
-      setProject(undefined);
-      setLoading(false);
-      setError(null);
-      return;
-    }
-
     let cancelled = false;
     setLoading(true);
     setError(null);
 
     Promise.all([
-      getProject(initialProjectId),
-      listProjects().catch(() => null),
+      me(),
+      initialProjectId ? getProject(initialProjectId) : Promise.resolve(null),
+      initialProjectId ? listProjects().catch(() => null) : Promise.resolve(null),
     ])
-      .then(([detail, items]) => {
+      .then(([currentUser, detail, items]) => {
         if (cancelled) return;
+        if (!currentUser.signed_in) {
+          const next = initialProjectId
+            ? `/editor?projectId=${encodeURIComponent(initialProjectId)}`
+            : "/editor";
+          router.replace(`/login?next=${encodeURIComponent(next)}`);
+          return;
+        }
+        setAuthAllowed(true);
+        if (!detail || !initialProjectId) {
+          setProject(undefined);
+          return;
+        }
         const listMatch = items?.find((item) => item.project_id === initialProjectId);
         setProject({
           ...toInitialProject(detail),
@@ -73,6 +69,17 @@ export function EditorClient({ initialProjectId }: { initialProjectId?: string }
     };
   }, [initialProjectId, router]);
 
+  if (error) {
+    return (
+      <main className="grid h-screen place-items-center bg-background px-6 text-center">
+        <div className="max-w-md">
+          <h1 className="text-lg font-semibold">Could not open this video</h1>
+          <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+        </div>
+      </main>
+    );
+  }
+
   if (!authAllowed) {
     return (
       <main className="grid h-screen place-items-center bg-background text-sm text-muted-foreground">
@@ -89,22 +96,12 @@ export function EditorClient({ initialProjectId }: { initialProjectId?: string }
     );
   }
 
-  if (error) {
-    return (
-      <main className="grid h-screen place-items-center bg-background px-6 text-center">
-        <div className="max-w-md">
-          <h1 className="text-lg font-semibold">Could not reopen this video</h1>
-          <p className="mt-2 text-sm text-muted-foreground">{error}</p>
-        </div>
-      </main>
-    );
-  }
-
   return (
     <Studio
       initialProject={project}
-      onExit={() => router.push("/projects")}
-      onLibrary={() => router.push("/projects")}
+      onProjectCreated={(projectId) => {
+        router.replace(`/editor?projectId=${encodeURIComponent(projectId)}`);
+      }}
     />
   );
 }

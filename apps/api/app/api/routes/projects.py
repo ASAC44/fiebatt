@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -25,6 +25,7 @@ class MeResponse(BaseModel):
 
 class ProjectListItem(BaseModel):
     project_id: str
+    name: str
     video_url: str
     duration: float
     fps: float
@@ -65,6 +66,7 @@ async def list_projects(
     return [
         ProjectListItem(
             project_id=p.id,
+            name=p.name,
             video_url=storage.normalize_url_like(p.video_url, fallback=p.video_url),
             duration=p.duration,
             fps=p.fps,
@@ -89,6 +91,36 @@ async def delete_project(
     await db.delete(proj)
     await db.commit()
     return {"status": "deleted", "project_id": project_id}
+
+
+class ProjectUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+@router.patch("/projects/{project_id}", response_model=ProjectListItem)
+async def update_project(
+    project_id: str,
+    body: ProjectUpdate,
+    session: SessionModel = Depends(get_session),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update user-facing project details."""
+    proj = await _load_owned_project(project_id, session, db)
+    proj.name = body.name.strip()
+    if not proj.name:
+        raise HTTPException(status_code=422, detail="project name is required")
+    await db.commit()
+    await db.refresh(proj)
+    return ProjectListItem(
+        project_id=proj.id,
+        name=proj.name,
+        video_url=storage.normalize_url_like(proj.video_url, fallback=proj.video_url),
+        duration=proj.duration,
+        fps=proj.fps,
+        width=proj.width,
+        height=proj.height,
+        created_at=proj.created_at.isoformat(),
+    )
 
 
 async def _load_owned_project(
@@ -132,6 +164,7 @@ async def get_project(
     # URLs, /media URLs, and local paths.
     return ProjectOut(
         project_id=proj.id,
+        name=proj.name,
         video_url=storage.normalize_url_like(proj.video_url, fallback=proj.video_url),
         duration=proj.duration,
         fps=proj.fps,

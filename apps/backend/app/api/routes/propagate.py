@@ -4,10 +4,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.session import get_db
+from app.config.settings import get_settings
 from app.deps import get_runner, get_session
 from app.models.entity import Entity, EntityAppearance
 from app.models.project import Project
-from app.models.propagation import PropagationJob, PropagationResult
+from app.models.job import Variant
+from app.models.propagation import GlobalEditPlan, PropagationJob, PropagationResult
 from app.models.segment import Segment
 from app.models.session import Session as SessionModel
 from app.schemas.propagate import (
@@ -49,21 +51,72 @@ async def propagate(
     db: AsyncSession = Depends(get_db),
     runner = Depends(get_runner),
 ):
-    entity = (
-        await db.execute(
-            select(Entity)
-            .where(Entity.id == body.entity_id)
-            .options(selectinload(Entity.appearances))
-        )
-    ).scalar_one_or_none()
-    if entity is None:
-        raise HTTPException(status_code=404, detail="entity not found")
+    global_plan: GlobalEditPlan | None = None
+    if get_settings().global_edit_planning:
+        if not body.global_plan_id:
+            raise HTTPException(status_code=422, detail="global_plan_id is required")
+        global_plan = await db.get(GlobalEditPlan, body.global_plan_id)
+        if global_plan is None:
+            raise HTTPException(status_code=404, detail="global edit plan not found")
+        proj = await db.get(Project, global_plan.project_id)
+        if proj is None or proj.session_id != session.id:
+            raise HTTPException(status_code=404, detail="global edit plan not found")
+        if global_plan.source_revision != proj.video_url:
+            raise HTTPException(status_code=409, detail="global edit plan is stale")
+        if global_plan.propagation_job_id:
+            return PropagateResponse(
+                propagation_job_id=global_plan.propagation_job_id,
+                global_plan_id=global_plan.id,
+            )
+        entity = await db.get(Entity, global_plan.entity_id)
+        segment = await db.get(Segment, global_plan.reference_segment_id)
+        variant = await db.get(Variant, global_plan.reference_variant_id)
+        if (
+            entity is None
+            or segment is None
+            or segment.project_id != proj.id
+            or not segment.active
+            or variant is None
+            or not variant.url
+        ):
+            raise HTTPException(status_code=422, detail="accepted reference is no longer available")
+        appearances = (
+            await db.execute(
+                select(EntityAppearance).where(
+                    EntityAppearance.entity_id == entity.id,
+                    EntityAppearance.id.in_(global_plan.occurrence_ids_json),
+                )
+            )
+        ).scalars().all()
+        if len(appearances) != len(global_plan.occurrence_ids_json):
+            raise HTTPException(status_code=409, detail="planned occurrences changed")
+        source_variant_url = variant.url
+        prompt = global_plan.prompt
+        auto_apply = False
+    else:
+        if not body.entity_id or not body.source_variant_url or not body.prompt:
+            raise HTTPException(
+                status_code=422,
+                detail="entity_id, source_variant_url, and prompt are required",
+            )
+        entity = (
+            await db.execute(
+                select(Entity)
+                .where(Entity.id == body.entity_id)
+                .options(selectinload(Entity.appearances))
+            )
+        ).scalar_one_or_none()
+        if entity is None:
+            raise HTTPException(status_code=404, detail="entity not found")
+        proj = await db.get(Project, entity.project_id)
+        if proj is None or proj.session_id != session.id:
+            raise HTTPException(status_code=404, detail="entity not found")
+        appearances = list(entity.appearances)
+        source_variant_url = body.source_variant_url
+        prompt = body.prompt
+        auto_apply = body.auto_apply
 
-    proj = await db.get(Project, entity.project_id)
-    if proj is None or proj.session_id != session.id:
-        raise HTTPException(status_code=404, detail="entity not found")
-
-    if not entity.appearances:
+    if not appearances:
         raise HTTPException(
             status_code=422, detail="entity has no other appearances to propagate"
         )
@@ -71,15 +124,15 @@ async def propagate(
     pjob = PropagationJob(
         project_id=proj.id,
         entity_id=entity.id,
-        source_variant_url=body.source_variant_url,
-        prompt=body.prompt,
-        auto_apply=body.auto_apply,
+        source_variant_url=source_variant_url,
+        prompt=prompt,
+        auto_apply=auto_apply,
         status="pending",
     )
     db.add(pjob)
     await db.flush()
 
-    for app in entity.appearances:
+    for app in appearances:
         res = PropagationResult(
             propagation_job_id=pjob.id,
             appearance_id=app.id,
@@ -90,8 +143,16 @@ async def propagate(
     await db.commit()
     await db.refresh(pjob)
 
+    if global_plan is not None:
+        global_plan.propagation_job_id = pjob.id
+        global_plan.status = "running"
+        await db.commit()
+
     runner.submit(pjob.id, lambda: propagate_job.run(pjob.id))
-    return PropagateResponse(propagation_job_id=pjob.id)
+    return PropagateResponse(
+        propagation_job_id=pjob.id,
+        global_plan_id=global_plan.id if global_plan is not None else None,
+    )
 
 
 @router.get("/propagate/{propagation_job_id}", response_model=PropagationStatus)

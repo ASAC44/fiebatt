@@ -16,7 +16,7 @@ from app.ai import services as ai
 from app.db.session import AsyncSessionLocal
 from app.models.entity import Entity, EntityAppearance
 from app.models.project import Project
-from app.models.propagation import PropagationJob, PropagationResult
+from app.models.propagation import GlobalEditPlan, PropagationJob, PropagationResult
 from app.models.segment import Segment
 from app.services import ffmpeg, storage
 
@@ -214,4 +214,13 @@ async def run(job_id: str) -> None:
             pjob.error = "all propagations failed"
         else:
             pjob.status = "done"
+        global_plan = (
+            await db.execute(
+                select(GlobalEditPlan).where(
+                    GlobalEditPlan.propagation_job_id == pjob.id
+                )
+            )
+        ).scalar_one_or_none()
+        if global_plan is not None:
+            global_plan.status = "error" if pjob.status == "error" else "done"
         await db.commit()

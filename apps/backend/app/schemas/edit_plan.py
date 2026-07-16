@@ -70,6 +70,18 @@ class GenerationContext(BaseModel):
         return self.end_ts - self.start_ts
 
 
+class LocalRangeResolution(BaseModel):
+    edit_core: EditCore
+    generation_context: GenerationContext
+    occurrence_start: float
+    occurrence_end: float
+    analysis_start: float
+    analysis_end: float
+    frames_inspected: int = 0
+    confidence: float = Field(ge=0.0, le=1.0)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class LegacyRange(BaseModel):
     """Compatibility boundary for current start_ts/end_ts generation requests."""
 

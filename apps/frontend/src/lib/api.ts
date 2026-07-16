@@ -247,6 +247,10 @@ export type TimelineSaveResp = {
 export type MaskResp = {
   contour: [number, number][]; // normalized 0-1 points forming the mask outline
   contours?: [number, number][][]; // disconnected subject components
+  selection_id?: string | null;
+  mask_url?: string | null;
+  subject_reference_url?: string | null;
+  score?: number | null;
 };
 
 export type IdentifyResp = {

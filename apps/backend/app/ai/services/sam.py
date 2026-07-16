@@ -13,11 +13,19 @@ Both use the same HTTP interface: POST {url} with {image_b64, bbox} → {mask_b6
 import httpx
 import base64
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 from app.ai.services.config import get_settings
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class MaskResult:
+    path: str
+    score: float | None = None
+    candidate_count: int | None = None
 
 
 async def bbox_to_mask(
@@ -35,6 +43,14 @@ async def bbox_to_mask(
     Returns:
         Path to the generated mask image (PNG, white = foreground)
     """
+    return (await bbox_to_mask_result(frame_path, bbox)).path
+
+
+async def bbox_to_mask_result(
+    frame_path: str,
+    bbox: dict[str, float],
+) -> MaskResult:
+    """Return reusable mask metadata without breaking the legacy path contract."""
     settings = get_settings()
     worker_url = settings.vision_worker_url
 
@@ -64,7 +80,15 @@ async def bbox_to_mask(
     mask_path = str(Path(frame_path).with_suffix(".mask.png"))
     Path(mask_path).write_bytes(mask_bytes)
 
-    return mask_path
+    return MaskResult(
+        path=mask_path,
+        score=float(data["score"]) if data.get("score") is not None else None,
+        candidate_count=(
+            int(data["candidate_count"])
+            if data.get("candidate_count") is not None
+            else None
+        ),
+    )
 
 
 async def is_available() -> bool:

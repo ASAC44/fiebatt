@@ -6,6 +6,7 @@ from app.models.timeline_snapshot import TimelineSnapshot
 from app.models.job import Job, Variant
 from app.models.entity import Entity, EntityAppearance
 from app.models.propagation import PropagationJob, PropagationResult
+from app.models.selection import SelectionArtifact
 from app.models.conversation import Conversation, ChatMessage
 from app.models.integration import (
     OAuthAuthorizationCode,
@@ -27,6 +28,7 @@ __all__ = [
     "EntityAppearance",
     "PropagationJob",
     "PropagationResult",
+    "SelectionArtifact",
     "Conversation",
     "ChatMessage",
     "ProviderCredential",

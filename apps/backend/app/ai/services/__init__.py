@@ -33,6 +33,7 @@ import types as _types
 from pathlib import Path
 
 from app.ai.services import _stubs
+from app.ai.services import sam
 from app.ai.services.config import get_settings as _get_ai_settings
 
 

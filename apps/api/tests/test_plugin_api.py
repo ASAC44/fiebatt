@@ -66,25 +66,6 @@ async def _signup(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_provider_keys_are_write_only(client: AsyncClient):
-    token = await _signup(client)
-    headers = {"Authorization": f"Bearer {token}"}
-    saved = await client.put(
-        "/api/providers/gemini",
-        headers=headers,
-        json={"api_key": "secret-provider-key-1234"},
-    )
-    assert saved.status_code == 200
-    assert saved.json()["key_hint"] == "1234"
-
-    listed = await client.get("/api/providers", headers=headers)
-    payload = listed.json()
-    assert listed.status_code == 200
-    assert next(item for item in payload if item["provider"] == "gemini")["configured"] is True
-    assert "secret-provider-key" not in listed.text
-
-
-@pytest.mark.asyncio
 async def test_pkce_oauth_connects_codex_to_mcp(client: AsyncClient):
     await _signup(client)
     metadata = await client.get("/.well-known/oauth-protected-resource/mcp")

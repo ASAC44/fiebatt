@@ -62,13 +62,15 @@ async def test_signup_returns_jwt_and_me(client: AsyncClient):
     assert body["access_token"]
     assert body["user"]["email"] == "test@example.com"
 
-    me = await client.get(
-        "/api/me",
-        headers={"Authorization": f"Bearer {body['access_token']}"},
-    )
+    assert client.cookies.get("fiebatt_session")
+    me = await client.get("/api/me")
     assert me.status_code == 200
     assert me.json()["signed_in"] is True
     assert me.json()["email"] == "test@example.com"
+
+    logout = await client.post("/api/auth/logout")
+    assert logout.status_code == 204
+    assert client.cookies.get("fiebatt_session") is None
 
 
 @pytest.mark.asyncio

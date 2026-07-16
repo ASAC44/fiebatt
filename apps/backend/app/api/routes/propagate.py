@@ -9,7 +9,13 @@ from app.deps import get_runner, get_session
 from app.models.entity import Entity, EntityAppearance
 from app.models.project import Project
 from app.models.job import Variant
-from app.models.propagation import GlobalEditPlan, PropagationJob, PropagationResult
+from app.models.propagation import (
+    GlobalEditPlan,
+    GlobalGenerationChunk,
+    GlobalOccurrencePlan,
+    PropagationJob,
+    PropagationResult,
+)
 from app.models.segment import Segment
 from app.models.session import Session as SessionModel
 from app.schemas.propagate import (
@@ -18,6 +24,7 @@ from app.schemas.propagate import (
     PropagationResultOut,
     PropagationStatus,
 )
+from app.services.global_chunk_sequence import MAX_CHUNK_ATTEMPTS
 from app.services.global_timeline import timeline_revision
 from app.workers import propagate_job
 
@@ -53,9 +60,9 @@ async def propagate(
     runner = Depends(get_runner),
 ):
     global_plan: GlobalEditPlan | None = None
-    if get_settings().global_edit_planning:
-        if not body.global_plan_id:
-            raise HTTPException(status_code=422, detail="global_plan_id is required")
+    if body.global_plan_id:
+        if not get_settings().global_edit_planning:
+            raise HTTPException(status_code=409, detail="global edit planning is disabled")
         global_plan = await db.get(GlobalEditPlan, body.global_plan_id)
         if global_plan is None:
             raise HTTPException(status_code=404, detail="global edit plan not found")
@@ -67,6 +74,49 @@ async def propagate(
         if global_plan.timeline_revision != timeline_revision(proj):
             raise HTTPException(status_code=409, detail="timeline changed after global planning")
         if global_plan.propagation_job_id:
+            existing_job = await db.get(
+                PropagationJob,
+                global_plan.propagation_job_id,
+            )
+            if existing_job is None:
+                raise HTTPException(status_code=409, detail="global propagation job is missing")
+            if existing_job.status == "error":
+                exhausted = (
+                    await db.execute(
+                        select(GlobalGenerationChunk)
+                        .join(GlobalOccurrencePlan)
+                        .where(
+                            GlobalOccurrencePlan.global_plan_id == global_plan.id,
+                            GlobalGenerationChunk.attempts >= MAX_CHUNK_ATTEMPTS,
+                            GlobalGenerationChunk.status != "generated",
+                        )
+                    )
+                ).scalars().first()
+                if exhausted is not None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="global edit retry limit reached; create a new plan",
+                    )
+                existing_job.status = "pending"
+                existing_job.error = None
+                global_plan.status = "running"
+                failed_results = (
+                    await db.execute(
+                        select(PropagationResult).where(
+                            PropagationResult.propagation_job_id == existing_job.id,
+                            PropagationResult.status == "error",
+                        )
+                    )
+                ).scalars().all()
+                for result in failed_results:
+                    result.status = "pending"
+                    result.error = None
+                retry_job_id = existing_job.id
+                await db.commit()
+                runner.submit(
+                    retry_job_id,
+                    lambda: propagate_job.run(retry_job_id),
+                )
             return PropagateResponse(
                 propagation_job_id=global_plan.propagation_job_id,
                 global_plan_id=global_plan.id,

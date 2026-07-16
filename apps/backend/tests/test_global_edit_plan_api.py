@@ -18,12 +18,13 @@ from app.models.propagation import (
     GlobalEditPlan,
     GlobalGenerationChunk,
     GlobalOccurrencePlan,
+    PropagationJob,
     PropagationResult,
 )
 from app.models.segment import Segment
 from app.schemas.timeline import PersistedAsset, PersistedClip, PersistedEDL
 from app.services.global_chunk_sequence import ChunkExecution
-from app.services.global_seam import AssemblyResult
+from app.services.global_seam import AssemblyResult, GlobalSeamError
 from app.workers import global_edit_job, propagate_job
 
 
@@ -338,6 +339,33 @@ async def test_global_propagation_uses_server_verified_plan(global_api):
 
 
 @pytest.mark.asyncio
+async def test_global_rollout_keeps_legacy_propagation_available(global_api):
+    client, sessions, runner, context = global_api
+
+    response = await client.post(
+        "/api/propagate",
+        headers={"X-Session-Id": "global-owner"},
+        json={
+            "entity_id": context["entity_id"],
+            "source_variant_url": "/media/reference.mp4",
+            "prompt": "make the jacket blue",
+            "auto_apply": False,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["global_plan_id"] is None
+    assert len(runner.submissions) == 1
+    async with sessions() as db:
+        job = await db.get(
+            PropagationJob,
+            response.json()["propagation_job_id"],
+        )
+        assert job.status == "pending"
+        assert job.auto_apply is False
+
+
+@pytest.mark.asyncio
 async def test_global_worker_persists_generated_chunk_state(
     global_api,
     monkeypatch,
@@ -376,6 +404,9 @@ async def test_global_worker_persists_generated_chunk_state(
         )
 
     async def assemble_global_occurrence(**kwargs):
+        assert [chunk.output_url for chunk in kwargs["chunks"]] == [
+            "/media/chunk-0.mp4"
+        ]
         return AssemblyResult(
             output_url="/media/occurrence.mp4",
             seams=(),
@@ -471,3 +502,288 @@ async def test_global_worker_persists_generated_chunk_state(
         assert global_clip.kind == "generated"
         assert global_clip.source_start == 0.0
         assert global_clip.source_end == 3.0
+
+
+@pytest.mark.asyncio
+async def test_failed_seam_retries_only_failed_work(global_api, monkeypatch, tmp_path):
+    client, sessions, runner, context = global_api
+    async with sessions() as db:
+        appearance = await db.get(EntityAppearance, context["appearance_ids"][0])
+        track = (
+            await db.execute(
+                select(OccurrenceTrack).where(
+                    OccurrenceTrack.entity_id == context["entity_id"],
+                    OccurrenceTrack.start_ts == 8.0,
+                )
+            )
+        ).scalar_one()
+        appearance.end_ts = 25.0
+        track.end_ts = 25.0
+        await db.commit()
+
+    planned = await client.post(
+        "/api/global-edit-plans",
+        headers={"X-Session-Id": "global-owner"},
+        json={
+            "entity_id": context["entity_id"],
+            "reference_segment_id": context["segment_id"],
+            "scope": "selected_occurrences",
+            "occurrence_ids": [context["appearance_ids"][0]],
+        },
+    )
+    plan_id = planned.json()["plan_id"]
+    started = await client.post(
+        "/api/propagate",
+        headers={"X-Session-Id": "global-owner"},
+        json={"global_plan_id": plan_id},
+    )
+    job_id = started.json()["propagation_job_id"]
+
+    async def prepare_reference_subject(**kwargs):
+        return Path(tmp_path / "accepted-subject.png")
+
+    generation_calls = []
+
+    async def execute_global_chunk(**kwargs):
+        chunk = kwargs["chunk"]
+        generation_calls.append(chunk.index)
+        return ChunkExecution(
+            output_url=f"/media/chunk-{chunk.index}-{len(generation_calls)}.mp4",
+            metadata={"provider": chunk.provider},
+        )
+
+    assembly_calls = 0
+
+    async def assemble_global_occurrence(**kwargs):
+        nonlocal assembly_calls
+        assembly_calls += 1
+        assert all(chunk.output_url for chunk in kwargs["chunks"])
+        if assembly_calls == 1:
+            raise GlobalSeamError("overlap did not match", retry_chunk_index=1)
+        return AssemblyResult(
+            output_url="/media/retried-occurrence.mp4",
+            seams=(),
+            continuity={"entry": {"passed": True}, "exit": {"passed": True}},
+        )
+
+    monkeypatch.setattr(
+        global_edit_job, "prepare_reference_subject", prepare_reference_subject
+    )
+    monkeypatch.setattr(global_edit_job, "execute_global_chunk", execute_global_chunk)
+    monkeypatch.setattr(
+        global_edit_job, "assemble_global_occurrence", assemble_global_occurrence
+    )
+
+    await runner.submissions[0][1]()
+    async with sessions() as db:
+        plan = await db.get(GlobalEditPlan, plan_id)
+        job = await db.get(PropagationJob, job_id)
+        chunks = (
+            await db.execute(
+                select(GlobalGenerationChunk).order_by(GlobalGenerationChunk.index)
+            )
+        ).scalars().all()
+        assert plan.status == "error"
+        assert job.status == "error"
+        assert len(chunks) == 2
+        assert chunks[0].status == "generated"
+        assert chunks[0].output_url == "/media/chunk-0-1.mp4"
+        assert chunks[0].attempts == 1
+        assert chunks[1].status == "planned"
+        assert chunks[1].output_url is None
+        assert chunks[1].attempts == 1
+
+    retried = await client.post(
+        "/api/propagate",
+        headers={"X-Session-Id": "global-owner"},
+        json={"global_plan_id": plan_id},
+    )
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["propagation_job_id"] == job_id
+    assert len(runner.submissions) == 2
+    await runner.submissions[1][1]()
+
+    assert generation_calls == [0, 1, 1]
+    async with sessions() as db:
+        plan = await db.get(GlobalEditPlan, plan_id)
+        job = await db.get(PropagationJob, job_id)
+        chunks = (
+            await db.execute(
+                select(GlobalGenerationChunk).order_by(GlobalGenerationChunk.index)
+            )
+        ).scalars().all()
+        result = (
+            await db.execute(
+                select(PropagationResult).where(
+                    PropagationResult.propagation_job_id == job_id
+                )
+            )
+        ).scalar_one()
+        assert plan.status == "done"
+        assert job.status == "done"
+        assert [chunk.status for chunk in chunks] == ["generated", "generated"]
+        assert [chunk.attempts for chunk in chunks] == [1, 2]
+        assert result.status == "done"
+        assert result.variant_url == "/media/retried-occurrence.mp4"
+
+
+@pytest.mark.asyncio
+async def test_retry_limit_prevents_more_generation(global_api):
+    client, sessions, runner, context = global_api
+    planned = await client.post(
+        "/api/global-edit-plans",
+        headers={"X-Session-Id": "global-owner"},
+        json={
+            "entity_id": context["entity_id"],
+            "reference_segment_id": context["segment_id"],
+            "scope": "selected_occurrences",
+            "occurrence_ids": [context["appearance_ids"][0]],
+        },
+    )
+    plan_id = planned.json()["plan_id"]
+    started = await client.post(
+        "/api/propagate",
+        headers={"X-Session-Id": "global-owner"},
+        json={"global_plan_id": plan_id},
+    )
+    job_id = started.json()["propagation_job_id"]
+
+    async with sessions() as db:
+        plan = await db.get(GlobalEditPlan, plan_id)
+        job = await db.get(PropagationJob, job_id)
+        chunk = (await db.execute(select(GlobalGenerationChunk))).scalar_one()
+        plan.status = "error"
+        job.status = "error"
+        chunk.status = "error"
+        chunk.attempts = 3
+        await db.commit()
+
+    retried = await client.post(
+        "/api/propagate",
+        headers={"X-Session-Id": "global-owner"},
+        json={"global_plan_id": plan_id},
+    )
+    assert retried.status_code == 409
+    assert "retry limit" in retried.json()["detail"]
+    assert len(runner.submissions) == 1
+
+
+@pytest.mark.asyncio
+async def test_plan_limit_rolls_back_all_planning_rows(global_api, monkeypatch):
+    client, sessions, runner, context = global_api
+    monkeypatch.setattr(get_settings(), "global_edit_max_occurrences", 1)
+
+    response = await client.post(
+        "/api/global-edit-plans",
+        headers={"X-Session-Id": "global-owner"},
+        json={
+            "entity_id": context["entity_id"],
+            "reference_segment_id": context["segment_id"],
+            "scope": "all_occurrences",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "at most 1" in response.json()["detail"]
+    assert runner.submissions == []
+    async with sessions() as db:
+        assert (await db.execute(select(GlobalEditPlan))).scalars().all() == []
+        assert (await db.execute(select(GlobalOccurrencePlan))).scalars().all() == []
+        assert (await db.execute(select(GlobalGenerationChunk))).scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_generation_limit_rolls_back_flushed_plan(global_api, monkeypatch):
+    client, sessions, runner, context = global_api
+    monkeypatch.setattr(get_settings(), "global_edit_max_generation_calls", 0)
+
+    response = await client.post(
+        "/api/global-edit-plans",
+        headers={"X-Session-Id": "global-owner"},
+        json={
+            "entity_id": context["entity_id"],
+            "reference_segment_id": context["segment_id"],
+            "scope": "selected_occurrences",
+            "occurrence_ids": [context["appearance_ids"][0]],
+        },
+    )
+
+    assert response.status_code == 422
+    assert "1 generation calls" in response.json()["detail"]
+    assert runner.submissions == []
+    async with sessions() as db:
+        assert (await db.execute(select(GlobalEditPlan))).scalars().all() == []
+        assert (await db.execute(select(GlobalOccurrencePlan))).scalars().all() == []
+        assert (await db.execute(select(GlobalGenerationChunk))).scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_atomic_apply_rolls_back_when_one_result_is_incomplete(global_api):
+    client, sessions, _, context = global_api
+    planned = await client.post(
+        "/api/global-edit-plans",
+        headers={"X-Session-Id": "global-owner"},
+        json={
+            "entity_id": context["entity_id"],
+            "reference_segment_id": context["segment_id"],
+            "scope": "all_occurrences",
+        },
+    )
+    plan_id = planned.json()["plan_id"]
+    started = await client.post(
+        "/api/propagate",
+        headers={"X-Session-Id": "global-owner"},
+        json={"global_plan_id": plan_id},
+    )
+    job_id = started.json()["propagation_job_id"]
+
+    async with sessions() as db:
+        plan = await db.get(GlobalEditPlan, plan_id)
+        job = await db.get(PropagationJob, job_id)
+        occurrences = (
+            await db.execute(
+                select(GlobalOccurrencePlan)
+                .where(GlobalOccurrencePlan.global_plan_id == plan_id)
+                .order_by(GlobalOccurrencePlan.index)
+            )
+        ).scalars().all()
+        results = (
+            await db.execute(
+                select(PropagationResult).where(
+                    PropagationResult.propagation_job_id == job_id
+                )
+            )
+        ).scalars().all()
+        result_by_appearance = {result.appearance_id: result for result in results}
+        first_result = result_by_appearance[occurrences[0].appearance_id]
+        second_result = result_by_appearance[occurrences[1].appearance_id]
+        plan.status = "done"
+        job.status = "done"
+        first_result.status = "done"
+        first_result.variant_url = "/media/first.mp4"
+        second_result.status = "error"
+        second_result.error = "generation failed"
+        await db.commit()
+        first_result_id = first_result.id
+
+    applied = await client.post(
+        f"/api/global-edit-plans/{plan_id}/apply",
+        headers={"X-Session-Id": "global-owner"},
+    )
+    assert applied.status_code == 422
+
+    async with sessions() as db:
+        plan = await db.get(GlobalEditPlan, plan_id)
+        first_result = await db.get(PropagationResult, first_result_id)
+        global_segments = (
+            await db.execute(
+                select(Segment).where(
+                    Segment.project_id == context["project_id"],
+                    Segment.start_ts >= 8.0,
+                )
+            )
+        ).scalars().all()
+        assert plan.status == "done"
+        assert first_result.applied is False
+        assert first_result.segment_id is None
+        assert global_segments == []

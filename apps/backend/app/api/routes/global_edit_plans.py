@@ -166,6 +166,15 @@ async def create_global_edit_plan(
         selected = list(entity.appearances)
     if not selected:
         raise HTTPException(status_code=422, detail="entity has no confirmed occurrences")
+    settings = get_settings()
+    if len(selected) > settings.global_edit_max_occurrences:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"select at most {settings.global_edit_max_occurrences} appearances "
+                "for one global edit"
+            ),
+        )
 
     source_payload = source_job.payload or {}
     accepted_ranges = source_payload.get("accepted_ranges")
@@ -306,6 +315,22 @@ async def create_global_edit_plan(
         ),
         "reference_accepted": True,
     }
+    if generation_calls > settings.global_edit_max_generation_calls:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"plan needs {generation_calls} generation calls; limit is "
+                f"{settings.global_edit_max_generation_calls}"
+            ),
+        )
+    if generated_seconds > settings.global_edit_max_generated_seconds:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"plan needs {generated_seconds:.1f} generated seconds; limit is "
+                f"{settings.global_edit_max_generated_seconds:.1f}"
+            ),
+        )
     await db.commit()
     await db.refresh(plan)
     return await _plan_response(db, plan)

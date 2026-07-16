@@ -23,6 +23,12 @@ SEAM_SAMPLES = 9
 MAX_SEAM_SCORE = 0.22
 
 
+class GlobalSeamError(ValueError):
+    def __init__(self, message: str, *, retry_chunk_index: int):
+        super().__init__(message)
+        self.retry_chunk_index = retry_chunk_index
+
+
 @dataclass(frozen=True, slots=True)
 class SeamFrames:
     timestamp: float
@@ -156,7 +162,13 @@ async def choose_chunk_seam(
         right.payload_json or {},
         (overlap_start + overlap_end) / 2,
     )
-    return select_best_seam(list(samples), bbox=bbox)
+    try:
+        return select_best_seam(list(samples), bbox=bbox)
+    except ValueError as exc:
+        raise GlobalSeamError(
+            str(exc),
+            retry_chunk_index=right.index,
+        ) from exc
 
 
 def _outer_report(report: ContinuityReport, boundaries: set[str]) -> ContinuityReport:
@@ -215,7 +227,10 @@ async def _validate_outer_boundaries(
         reports["entry" if "pre" in boundaries else "exit"] = filtered.metadata()
         if not filtered.passed:
             evidence = filtered.correction_evidence()
-            raise ValueError(f"global occurrence outer continuity failed: {evidence}")
+            raise GlobalSeamError(
+                f"global occurrence outer continuity failed: {evidence}",
+                retry_chunk_index=index,
+            )
     return reports
 
 

@@ -51,6 +51,41 @@ def test_seam_selection_rejects_visually_unrelated_overlap():
         )
 
 
+@pytest.mark.asyncio
+async def test_failed_overlap_targets_right_chunk_for_retry(monkeypatch, tmp_path):
+    left = SimpleNamespace(context_start=0.0, context_end=6.0, index=0)
+    right = SimpleNamespace(
+        context_start=4.0,
+        context_end=10.0,
+        index=1,
+        payload_json={
+            "track_frames": [
+                {
+                    "timestamp": 5.0,
+                    "state": "tracked",
+                    "bbox": BBOX,
+                }
+            ]
+        },
+    )
+
+    monkeypatch.setattr(
+        global_seam,
+        "_read_frame",
+        lambda path, timestamp: _frame(0 if "left" in path.name else 255),
+    )
+    with pytest.raises(global_seam.GlobalSeamError) as error:
+        await global_seam.choose_chunk_seam(
+            left,
+            right,
+            tmp_path / "left.mp4",
+            tmp_path / "right.mp4",
+            fps=10.0,
+        )
+
+    assert error.value.retry_chunk_index == 1
+
+
 def test_outer_report_keeps_only_requested_boundary_issues():
     report = ContinuityReport(
         passed=False,

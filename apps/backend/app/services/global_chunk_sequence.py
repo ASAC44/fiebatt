@@ -5,6 +5,9 @@ from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
 
+MAX_CHUNK_ATTEMPTS = 3
+
+
 @dataclass(frozen=True, slots=True)
 class ChunkState:
     id: str
@@ -67,8 +70,8 @@ async def run_chunk_sequence(
             previous_output = chunk.output_url
             continue
 
-        await mark_started(chunk, expected_input)
         try:
+            await mark_started(chunk, expected_input)
             result = await execute(chunk, previous_output)
             if not result.output_url:
                 raise ValueError("chunk executor returned no output URL")

@@ -475,18 +475,38 @@ export function ContinuityPanel({
           )}
 
           {propagation.error && (
-            <div
-              className="mono"
-              style={{
-                fontSize: 11,
-                color: "#ff9b9b",
-                borderRadius: 8,
-                border: "1px solid rgba(255, 107, 107, 0.2)",
-                background: "rgba(255, 107, 107, 0.06)",
-                padding: 10,
-              }}
-            >
-              {propagation.error}
+            <div style={{ display: "grid", gap: 8 }}>
+              <div
+                className="mono"
+                style={{
+                  fontSize: 11,
+                  color: "#ff9b9b",
+                  borderRadius: 8,
+                  border: "1px solid rgba(255, 107, 107, 0.2)",
+                  background: "rgba(255, 107, 107, 0.06)",
+                  padding: 10,
+                }}
+              >
+                {propagation.error}
+              </div>
+              {globalEnabled && (
+                <button
+                  className="mono"
+                  onClick={() => void (globalPlan ? startPropagation() : prepareGlobalPlan())}
+                  style={{
+                    justifySelf: "start",
+                    borderRadius: 999,
+                    border: "1px solid rgba(255, 196, 87, 0.25)",
+                    background: "rgba(255, 196, 87, 0.08)",
+                    color: "rgba(255, 196, 87, 0.9)",
+                    fontSize: 10,
+                    padding: "6px 12px",
+                    cursor: "pointer",
+                  }}
+                >
+                  {globalPlan ? "retry failed work" : "review plan again"}
+                </button>
+              )}
             </div>
           )}
 

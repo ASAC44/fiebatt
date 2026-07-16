@@ -26,11 +26,12 @@ from app.services.global_chunk_execution import (
     prepare_reference_subject,
 )
 from app.services.global_chunk_sequence import (
+    MAX_CHUNK_ATTEMPTS,
     ChunkExecution,
     ChunkState,
     run_chunk_sequence,
 )
-from app.services.global_seam import assemble_global_occurrence
+from app.services.global_seam import GlobalSeamError, assemble_global_occurrence
 
 
 log = logging.getLogger("fiebatt.jobs.global_edit")
@@ -93,6 +94,10 @@ async def _run_occurrence(
         async with AsyncSessionLocal() as db:
             row = await db.get(GlobalGenerationChunk, chunk_state.id)
             if row is not None:
+                if row.attempts >= MAX_CHUNK_ATTEMPTS:
+                    raise ValueError(
+                        f"chunk retry limit reached after {MAX_CHUNK_ATTEMPTS} attempts"
+                    )
                 row.status = "processing"
                 row.input_revision = input_revision
                 row.output_url = None
@@ -164,6 +169,12 @@ async def _run_occurrence(
     )
     if not outcome.completed:
         return False
+    for chunk, output_url in zip(
+        sorted(chunks, key=lambda item: item.index),
+        outcome.output_urls,
+        strict=True,
+    ):
+        chunk.output_url = output_url
     try:
         assembly = await assemble_global_occurrence(
             project=project,
@@ -174,13 +185,33 @@ async def _run_occurrence(
         error = str(exc).strip() or type(exc).__name__
         log.exception("global occurrence assembly failed")
         async with AsyncSessionLocal() as db:
+            if isinstance(exc, GlobalSeamError):
+                affected = (
+                    await db.execute(
+                        select(GlobalGenerationChunk).where(
+                            GlobalGenerationChunk.occurrence_plan_id
+                            == occurrence_plan_id,
+                            GlobalGenerationChunk.index >= exc.retry_chunk_index,
+                        )
+                    )
+                ).scalars().all()
+                for chunk in affected:
+                    chunk.status = "planned"
+                    chunk.input_revision = None
+                    chunk.output_url = None
+                    chunk.execution_json = {}
+                    chunk.error = error[:500]
             occurrence_row = await db.get(GlobalOccurrencePlan, occurrence_plan_id)
             result_row = await db.get(PropagationResult, result_id)
             if occurrence_row is not None:
                 occurrence_row.status = "error"
+                occurrence_row.output_url = None
+                occurrence_row.seams_json = []
+                occurrence_row.continuity_json = {}
                 occurrence_row.error = error[:500]
             if result_row is not None:
                 result_row.status = "error"
+                result_row.variant_url = None
                 result_row.error = error[:500]
             await db.commit()
         return False

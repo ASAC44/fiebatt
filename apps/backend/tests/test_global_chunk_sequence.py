@@ -162,6 +162,36 @@ async def test_failure_stops_before_dependent_chunks():
 
 
 @pytest.mark.asyncio
+async def test_start_failure_is_persisted_and_stops_sequence():
+    failures = []
+
+    async def execute(chunk, previous):
+        raise AssertionError("executor must not run after start rejection")
+
+    async def started(chunk, revision):
+        raise ValueError("chunk retry limit reached")
+
+    async def succeeded(*args):
+        raise AssertionError("success callback must not run")
+
+    async def failed(chunk, error):
+        failures.append((chunk.id, error))
+
+    outcome = await run_chunk_sequence(
+        [_chunk(0), _chunk(1)],
+        source_revision="source-v1",
+        execute=execute,
+        mark_started=started,
+        mark_succeeded=succeeded,
+        mark_failed=failed,
+    )
+
+    assert outcome.completed is False
+    assert outcome.failed_chunk_id == "chunk-0"
+    assert failures == [("chunk-0", "chunk retry limit reached")]
+
+
+@pytest.mark.asyncio
 async def test_non_contiguous_indexes_are_rejected():
     async def no_op(*args):
         return None

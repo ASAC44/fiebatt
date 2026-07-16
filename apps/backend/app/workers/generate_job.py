@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -52,6 +53,11 @@ from app.services.continuity_validator import (
 from app.services.generation_window import (
     protected_context_prompt,
     resolve_generation_window,
+)
+from app.services.generation_quality import (
+    GenerationQualityAction,
+    corrective_prompt,
+    decide_generation_quality,
 )
 
 log = logging.getLogger("fiebatt.jobs.generate")
@@ -681,11 +687,42 @@ async def run(job_id: str) -> None:
             current_job.payload = current_payload
             await db.commit()
 
-    provider_prompt = (
-        protected_context_prompt(prompt, generation_window)
-        if video_provider in {"wan", "happyhorse"} and source_video_url is not None
-        else prompt
-    )
+    def prompt_for_provider(provider: str, correction: str = "") -> str:
+        base = (
+            protected_context_prompt(prompt, generation_window)
+            if provider in {"wan", "happyhorse"} and source_video_url is not None
+            else prompt
+        )
+        return base + correction
+
+    async def dispatch(provider: str, correction: str = "") -> bool:
+        attempt_mode = select_source_edit_mode(
+            provider,
+            duration=generation_duration,
+            source_video=source_video_url is not None,
+            mask_available=mask_public_url is not None,
+        )
+        attempt_conditioning = replace(
+            generation_conditioning,
+            mask_image_url=(
+                mask_public_url if attempt_mode == "tracked_mask" else None
+            ),
+        )
+        return await _run_variant(
+            job_id=job_id,
+            variant_id=variant_id,
+            clip_path=clip_path,
+            clip_url=clip_url,
+            plan={
+                **plan,
+                "_video_gen_provider": provider,
+                "_edit_prompt": prompt_for_provider(provider, correction),
+            },
+            conditioning=attempt_conditioning,
+            duration=generation_duration,
+            resolution=generation_resolution,
+            source_video_url=source_video_url,
+        )
 
     await _emit(
         job_id,
@@ -699,17 +736,54 @@ async def run(job_id: str) -> None:
         warnings=warnings,
     )
 
-    await _run_variant(
-        job_id=job_id,
-        variant_id=variant_id,
-        clip_path=clip_path,
-        clip_url=clip_url,
-        plan={**plan, "_edit_prompt": provider_prompt},
-        conditioning=generation_conditioning,
-        duration=generation_duration,
-        resolution=generation_resolution,
-        source_video_url=source_video_url,
-    )
+    attempts = 1
+    generated_seconds = generation_duration
+    provider_attempts = [video_provider]
+    fallback_used = False
+    initial_ok = await dispatch(video_provider)
+
+    if generation_window.adaptive and not initial_ok:
+        async with AsyncSessionLocal() as db:
+            failed_variant = await db.get(Variant, variant_id)
+            generation_error = failed_variant.error if failed_variant is not None else "generation failed"
+        failure_decision = decide_generation_quality(
+            score=None,
+            continuity=None,
+            current_provider=video_provider,
+            duration=generation_duration,
+            attempts=attempts,
+            generated_seconds=generated_seconds,
+            fallback_used=fallback_used,
+            source_video_available=source_video_url is not None,
+            generation_error=generation_error,
+        )
+        if failure_decision.action in {
+            GenerationQualityAction.CORRECTIVE_RETRY,
+            GenerationQualityAction.PROVIDER_FALLBACK,
+        }:
+            if failure_decision.action == GenerationQualityAction.PROVIDER_FALLBACK:
+                assert failure_decision.next_provider is not None
+                video_provider = failure_decision.next_provider
+                fallback_used = True
+            attempts += 1
+            generated_seconds += generation_duration
+            provider_attempts.append(video_provider)
+            await _emit(
+                job_id,
+                (
+                    "gen_provider_fallback"
+                    if failure_decision.action == GenerationQualityAction.PROVIDER_FALLBACK
+                    else "gen_retry"
+                ),
+                f"generation failed; retrying with {_provider_label(video_provider)}",
+                attempt=attempts,
+                provider=video_provider,
+                evidence=list(failure_decision.evidence),
+            )
+            initial_ok = await dispatch(
+                video_provider,
+                corrective_prompt(failure_decision.evidence),
+            )
 
     # collect outcome
     async with AsyncSessionLocal() as db:
@@ -789,60 +863,164 @@ async def run(job_id: str) -> None:
         validate_continuity(done[0]),
     )
 
-    needs_retry = isinstance(score, dict) and (
-        int(score.get("visual_coherence") or 0) < 5
-        or int(score.get("prompt_adherence") or 0) < 6
-    )
-    if needs_retry:
-        previous_url = done[0].url
-        previous_description = done[0].description
-        await _emit(
-            job_id,
-            "gen_retry",
-            "quality validation failed; making one corrective generation attempt",
-            attempt=2,
-            previous_score=score,
-        )
-        correction = (
-            "\n\nCORRECTIVE RETRY: The previous result failed quality validation. "
-            "Make every requested action visually distinct, preserve the exact action order and count, "
-            "avoid ghosting or blended limbs, and finish in the requested continuing motion."
-        )
-        await _run_variant(
-            job_id=job_id,
-            variant_id=variant_id,
-            clip_path=clip_path,
-            clip_url=clip_url,
-            plan={**plan, "_edit_prompt": provider_prompt + correction},
-            conditioning=generation_conditioning,
+    quality_state = GenerationQualityAction.PASS
+    quality_evidence: list[str] = []
+    if generation_window.adaptive:
+        decision = decide_generation_quality(
+            score=score,
+            continuity=continuity_report,
+            current_provider=video_provider,
             duration=generation_duration,
-            resolution=generation_resolution,
-            source_video_url=source_video_url,
+            attempts=attempts,
+            generated_seconds=generated_seconds,
+            fallback_used=fallback_used,
+            source_video_available=source_video_url is not None,
         )
-        async with AsyncSessionLocal() as db:
-            retried = await db.get(Variant, variant_id)
-            if retried is not None and retried.status == "done":
-                done = [retried]
+        while decision.action in {
+            GenerationQualityAction.CORRECTIVE_RETRY,
+            GenerationQualityAction.PROVIDER_FALLBACK,
+        }:
+            previous_url = done[0].url
+            previous_description = done[0].description
+            next_provider = video_provider
+            if decision.action == GenerationQualityAction.PROVIDER_FALLBACK:
+                assert decision.next_provider is not None
+                next_provider = decision.next_provider
+                fallback_used = True
+            attempts += 1
+            generated_seconds += generation_duration
+            provider_attempts.append(next_provider)
+            await _emit(
+                job_id,
+                (
+                    "gen_provider_fallback"
+                    if decision.action == GenerationQualityAction.PROVIDER_FALLBACK
+                    else "gen_retry"
+                ),
+                (
+                    f"continuity checks failed; trying {_provider_label(next_provider)}"
+                ),
+                attempt=attempts,
+                provider=next_provider,
+                evidence=list(decision.evidence),
+                generated_seconds=generated_seconds,
+            )
+            succeeded = await dispatch(
+                next_provider,
+                corrective_prompt(decision.evidence),
+            )
+            video_provider = next_provider
+            async with AsyncSessionLocal() as db:
+                retried = await db.get(Variant, variant_id)
+                generation_error = (
+                    retried.error
+                    if retried is not None and not succeeded
+                    else None
+                )
+                if retried is not None and succeeded and retried.status == "done":
+                    done = [retried]
+                elif retried is not None:
+                    await _update_variant(
+                        db,
+                        variant_id,
+                        status="done",
+                        url=previous_url,
+                        description=previous_description,
+                        error=None,
+                    )
+                    restored = await db.get(Variant, variant_id)
+                    if restored is not None:
+                        done = [restored]
+            if succeeded:
                 score, continuity_report = await asyncio.gather(
-                    score_variant(retried),
-                    validate_continuity(retried),
+                    score_variant(done[0]),
+                    validate_continuity(done[0]),
                 )
-            elif retried is not None:
-                await _update_variant(
-                    db,
-                    variant_id,
-                    status="done",
-                    url=previous_url,
-                    description=previous_description,
-                    error=None,
-                )
+            else:
                 await _emit(
                     job_id,
                     "gen_retry_failed",
-                    "corrective attempt failed; retaining the first generated result",
+                    "generation attempt failed; retaining the last rendered result",
+                    provider=next_provider,
+                    error=generation_error,
                 )
+            decision = decide_generation_quality(
+                score=score,
+                continuity=continuity_report,
+                current_provider=video_provider,
+                duration=generation_duration,
+                attempts=attempts,
+                generated_seconds=generated_seconds,
+                fallback_used=fallback_used,
+                source_video_available=source_video_url is not None,
+                generation_error=generation_error,
+            )
+        quality_state = decision.action
+        quality_evidence = list(decision.evidence)
+    else:
+        needs_retry = isinstance(score, dict) and (
+            int(score.get("visual_coherence") or 0) < 5
+            or int(score.get("prompt_adherence") or 0) < 6
+        )
+        if needs_retry:
+            previous_url = done[0].url
+            previous_description = done[0].description
+            attempts += 1
+            generated_seconds += generation_duration
+            provider_attempts.append(video_provider)
+            await _emit(
+                job_id,
+                "gen_retry",
+                "quality validation failed; making one corrective generation attempt",
+                attempt=attempts,
+                previous_score=score,
+            )
+            correction = (
+                "\n\nCORRECTIVE RETRY: The previous result failed quality validation. "
+                "Make every requested action visually distinct, preserve the exact action order and count, "
+                "avoid ghosting or blended limbs, and finish in the requested continuing motion."
+            )
+            succeeded = await dispatch(video_provider, correction)
+            async with AsyncSessionLocal() as db:
+                retried = await db.get(Variant, variant_id)
+                if retried is not None and succeeded and retried.status == "done":
+                    done = [retried]
+                    score, continuity_report = await asyncio.gather(
+                        score_variant(retried),
+                        validate_continuity(retried),
+                    )
+                elif retried is not None:
+                    await _update_variant(
+                        db,
+                        variant_id,
+                        status="done",
+                        url=previous_url,
+                        description=previous_description,
+                        error=None,
+                    )
+                    await _emit(
+                        job_id,
+                        "gen_retry_failed",
+                        "corrective attempt failed; retaining the first generated result",
+                    )
 
     async with AsyncSessionLocal() as db:
+        current_job = await db.get(Job, job_id)
+        if current_job is not None:
+            current_payload = dict(current_job.payload or {})
+            current_payload.update(
+                {
+                    "generation_quality_state": quality_state.value,
+                    "generation_quality_evidence": quality_evidence,
+                    "generation_attempts": attempts,
+                    "generated_seconds": generated_seconds,
+                    "provider_attempts": provider_attempts,
+                    "selected_provider": video_provider,
+                    "selected_model": _provider_model(video_provider),
+                }
+            )
+            current_job.payload = current_payload
+            await db.commit()
         if isinstance(score, dict):
             await _update_variant(
                 db,
@@ -870,6 +1048,15 @@ async def run(job_id: str) -> None:
     await _emit_terminal(
         job_id,
         "done",
-        "generation complete",
+        (
+            "generation complete with a continuity hard-fail"
+            if quality_state == GenerationQualityAction.HARD_FAIL
+            else "generation complete"
+        ),
         variant_url=done[0].url,
+        generation_quality_state=quality_state.value,
+        generation_quality_evidence=quality_evidence,
+        acceptance_blocked=quality_state == GenerationQualityAction.HARD_FAIL,
+        attempts=attempts,
+        generated_seconds=generated_seconds,
     )

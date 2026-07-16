@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.session import get_db
+from app.config.settings import get_settings
 from app.deps import get_runner, get_session
 from app.models.job import Job, Variant
 from app.models.project import Project
@@ -19,6 +20,7 @@ from app.models.segment import Segment
 from app.models.session import Session as SessionModel
 from app.schemas.accept import AcceptRequest, AcceptResponse
 from app.services.entity_discovery import enqueue_entity_discovery
+from app.services.generation_quality import acceptance_allowed, acceptance_block_reason
 from app.workers import entity_job
 
 router = APIRouter(tags=["accept"])
@@ -50,6 +52,12 @@ async def accept(
     )
     if variant is None or variant.status != "done" or not variant.url:
         raise HTTPException(status_code=422, detail="variant not ready")
+    if not acceptance_allowed(
+        job.payload,
+        override_requested=body.continuity_override,
+        override_enabled=get_settings().allow_hard_failed_acceptance,
+    ):
+        raise HTTPException(status_code=409, detail=acceptance_block_reason(job.payload))
 
     if job.start_ts is None or job.end_ts is None:
         raise HTTPException(status_code=422, detail="job has no segment range")

@@ -861,11 +861,13 @@ async def _accept_variant(
 ) -> dict[str, Any]:
     """Accept a variant and apply it to the timeline — mirrors POST /api/accept."""
     from app.services.entity_discovery import enqueue_entity_discovery
+    from app.services.generation_quality import acceptance_allowed, acceptance_block_reason
     from app.workers import entity_job
 
     job_id: str = args["job_id"]
     variant_index: int = args.get("variant_index", 0)
     discover_occurrences: bool = bool(args.get("discover_occurrences", False))
+    continuity_override: bool = bool(args.get("continuity_override", False))
 
     job = (
         await db.execute(
@@ -884,6 +886,12 @@ async def _accept_variant(
     )
     if variant is None or variant.status != "done" or not variant.url:
         raise ValueError("variant not ready")
+    if not acceptance_allowed(
+        job.payload,
+        override_requested=continuity_override,
+        override_enabled=_get_backend_settings().allow_hard_failed_acceptance,
+    ):
+        raise ValueError(acceptance_block_reason(job.payload))
 
     if job.start_ts is None or job.end_ts is None:
         raise ValueError("job has no segment range")

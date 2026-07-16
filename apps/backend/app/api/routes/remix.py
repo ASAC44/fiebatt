@@ -9,12 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.session import get_db
+from app.config.settings import get_settings
 from app.deps import get_session, get_runner
 from app.models.job import Job, Variant
 from app.models.project import Project
 from app.models.segment import Segment
 from app.models.session import Session as SessionModel
 from app.schemas.common import BBox
+from app.services.generation_quality import acceptance_allowed, acceptance_block_reason
 from app.workers import entity_job
 from app.workers import generate_job as generate_worker
 
@@ -57,6 +59,7 @@ class BatchAcceptItem(BaseModel):
     job_id: str
     variant_index: int
     discover_occurrences: bool = False
+    continuity_override: bool = False
 
 
 class BatchAcceptRequest(BaseModel):
@@ -293,6 +296,12 @@ async def batch_accept(
         variant = next((v for v in job.variants if v.index == item.variant_index), None)
         if variant is None or variant.status != "done" or not variant.url:
             raise HTTPException(status_code=422, detail="variant not ready")
+        if not acceptance_allowed(
+            job.payload,
+            override_requested=item.continuity_override,
+            override_enabled=get_settings().allow_hard_failed_acceptance,
+        ):
+            raise HTTPException(status_code=409, detail=acceptance_block_reason(job.payload))
 
         segment_id, entity_job_id = await _accept_variant_for_job(
             db=db,

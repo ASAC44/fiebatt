@@ -339,6 +339,10 @@ TOOL_DECLARATIONS = [
                     type=types.Type.BOOLEAN,
                     description="Search the full reel only when the user explicitly asks to find other occurrences",
                 ),
+                "continuity_override": types.Schema(
+                    type=types.Type.BOOLEAN,
+                    description="Emergency override for a hard-failed seam; works only when the backend operator enables it",
+                ),
             },
             required=["job_id"],
         ),

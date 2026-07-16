@@ -10,14 +10,44 @@ Supports two backends:
 Both use the same HTTP interface: POST {url} with {image_b64, bbox} → {mask_b64}
 """
 
-import httpx
+import asyncio
 import base64
 import logging
+import os
 from pathlib import Path
+from urllib.parse import urlparse
+
+import httpx
 
 from app.ai.services.config import get_settings
 
 log = logging.getLogger(__name__)
+
+
+def _is_huggingface_space(worker_url: str) -> bool:
+    """Return whether a worker URL should be called through Gradio."""
+    parsed = urlparse(worker_url)
+    hostname = (parsed.hostname or "").lower()
+    return hostname.endswith(".hf.space") or (
+        hostname in {"huggingface.co", "www.huggingface.co"}
+        and parsed.path.startswith("/spaces/")
+    )
+
+
+def _call_huggingface_space(worker_url: str, payload: dict) -> dict:
+    """Call the named ZeroGPU Gradio endpoint from a worker thread."""
+    from gradio_client import Client
+
+    token = os.getenv("HF_TOKEN") or None
+    client = Client(
+        worker_url.rstrip("/"),
+        token=token,
+        analytics_enabled=False,
+    )
+    result = client.predict(payload, api_name="/segment")
+    if not isinstance(result, dict):
+        raise TypeError("Hugging Face SAM endpoint returned a non-object response")
+    return result
 
 
 async def bbox_to_mask(
@@ -41,23 +71,25 @@ async def bbox_to_mask(
     frame_bytes = Path(frame_path).read_bytes()
     frame_b64 = base64.b64encode(frame_bytes).decode()
 
-    # modal web endpoints use the class method URL directly
-    # self-hosted workers use {gpu_url}/sam/segment
-    segment_url = (
-        worker_url if "modal.run" in worker_url
-        else f"{worker_url}/sam/segment"
-    )
-
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(
-            segment_url,
-            json={
-                "image_b64": frame_b64,
-                "bbox": bbox,
-            },
+    payload = {"image_b64": frame_b64, "bbox": bbox}
+    if _is_huggingface_space(worker_url):
+        # gradio_client is blocking; keep it off FastAPI's event loop. The
+        # longer timeout includes a possible ZeroGPU queue/cold start.
+        data = await asyncio.wait_for(
+            asyncio.to_thread(_call_huggingface_space, worker_url, payload),
+            timeout=180.0,
         )
-        response.raise_for_status()
-        data = response.json()
+    else:
+        # Modal web endpoints use the class method URL directly. Self-hosted
+        # workers use {worker_url}/sam/segment.
+        segment_url = (
+            worker_url if "modal.run" in worker_url
+            else f"{worker_url.rstrip('/')}/sam/segment"
+        )
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(segment_url, json=payload)
+            response.raise_for_status()
+            data = response.json()
 
     # Save mask
     mask_bytes = base64.b64decode(data["mask_b64"])
@@ -72,10 +104,12 @@ async def is_available() -> bool:
     try:
         worker_url = get_settings().vision_worker_url
 
-        if "modal.run" in worker_url:
+        if _is_huggingface_space(worker_url):
+            health_url = worker_url.rstrip("/")
+        elif "modal.run" in worker_url:
             health_url = worker_url.replace("segment", "health")
         else:
-            health_url = f"{worker_url}/health"
+            health_url = f"{worker_url.rstrip('/')}/health"
 
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(health_url)

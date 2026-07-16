@@ -4,8 +4,7 @@
  *   - Authorization: Bearer <jwt access token> if the user is signed in
  */
 
-import { getAuthToken, redirectToLogin } from "@/lib/auth";
-import { getSettings, type VideoProvider } from "@/lib/settings";
+import { redirectToLogin } from "@/lib/auth";
 
 const SESSION_KEY = "fiebatt.session_id";
 
@@ -28,10 +27,7 @@ async function request<T>(
     headers.set("Content-Type", "application/json");
   }
 
-  const token = getAuthToken();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-
-  const res = await fetch(path, { ...init, headers });
+  const res = await fetch(path, { ...init, headers, credentials: "include" });
   if (res.status === 401) {
     redirectToLogin();
     throw new Error("401 Unauthorized");
@@ -65,31 +61,6 @@ export type Me = {
   signed_in: boolean;
 };
 
-export type ProviderStatus = {
-  provider: "gemini" | "dashscope" | "mesh" | "elevenlabs";
-  configured: boolean;
-  key_hint: string;
-  validated_at: string | null;
-};
-
-export function listProviderKeys(): Promise<ProviderStatus[]> {
-  return request<ProviderStatus[]>("/api/providers");
-}
-
-export function saveProviderKey(provider: ProviderStatus["provider"], apiKey: string) {
-  return request<Pick<ProviderStatus, "provider" | "configured" | "key_hint">>(
-    `/api/providers/${provider}`,
-    { method: "PUT", body: JSON.stringify({ api_key: apiKey }) },
-  );
-}
-
-export function deleteProviderKey(provider: ProviderStatus["provider"]) {
-  return request<{ provider: string; configured: boolean; removed: boolean }>(
-    `/api/providers/${provider}`,
-    { method: "DELETE" },
-  );
-}
-
 export type AuthResponse = {
   access_token: string;
   token_type: "bearer";
@@ -101,6 +72,7 @@ export type AuthResponse = {
 
 export type ProjectListItem = {
   project_id: string;
+  name: string;
   video_url: string;
   duration: number;
   fps: number;
@@ -181,7 +153,6 @@ export type GenerateReq = {
   bbox: BBox;
   prompt: string;
   reference_frame_ts: number;
-  video_gen_provider?: VideoProvider;
 };
 
 export type GenerateRequest = GenerateReq;
@@ -237,7 +208,6 @@ export type CreateEditPlanReq = {
   prompt: string;
   explicit_start_ts?: number;
   explicit_end_ts?: number;
-  video_gen_provider?: VideoProvider;
 };
 
 export type AcceptResp = {
@@ -267,6 +237,7 @@ export type ProjectSegment = {
 
 export type ProjectResp = {
   project_id: string;
+  name: string;
   video_url: string;
   duration: number;
   fps: number;
@@ -479,6 +450,14 @@ export function login(email: string, password: string): Promise<AuthResponse> {
   });
 }
 
+export async function logout(): Promise<void> {
+  const res = await fetch("/api/auth/logout", {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok && res.status !== 204) throw new Error("Could not log out.");
+}
+
 export function listProjects(): Promise<ProjectListItem[]> {
   return request<ProjectListItem[]>("/api/projects");
 }
@@ -495,6 +474,13 @@ export function deleteProject(project_id: string): Promise<{ status: string }> {
   return request<{ status: string }>(`/api/projects/${project_id}`, { method: "DELETE" });
 }
 
+export function updateProject(project_id: string, name: string): Promise<ProjectListItem> {
+  return request<ProjectListItem>(`/api/projects/${project_id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+}
+
 export async function upload(file: File): Promise<UploadResp> {
   const fd = new FormData();
   fd.append("file", file);
@@ -506,20 +492,14 @@ export const uploadProject = upload;
 export function generate(req: GenerateReq): Promise<{ job_id: string }> {
   return request("/api/generate", {
     method: "POST",
-    body: JSON.stringify({
-      video_gen_provider: getSettings().videoProvider,
-      ...req,
-    }),
+    body: JSON.stringify(req),
   });
 }
 
 export function createEditPlan(req: CreateEditPlanReq): Promise<EditPlanResp> {
   return request("/api/edit-plans", {
     method: "POST",
-    body: JSON.stringify({
-      video_gen_provider: getSettings().videoProvider,
-      ...req,
-    }),
+    body: JSON.stringify(req),
   });
 }
 
@@ -564,10 +544,7 @@ export function createGlobalEditPlan(req: {
 }): Promise<GlobalEditPlanResp> {
   return request<GlobalEditPlanResp>("/api/global-edit-plans", {
     method: "POST",
-    body: JSON.stringify({
-      video_gen_provider: getSettings().videoProvider,
-      ...req,
-    }),
+    body: JSON.stringify(req),
   });
 }
 
@@ -709,12 +686,10 @@ export function streamJobEvents(
       const headers = new Headers();
       headers.set("X-Session-Id", getSessionId());
       headers.set("Accept", "text/event-stream");
-      const token = getAuthToken();
-      if (token) headers.set("Authorization", `Bearer ${token}`);
-
       const res = await fetch(`/api/jobs/${jobId}/stream`, {
         headers,
         signal: controller.signal,
+        credentials: "include",
       });
       if (!res.ok || !res.body) {
         throw new Error(`${res.status} ${res.statusText}`);

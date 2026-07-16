@@ -24,6 +24,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://fiebatt:fiebatt@db:5432/fiebatt}
       VISION_WORKER_URL: ${VISION_WORKER_URL:-http://vision-worker:8001}
       USE_AI_STUBS: ${USE_AI_STUBS:-true}
+      APP_ENV: ${APP_ENV:-development}
     volumes:
       - storage:/app/storage
     depends_on:

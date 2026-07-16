@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +11,7 @@ from app.auth.jwt import (
     verify_password,
 )
 from app.db.session import get_db
+from app.config.settings import get_settings
 from app.models.session import Session as SessionModel
 from app.models.user import User
 
@@ -33,10 +34,21 @@ class AuthResponse(BaseModel):
     user: AuthUserOut
 
 
-def _response_for(user: User) -> AuthResponse:
+def _response_for(user: User, response: Response) -> AuthResponse:
     token_user = AuthedUser(id=user.id, email=user.email)
+    token = create_access_token(token_user)
+    settings = get_settings()
+    response.set_cookie(
+        key=settings.auth_cookie_name,
+        value=token,
+        httponly=True,
+        secure=settings.auth_cookie_secure,
+        samesite="lax",
+        max_age=settings.auth_jwt_expires_minutes * 60,
+        path="/",
+    )
     return AuthResponse(
-        access_token=create_access_token(token_user),
+        access_token=token,
         user=AuthUserOut(id=user.id, email=user.email),
     )
 
@@ -52,7 +64,7 @@ def _validate_email(email: str) -> str:
 
 
 @router.post("/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-async def signup(body: AuthRequest, db: AsyncSession = Depends(get_db)):
+async def signup(body: AuthRequest, response: Response, db: AsyncSession = Depends(get_db)):
     email = _validate_email(body.email)
     existing = (
         await db.execute(select(User).where(User.email == email))
@@ -67,11 +79,11 @@ async def signup(body: AuthRequest, db: AsyncSession = Depends(get_db)):
     db.add(SessionModel(id=f"user:{user.id}", user_id=user.id, email=user.email))
     await db.commit()
     await db.refresh(user)
-    return _response_for(user)
+    return _response_for(user, response)
 
 
 @router.post("/login", response_model=AuthResponse)
-async def login(body: AuthRequest, db: AsyncSession = Depends(get_db)):
+async def login(body: AuthRequest, response: Response, db: AsyncSession = Depends(get_db)):
     email = _validate_email(body.email)
     user = (
         await db.execute(select(User).where(User.email == email))
@@ -83,4 +95,16 @@ async def login(body: AuthRequest, db: AsyncSession = Depends(get_db)):
     if session is None:
         db.add(SessionModel(id=f"user:{user.id}", user_id=user.id, email=user.email))
         await db.commit()
-    return _response_for(user)
+    return _response_for(user, response)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(response: Response):
+    settings = get_settings()
+    response.delete_cookie(
+        key=settings.auth_cookie_name,
+        httponly=True,
+        secure=settings.auth_cookie_secure,
+        samesite="lax",
+        path="/",
+    )

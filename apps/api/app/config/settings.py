@@ -1,11 +1,12 @@
 from pathlib import Path
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    app_env: str = "development"
     # database url. defaults to local sqlite so the app boots without postgres.
     # for real deploys set DATABASE_URL=postgresql+asyncpg://fiebatt:fiebatt@host:5432/fiebatt
     database_url: str = "sqlite+aiosqlite:///./fiebatt.db"
@@ -27,11 +28,12 @@ class Settings(BaseSettings):
 
     auth_jwt_secret: str = "change-me"
     auth_jwt_expires_minutes: int = 7 * 24 * 60
+    auth_cookie_name: str = "fiebatt_session"
+    auth_cookie_secure: bool = False
     oauth_access_token_minutes: int = 60
     oauth_refresh_token_days: int = 30
     public_api_url: str = "http://localhost:8000"
     app_url: str = "http://localhost:3001"
-    credential_encryption_key: str = ""
     upload_intent_expiry_seconds: int = 15 * 60
     max_upload_bytes: int = 500 * 1024 * 1024
 
@@ -83,6 +85,31 @@ class Settings(BaseSettings):
         if normalized not in {"presigned", "public"}:
             raise ValueError("MEDIA_URL_MODE must be 'presigned' or 'public'")
         return normalized
+
+    @field_validator("app_env", mode="before")
+    @classmethod
+    def _normalize_app_env(cls, value: object) -> str:
+        normalized = str(value or "development").strip().lower()
+        if normalized not in {"development", "test", "production"}:
+            raise ValueError("APP_ENV must be development, test, or production")
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_production_settings(self):
+        if self.app_env != "production":
+            return self
+        errors: list[str] = []
+        if self.use_ai_stubs:
+            errors.append("USE_AI_STUBS must be false")
+        if len(self.auth_jwt_secret.strip()) < 32 or self.auth_jwt_secret == "change-me":
+            errors.append("AUTH_JWT_SECRET must be a strong secret")
+        if not self.auth_cookie_secure:
+            errors.append("AUTH_COOKIE_SECURE must be true")
+        if not self.real_ai_ready:
+            errors.append("at least one platform AI key must be configured")
+        if errors:
+            raise ValueError("Invalid production configuration: " + "; ".join(errors))
+        return self
 
     @field_validator("database_url", mode="before")
     @classmethod

@@ -17,8 +17,7 @@ import {
   listConversations,
   type ChatMessageResp,
 } from "@/lib/api";
-import { getAuthToken, redirectToLogin } from "@/lib/auth";
-import { getSettings } from "@/lib/settings";
+import { redirectToLogin } from "@/lib/auth";
 import {
   useAgent,
   type AgentAction,
@@ -203,9 +202,6 @@ export function useAgentStream(projectId?: string | null) {
           "Content-Type": "application/json",
           "X-Session-Id": getSessionId(),
         };
-        const token = getAuthToken();
-        if (token) headers.Authorization = `Bearer ${token}`;
-
         // Build conversation history from messages already in state.
         // We snapshot *before* the user message we just dispatched
         // (reducer runs async from our perspective) so we send the
@@ -223,6 +219,7 @@ export function useAgentStream(projectId?: string | null) {
 
         const response = await fetch(agentChatUrl(), {
           method: "POST",
+          credentials: "include",
           headers,
           signal: controller.signal,
           body: JSON.stringify({
@@ -234,7 +231,6 @@ export function useAgentStream(projectId?: string | null) {
             duration: duration ?? null,
             bbox: bbox ?? null,
             selection_id: selectionId ?? null,
-            video_gen_provider: getSettings().videoProvider,
           }),
         });
 

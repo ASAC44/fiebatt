@@ -98,6 +98,7 @@ class GlobalEditPlan(Base):
     requested_provider: Mapped[str] = mapped_column(String, default="auto")
     occurrence_ids_json: Mapped[list[str]] = mapped_column(JSON)
     estimate_json: Mapped[dict] = mapped_column(JSON)
+    reference_json: Mapped[dict] = mapped_column(JSON, default=dict)
     prompt: Mapped[str] = mapped_column(Text)
     source_revision: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="ready")

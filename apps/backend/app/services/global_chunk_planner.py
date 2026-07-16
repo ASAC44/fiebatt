@@ -76,7 +76,7 @@ def _provider_for_occurrence(requested: str, total_context_seconds: float) -> st
                 f"{requested} cannot preserve source-video motion for global edits"
             )
         return requested
-    if total_context_seconds <= VIDEO_PROVIDER_CAPABILITIES["wan"].max_total_duration + 0.05:
+    if total_context_seconds <= VIDEO_PROVIDER_CAPABILITIES["wan"].max_total_duration + 1e-6:
         return "wan"
     return "happyhorse"
 
@@ -138,7 +138,7 @@ def plan_occurrence_chunks(
     while (
         min(project_duration, occurrence_end + HANDLE_SECONDS)
         - max(0.0, cursor - HANDLE_SECONDS)
-        > max_context + 0.05
+        > max_context + 1e-6
     ):
         context_start = max(0.0, cursor - HANDLE_SECONDS)
         target = context_start + max_context - HANDLE_SECONDS
@@ -189,7 +189,7 @@ def plan_occurrence_chunks(
             raise ValueError("provider split produced a core shorter than two seconds")
         if chunk.context_duration < minimum_total - 0.05:
             raise ValueError(f"source video is too short for {provider}")
-        if chunk.context_duration > max_context + 0.05:
+        if chunk.context_duration > max_context + 1e-3:
             raise ValueError("provider split exceeds total duration limit")
     for left, right in zip(chunks, chunks[1:], strict=False):
         if abs(left.edit_end - right.edit_start) > 1e-6:

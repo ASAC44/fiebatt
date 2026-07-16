@@ -151,6 +151,30 @@ async def create_global_edit_plan(
     if not selected:
         raise HTTPException(status_code=422, detail="entity has no confirmed occurrences")
 
+    source_payload = source_job.payload or {}
+    accepted_ranges = source_payload.get("accepted_ranges")
+    accepted_range = (
+        accepted_ranges.get(segment.id, {})
+        if isinstance(accepted_ranges, dict)
+        else {}
+    )
+    reference_media_start = float(accepted_range.get("media_start", 0.0))
+    reference_media_end = float(
+        accepted_range.get("media_end", segment.end_ts - segment.start_ts)
+    )
+    execution_window = source_payload.get("execution_window")
+    context_start = (
+        float(execution_window.get("context_start", segment.start_ts))
+        if isinstance(execution_window, dict)
+        else segment.start_ts
+    )
+    reference_media_timestamp = min(
+        reference_media_end,
+        max(
+            reference_media_start,
+            float(source_job.reference_frame_ts or segment.start_ts) - context_start,
+        ),
+    )
     plan = GlobalEditPlan(
         project_id=project.id,
         entity_id=entity.id,
@@ -160,6 +184,12 @@ async def create_global_edit_plan(
         requested_provider=body.video_gen_provider,
         occurrence_ids_json=[appearance.id for appearance in selected],
         estimate_json={},
+        reference_json={
+            "media_start": reference_media_start,
+            "media_end": reference_media_end,
+            "media_timestamp": reference_media_timestamp,
+            "bbox": source_job.bbox_json or {},
+        },
         prompt=source_job.prompt,
         source_revision=project.video_url,
         status="ready",

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -19,6 +21,8 @@ from app.models.propagation import (
     PropagationResult,
 )
 from app.models.segment import Segment
+from app.services.global_chunk_sequence import ChunkExecution
+from app.workers import global_edit_job, propagate_job
 
 
 class FakeRunner:
@@ -45,6 +49,8 @@ async def global_api(tmp_path, monkeypatch):
             yield session
 
     runner = FakeRunner()
+    monkeypatch.setattr(propagate_job, "AsyncSessionLocal", sessions)
+    monkeypatch.setattr(global_edit_job, "AsyncSessionLocal", sessions)
     app.dependency_overrides[get_db] = override_get_db
     app.state.runner = runner
     transport = ASGITransport(app=app)
@@ -271,3 +277,78 @@ async def test_global_propagation_uses_server_verified_plan(global_api):
         assert plan.status == "running"
         assert len(results) == 1
         assert results[0].appearance_id == context["appearance_ids"][0]
+
+
+@pytest.mark.asyncio
+async def test_global_worker_persists_generated_chunk_state(
+    global_api,
+    monkeypatch,
+    tmp_path,
+):
+    client, sessions, runner, context = global_api
+    planned = await client.post(
+        "/api/global-edit-plans",
+        headers={"X-Session-Id": "global-owner"},
+        json={
+            "entity_id": context["entity_id"],
+            "reference_segment_id": context["segment_id"],
+            "scope": "selected_occurrences",
+            "occurrence_ids": [context["appearance_ids"][0]],
+        },
+    )
+    plan_id = planned.json()["plan_id"]
+    response = await client.post(
+        "/api/propagate",
+        headers={"X-Session-Id": "global-owner"},
+        json={"global_plan_id": plan_id},
+    )
+
+    async def prepare_reference_subject(**kwargs):
+        return Path(tmp_path / "accepted-subject.png")
+
+    calls = []
+
+    async def execute_global_chunk(**kwargs):
+        chunk = kwargs["chunk"]
+        previous = kwargs["previous"]
+        calls.append((chunk.index, previous))
+        return ChunkExecution(
+            output_url=f"/media/chunk-{chunk.index}.mp4",
+            metadata={"provider": chunk.provider},
+        )
+
+    monkeypatch.setattr(
+        global_edit_job,
+        "prepare_reference_subject",
+        prepare_reference_subject,
+    )
+    monkeypatch.setattr(
+        global_edit_job,
+        "execute_global_chunk",
+        execute_global_chunk,
+    )
+    await runner.submissions[0][1]()
+
+    assert response.status_code == 200
+    assert calls == [(0, None)]
+    async with sessions() as db:
+        plan = await db.get(GlobalEditPlan, plan_id)
+        occurrence = (
+            await db.execute(
+                select(GlobalOccurrencePlan).where(
+                    GlobalOccurrencePlan.global_plan_id == plan_id
+                )
+            )
+        ).scalar_one()
+        chunk = (
+            await db.execute(
+                select(GlobalGenerationChunk).where(
+                    GlobalGenerationChunk.occurrence_plan_id == occurrence.id
+                )
+            )
+        ).scalar_one()
+        assert plan.status == "generated"
+        assert occurrence.status == "generated"
+        assert chunk.status == "generated"
+        assert chunk.attempts == 1
+        assert chunk.output_url == "/media/chunk-0.mp4"

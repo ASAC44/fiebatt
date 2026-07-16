@@ -19,9 +19,9 @@ from app.models.project import Project
 from app.models.propagation import GlobalEditPlan, PropagationJob, PropagationResult
 from app.models.segment import Segment
 from app.services import ffmpeg, storage
+from app.workers import global_edit_job
 
 log = logging.getLogger("fiebatt.jobs.propagate")
-
 
 async def _run_one(
     result_id: str,
@@ -162,6 +162,26 @@ async def _run_one(
 
 
 async def run(job_id: str) -> None:
+    async with AsyncSessionLocal() as db:
+        pjob = await db.get(PropagationJob, job_id)
+        if pjob is None:
+            return
+        global_plan = (
+            await db.execute(
+                select(GlobalEditPlan).where(
+                    GlobalEditPlan.propagation_job_id == pjob.id
+                )
+            )
+        ).scalar_one_or_none()
+        if global_plan is not None:
+            global_plan_id = global_plan.id
+        else:
+            global_plan_id = None
+
+    if global_plan_id is not None:
+        await global_edit_job.run(job_id, global_plan_id)
+        return
+
     async with AsyncSessionLocal() as db:
         pjob = await db.get(PropagationJob, job_id)
         if pjob is None:

@@ -59,6 +59,7 @@ from app.services.generation_quality import (
     corrective_prompt,
     decide_generation_quality,
 )
+from app.services.local_compositor import composite_generated_target
 
 log = logging.getLogger("fiebatt.jobs.generate")
 
@@ -521,9 +522,11 @@ async def run(job_id: str) -> None:
     mask_path: str | None = None
     mask_image_url: str | None = None
     subject_reference_path: str | None = None
+    sam_available = False
     if subject_frame_ok and bbox and not bbox_is_full_frame:
         try:
-            if await sam_service.is_available():
+            sam_available = await sam_service.is_available()
+            if sam_available:
                 mask_path = await sam_service.bbox_to_mask(
                     str(subject_frame_path),
                     bbox,
@@ -808,6 +811,96 @@ async def run(job_id: str) -> None:
         await _emit_terminal(job_id, "error", err or "generation failed")
         return
 
+    async def maybe_composite(
+        variant: Variant,
+        provider: str,
+    ) -> Variant:
+        if (
+            not generation_window.adaptive
+            or bbox_is_full_frame
+            or not sam_available
+            or not variant.url
+        ):
+            return variant
+        attempt_mode = select_source_edit_mode(
+            provider,
+            duration=generation_duration,
+            source_video=source_video_url is not None,
+            mask_available=mask_public_url is not None,
+        )
+        if attempt_mode == "tracked_mask":
+            await _emit(
+                job_id,
+                "localized_composite_skipped",
+                "provider already used its native tracked-mask edit path",
+                provider=provider,
+                reason="provider_native_tracked_mask",
+            )
+            return variant
+
+        try:
+            generated_path = await storage.path_from_url(variant.url)
+            composite_path, _ = storage.new_path("generated", "mp4")
+            result = await composite_generated_target(
+                source_path=clip_path,
+                generated_path=generated_path,
+                bbox=bbox,
+                seed_frame_index=mask_frame_id - 1,
+                output_path=composite_path,
+            )
+        except Exception as exc:
+            log.exception("generated-output compositing failed; keeping provider output")
+            result_metadata: dict[str, Any] = {
+                "applied": False,
+                "provider": provider,
+                "reason": f"output compositing unavailable: {exc}",
+            }
+        else:
+            result_metadata = {
+                "applied": result.applied,
+                "provider": provider,
+                "reason": result.reason,
+                "metrics": result.metrics,
+            }
+            if result.applied and result.path is not None:
+                composite_url = await storage.publish(
+                    result.path,
+                    content_type="video/mp4",
+                )
+                async with AsyncSessionLocal() as db:
+                    await _update_variant(db, variant.id, url=composite_url)
+                    refreshed = await db.get(Variant, variant.id)
+                    if refreshed is not None:
+                        variant = refreshed
+
+        async with AsyncSessionLocal() as db:
+            current_job = await db.get(Job, job_id)
+            if current_job is not None:
+                current_payload = dict(current_job.payload or {})
+                history = list(current_payload.get("localized_compositing") or [])
+                history.append(result_metadata)
+                current_payload["localized_compositing"] = history
+                current_job.payload = current_payload
+                await db.commit()
+        await _emit(
+            job_id,
+            (
+                "localized_composite_done"
+                if result_metadata["applied"]
+                else "localized_composite_skipped"
+            ),
+            (
+                "composited tracked generated target over original footage"
+                if result_metadata["applied"]
+                else "kept provider-native output because generated-target tracking was unsafe"
+            ),
+            **result_metadata,
+        )
+        return variant
+
+    if generation_window.adaptive:
+        done = [await maybe_composite(done[0], video_provider)]
+
     async def score_variant(variant: Variant) -> dict | None:
         if not variant.url:
             return None
@@ -932,6 +1025,7 @@ async def run(job_id: str) -> None:
                     if restored is not None:
                         done = [restored]
             if succeeded:
+                done = [await maybe_composite(done[0], video_provider)]
                 score, continuity_report = await asyncio.gather(
                     score_variant(done[0]),
                     validate_continuity(done[0]),

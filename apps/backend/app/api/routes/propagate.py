@@ -18,6 +18,7 @@ from app.schemas.propagate import (
     PropagationResultOut,
     PropagationStatus,
 )
+from app.services.global_timeline import timeline_revision
 from app.workers import propagate_job
 
 router = APIRouter(tags=["propagate"])
@@ -63,6 +64,8 @@ async def propagate(
             raise HTTPException(status_code=404, detail="global edit plan not found")
         if global_plan.source_revision != proj.video_url:
             raise HTTPException(status_code=409, detail="global edit plan is stale")
+        if global_plan.timeline_revision != timeline_revision(proj):
+            raise HTTPException(status_code=409, detail="timeline changed after global planning")
         if global_plan.propagation_job_id:
             return PropagateResponse(
                 propagation_job_id=global_plan.propagation_job_id,
@@ -210,6 +213,18 @@ async def apply_propagation_result(
     proj = await db.get(Project, pjob.project_id)
     if proj is None or proj.session_id != session.id:
         raise HTTPException(status_code=404, detail="propagation job not found")
+    global_plan = (
+        await db.execute(
+            select(GlobalEditPlan).where(
+                GlobalEditPlan.propagation_job_id == propagation_job_id
+            )
+        )
+    ).scalar_one_or_none()
+    if global_plan is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="apply the completed global edit plan as one operation",
+        )
 
     res = await db.get(PropagationResult, result_id)
     if res is None or res.propagation_job_id != propagation_job_id:

@@ -101,6 +101,7 @@ class GlobalEditPlan(Base):
     reference_json: Mapped[dict] = mapped_column(JSON, default=dict)
     prompt: Mapped[str] = mapped_column(Text)
     source_revision: Mapped[str] = mapped_column(String)
+    timeline_revision: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="ready")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

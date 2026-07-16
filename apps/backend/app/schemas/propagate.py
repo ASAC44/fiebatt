@@ -3,6 +3,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.schemas.common import JobStatus
+from app.schemas.timeline import TimelineOut
 
 
 class PropagateRequest(BaseModel):
@@ -81,3 +82,9 @@ class GlobalEditPlanOut(BaseModel):
     occurrences: list[PlannedOccurrenceOut]
     estimate: dict
     status: str
+
+
+class GlobalEditApplyOut(BaseModel):
+    plan_id: str
+    segment_ids: list[str]
+    timeline: TimelineOut

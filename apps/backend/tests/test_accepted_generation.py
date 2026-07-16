@@ -9,6 +9,7 @@ from app.services.accepted_generation import (
     record_accepted_range,
     resolve_committed_timeline_range,
     splice_accepted_clip_into_edl,
+    splice_generated_clip_into_edl,
 )
 from app.workers import export_job
 
@@ -126,6 +127,44 @@ def test_source_range_maps_through_reordered_target_clip_to_timeline_range():
         source_start=6.0,
         source_end=8.0,
     ) == (1.0, 3.0)
+
+
+def test_generic_generated_splice_uses_exact_occurrence_media_range():
+    edl = PersistedEDL(
+        clips=[
+            PersistedClip(
+                id="source",
+                kind="source",
+                url="source.mp4",
+                source_start=0.0,
+                source_end=10.0,
+                media_duration=10.0,
+                project_id="project-1",
+            )
+        ],
+        sources=[],
+    )
+
+    result = splice_generated_clip_into_edl(
+        edl,
+        project_id="project-1",
+        project_fps=24.0,
+        segment_id="global-segment",
+        asset_id="global-result",
+        url="global.mp4",
+        timeline_start=3.0,
+        timeline_end=6.0,
+        media_start=0.0,
+        media_end=3.0,
+        media_duration=3.0,
+    )
+
+    assert [(clip.kind, clip.source_start, clip.source_end) for clip in result.clips] == [
+        ("source", 0.0, 3.0),
+        ("generated", 0.0, 3.0),
+        ("source", 6.0, 10.0),
+    ]
+    assert result.sources[0].id == "global-result"
 
 
 @pytest.mark.asyncio

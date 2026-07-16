@@ -13,19 +13,28 @@ from app.models.propagation import (
     GlobalEditPlan,
     GlobalGenerationChunk,
     GlobalOccurrencePlan,
+    PropagationResult,
 )
 from app.models.segment import Segment
 from app.models.session import Session as SessionModel
 from app.schemas.propagate import (
+    GlobalEditApplyOut,
     GlobalEditPlanOut,
     GlobalEditPlanRequest,
     PlannedChunkOut,
     PlannedOccurrenceOut,
 )
+from app.schemas.timeline import PersistedEDL
+from app.services.accepted_generation import splice_generated_clip_into_edl
 from app.services.global_chunk_planner import (
     plan_occurrence_chunks,
     split_evidence_from_track_frames,
 )
+from app.services.global_timeline import (
+    ensure_source_aligned_timeline,
+    timeline_revision,
+)
+from app.services.timeline_response import build_timeline_response
 
 
 router = APIRouter(prefix="/global-edit-plans", tags=["global-edit-plans"])
@@ -119,6 +128,10 @@ async def create_global_edit_plan(
     project = await db.get(Project, entity.project_id)
     if project is None or project.session_id != session.id:
         raise HTTPException(status_code=404, detail="entity not found")
+    try:
+        await ensure_source_aligned_timeline(db, project)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     segment = await db.get(Segment, body.reference_segment_id)
     if (
         segment is None
@@ -195,6 +208,7 @@ async def create_global_edit_plan(
         },
         prompt=source_job.prompt,
         source_revision=project.video_url,
+        timeline_revision=timeline_revision(project),
         status="ready",
     )
     db.add(plan)
@@ -310,3 +324,113 @@ async def get_global_edit_plan(
     if project is None or project.session_id != session.id:
         raise HTTPException(status_code=404, detail="global edit plan not found")
     return await _plan_response(db, plan)
+
+
+@router.post("/{plan_id}/apply", response_model=GlobalEditApplyOut)
+async def apply_global_edit_plan(
+    plan_id: str,
+    session: SessionModel = Depends(get_session),
+    db: AsyncSession = Depends(get_db),
+):
+    plan = (
+        await db.execute(
+            select(GlobalEditPlan)
+            .where(GlobalEditPlan.id == plan_id)
+            .options(selectinload(GlobalEditPlan.occurrence_plans))
+        )
+    ).scalar_one_or_none()
+    if plan is None:
+        raise HTTPException(status_code=404, detail="global edit plan not found")
+    project = await db.get(Project, plan.project_id)
+    if project is None or project.session_id != session.id:
+        raise HTTPException(status_code=404, detail="global edit plan not found")
+    if plan.status not in {"done", "applied"} or not plan.propagation_job_id:
+        raise HTTPException(status_code=422, detail="global edit results are not ready")
+
+    results = (
+        await db.execute(
+            select(PropagationResult).where(
+                PropagationResult.propagation_job_id == plan.propagation_job_id
+            )
+        )
+    ).scalars().all()
+    result_by_appearance = {result.appearance_id: result for result in results}
+    if len(result_by_appearance) != len(plan.occurrence_plans):
+        raise HTTPException(status_code=409, detail="global edit results are incomplete")
+
+    if plan.status != "applied":
+        if timeline_revision(project) != plan.timeline_revision:
+            raise HTTPException(status_code=409, detail="timeline changed after global planning")
+        try:
+            await ensure_source_aligned_timeline(db, project)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    edl = (
+        PersistedEDL.model_validate(project.timeline_edl)
+        if project.timeline_edl and plan.status != "applied"
+        else None
+    )
+    segment_ids: list[str] = []
+    for occurrence in sorted(plan.occurrence_plans, key=lambda item: item.index):
+        result = result_by_appearance[occurrence.appearance_id]
+        if result.status != "done" or not result.variant_url:
+            raise HTTPException(status_code=422, detail="global edit result is not ready")
+        if result.applied and result.segment_id:
+            segment_ids.append(result.segment_id)
+            continue
+
+        overlapping = (
+            await db.execute(
+                select(Segment).where(
+                    Segment.project_id == project.id,
+                    Segment.active == True,  # noqa: E712
+                    Segment.source == "generated",
+                    Segment.start_ts < occurrence.edit_end,
+                    Segment.end_ts > occurrence.edit_start,
+                )
+            )
+        ).scalars().all()
+        for segment in overlapping:
+            segment.active = False
+        segment = Segment(
+            project_id=project.id,
+            start_ts=occurrence.edit_start,
+            end_ts=occurrence.edit_end,
+            source="generated",
+            url=result.variant_url,
+            order_index=int(occurrence.edit_start * 1000),
+            active=True,
+        )
+        db.add(segment)
+        await db.flush()
+        result.segment_id = segment.id
+        result.applied = True
+        occurrence.status = "applied"
+        segment_ids.append(segment.id)
+        if edl is not None:
+            duration = occurrence.edit_end - occurrence.edit_start
+            edl = splice_generated_clip_into_edl(
+                edl,
+                project_id=project.id,
+                project_fps=project.fps,
+                segment_id=segment.id,
+                asset_id=result.id,
+                url=result.variant_url,
+                timeline_start=occurrence.edit_start,
+                timeline_end=occurrence.edit_end,
+                media_start=0.0,
+                media_end=duration,
+                media_duration=duration,
+            )
+
+    if edl is not None:
+        project.timeline_edl = edl.model_dump(mode="json")
+    plan.status = "applied"
+    await db.commit()
+    await db.refresh(project)
+    return GlobalEditApplyOut(
+        plan_id=plan.id,
+        segment_ids=segment_ids,
+        timeline=await build_timeline_response(db, project),
+    )

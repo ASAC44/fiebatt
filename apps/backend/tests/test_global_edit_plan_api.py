@@ -21,6 +21,7 @@ from app.models.propagation import (
     PropagationResult,
 )
 from app.models.segment import Segment
+from app.schemas.timeline import PersistedAsset, PersistedClip, PersistedEDL
 from app.services.global_chunk_sequence import ChunkExecution
 from app.services.global_seam import AssemblyResult
 from app.workers import global_edit_job, propagate_job
@@ -73,6 +74,10 @@ async def global_api(tmp_path, monkeypatch):
                 project_id=project.id,
                 kind="generate",
                 status="done",
+                start_ts=2.0,
+                end_ts=5.0,
+                reference_frame_ts=3.0,
+                bbox_json={"x": 0.2, "y": 0.1, "w": 0.3, "h": 0.7},
                 prompt="make the jacket blue",
             )
             db.add(source_job)
@@ -97,6 +102,58 @@ async def global_api(tmp_path, monkeypatch):
             )
             db.add(segment)
             await db.flush()
+            project.timeline_edl = PersistedEDL(
+                clips=[
+                    PersistedClip(
+                        id="source-before",
+                        kind="source",
+                        url=project.video_url,
+                        source_start=0.0,
+                        source_end=2.0,
+                        media_duration=project.duration,
+                        project_id=project.id,
+                    ),
+                    PersistedClip(
+                        id=segment.id,
+                        kind="generated",
+                        url=variant.url,
+                        source_start=0.0,
+                        source_end=3.0,
+                        media_duration=3.0,
+                        volume=0.0,
+                        project_id=project.id,
+                    ),
+                    PersistedClip(
+                        id="source-after",
+                        kind="source",
+                        url=project.video_url,
+                        source_start=5.0,
+                        source_end=30.0,
+                        media_duration=project.duration,
+                        project_id=project.id,
+                    ),
+                ],
+                sources=[
+                    PersistedAsset(
+                        id="source",
+                        kind="source",
+                        url=project.video_url,
+                        duration=project.duration,
+                        fps=project.fps,
+                        project_id=project.id,
+                        label="source",
+                    ),
+                    PersistedAsset(
+                        id=variant.id,
+                        kind="generated",
+                        url=variant.url,
+                        duration=3.0,
+                        fps=project.fps,
+                        project_id=project.id,
+                        label="ai edit",
+                    ),
+                ],
+            ).model_dump(mode="json")
             entity = Entity(
                 project_id=project.id,
                 source_segment_id=segment.id,
@@ -375,3 +432,42 @@ async def test_global_worker_persists_generated_chunk_state(
         assert chunk.output_url == "/media/chunk-0.mp4"
         assert result.status == "done"
         assert result.variant_url == "/media/occurrence.mp4"
+
+    applied = await client.post(
+        f"/api/global-edit-plans/{plan_id}/apply",
+        headers={"X-Session-Id": "global-owner"},
+    )
+    assert applied.status_code == 200, applied.text
+    assert len(applied.json()["segment_ids"]) == 1
+    segment_id = applied.json()["segment_ids"][0]
+
+    applied_again = await client.post(
+        f"/api/global-edit-plans/{plan_id}/apply",
+        headers={"X-Session-Id": "global-owner"},
+    )
+    assert applied_again.status_code == 200
+    assert applied_again.json()["segment_ids"] == [segment_id]
+
+    individual = await client.post(
+        f"/api/propagate/{response.json()['propagation_job_id']}/apply/{result.id}",
+        headers={"X-Session-Id": "global-owner"},
+    )
+    assert individual.status_code == 409
+    assert "one operation" in individual.json()["detail"]
+
+    async with sessions() as db:
+        plan = await db.get(GlobalEditPlan, plan_id)
+        project = await db.get(Project, context["project_id"])
+        result = await db.get(PropagationResult, result.id)
+        segment = await db.get(Segment, segment_id)
+        assert plan.status == "applied"
+        assert project.video_url == "/media/source-v1.mp4"
+        assert result.applied is True
+        assert result.segment_id == segment.id
+        assert segment.start_ts == 8.0
+        assert segment.end_ts == 11.0
+        edl = PersistedEDL.model_validate(project.timeline_edl)
+        global_clip = next(clip for clip in edl.clips if clip.id == segment.id)
+        assert global_clip.kind == "generated"
+        assert global_clip.source_start == 0.0
+        assert global_clip.source_end == 3.0

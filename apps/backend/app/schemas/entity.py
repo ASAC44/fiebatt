@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AppearanceOut(BaseModel):
@@ -10,12 +10,24 @@ class AppearanceOut(BaseModel):
     confidence: float
 
 
+class OccurrenceCandidateOut(BaseModel):
+    id: str
+    keyframe_ts: float
+    start_ts: float
+    end_ts: float
+    keyframe_url: str | None = None
+    confidence: float
+    evidence: dict
+    status: str
+
+
 class EntityOut(BaseModel):
     entity_id: str
     description: str
     category: str | None = None
     reference_crop_url: str | None = None
     appearances: list[AppearanceOut]
+    occurrence_candidates: list[OccurrenceCandidateOut] = Field(default_factory=list)
 
 
 class DiscoveryJobOut(BaseModel):

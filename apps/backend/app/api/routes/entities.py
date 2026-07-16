@@ -10,7 +10,12 @@ from app.models.job import Job, Variant
 from app.models.project import Project
 from app.models.segment import Segment
 from app.models.session import Session as SessionModel
-from app.schemas.entity import AppearanceOut, DiscoveryJobOut, EntityOut
+from app.schemas.entity import (
+    AppearanceOut,
+    DiscoveryJobOut,
+    EntityOut,
+    OccurrenceCandidateOut,
+)
 from app.services.entity_discovery import enqueue_entity_discovery
 from app.workers import entity_job
 
@@ -65,7 +70,10 @@ async def get_entity(
         await db.execute(
             select(Entity)
             .where(Entity.id == entity_id)
-            .options(selectinload(Entity.appearances))
+            .options(
+                selectinload(Entity.appearances),
+                selectinload(Entity.occurrence_candidates),
+            )
         )
     ).scalar_one_or_none()
     if entity is None:
@@ -90,5 +98,18 @@ async def get_entity(
                 confidence=a.confidence,
             )
             for a in entity.appearances
+        ],
+        occurrence_candidates=[
+            OccurrenceCandidateOut(
+                id=candidate.id,
+                keyframe_ts=candidate.keyframe_ts,
+                start_ts=candidate.start_ts,
+                end_ts=candidate.end_ts,
+                keyframe_url=candidate.keyframe_url,
+                confidence=candidate.confidence,
+                evidence=candidate.evidence_json or {},
+                status=candidate.status,
+            )
+            for candidate in entity.occurrence_candidates
         ],
     )

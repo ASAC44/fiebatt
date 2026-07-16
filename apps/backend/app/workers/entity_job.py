@@ -7,6 +7,7 @@ Results persist as EntityAppearance rows tied to a single Entity.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from pathlib import Path
 
 from sqlalchemy import select
@@ -18,6 +19,11 @@ from app.models.job import Job
 from app.models.project import Project
 from app.models.segment import Segment
 from app.services import ffmpeg, storage
+from app.services.coarse_occurrence import (
+    persist_coarse_candidates,
+    search_coarse_occurrences,
+    source_revision_cache_dir,
+)
 
 log = logging.getLogger("fiebatt.jobs.entity")
 
@@ -119,7 +125,12 @@ async def run(job_id: str) -> None:
     try:
         from app.config.settings import get_settings as _get_bs
 
-        cache_dir = Path(_get_bs().storage_path) / "keyframes" / proj.id
+        settings = _get_bs()
+        cache_dir = source_revision_cache_dir(
+            Path(settings.storage_path),
+            project_id=proj.id,
+            source_revision=proj.video_url,
+        )
         cache_dir.mkdir(parents=True, exist_ok=True)
         cached_pattern = cache_dir / "frame_%04d.jpg"
         existing = sorted(cache_dir.glob("frame_*.jpg"))
@@ -145,6 +156,82 @@ async def run(job_id: str) -> None:
                 j.status = "error"
                 j.error = f"keyframes failed: {e}"
                 await db.commit()
+        return
+
+    global_planning = settings.global_edit_planning
+    if global_planning and payload.get("discovery_scope") not in {
+        "all_occurrences",
+        "selected_occurrences",
+    }:
+        async with AsyncSessionLocal() as db:
+            j = await db.get(Job, job_id)
+            if j:
+                j.status = "error"
+                j.error = "global discovery requires explicit occurrence scope"
+                await db.commit()
+        return
+
+    if global_planning:
+        try:
+            coarse = await search_coarse_occurrences(
+                identity=identity,
+                reference_crop_path=reference_crop_path,
+                keyframe_paths=keyframe_paths,
+                source_revision=proj.video_url,
+                duration=float(proj.duration),
+                exclude_start=(
+                    float(source_segment_start)
+                    if source_segment_start is not None
+                    else None
+                ),
+                exclude_end=(
+                    float(source_segment_end)
+                    if source_segment_end is not None
+                    else None
+                ),
+                vlm_search=ai.gemini.find_entity_in_keyframes,
+            )
+            browser_candidates = tuple(
+                replace(
+                    candidate,
+                    keyframe_url=keyframe_url_by_path.get(
+                        str(candidate.keyframe_url or ""),
+                        candidate.keyframe_url,
+                    ),
+                )
+                for candidate in coarse.candidates
+            )
+        except Exception as e:
+            log.exception("coarse occurrence search failed")
+            async with AsyncSessionLocal() as db:
+                j = await db.get(Job, job_id)
+                if j:
+                    j.status = "error"
+                    j.error = f"coarse search failed: {e}"
+                    await db.commit()
+            return
+
+        async with AsyncSessionLocal() as db:
+            _, cache_hits = await persist_coarse_candidates(
+                db,
+                entity_id=entity_id,
+                candidates=browser_candidates,
+            )
+            j = await db.get(Job, job_id)
+            if j:
+                next_payload = dict(j.payload or {})
+                next_payload.update(
+                    {
+                        "entity_id": entity_id,
+                        "coarse_candidate_count": len(browser_candidates),
+                        "coarse_cache_hits": cache_hits,
+                        "coarse_analysis_mode": coarse.analysis_mode,
+                        "coarse_frames_inspected": coarse.frames_inspected,
+                    }
+                )
+                j.payload = next_payload
+                j.status = "done"
+            await db.commit()
         return
 
     try:

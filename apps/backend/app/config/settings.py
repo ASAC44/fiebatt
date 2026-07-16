@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     use_ai_stubs: bool = True
     # Plans can be previewed before PR2 changes generation semantics.
     adaptive_edit_planning: bool = False
+    # PR3 global discovery/chunk orchestration. Local and legacy paths stay
+    # unchanged until this independent rollout switch is enabled.
+    global_edit_planning: bool = False
     # Emergency operator escape hatch; request must also explicitly opt in.
     allow_hard_failed_acceptance: bool = False
 

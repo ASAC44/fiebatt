@@ -45,6 +45,10 @@ from app.models.project import Project
 from app.models.session import Session as SessionModel
 from app.services.credentials import provider_overrides
 from app.services import ffmpeg, job_events, storage
+from app.services.continuity_validator import (
+    ContinuityReport,
+    validate_generated_continuity,
+)
 from app.services.generation_window import (
     protected_context_prompt,
     resolve_generation_window,
@@ -741,8 +745,49 @@ async def run(job_id: str) -> None:
             return None
         return await _score_variant_safe(sampled_frames, prompt)
 
-    await _emit(job_id, "score_start", "sampling generated video for quality scoring")
-    score = await score_variant(done[0])
+    async def validate_continuity(variant: Variant) -> ContinuityReport | None:
+        if not variant.url:
+            return None
+        try:
+            generated_path = await storage.path_from_url(variant.url)
+            report = await validate_generated_continuity(
+                source_path=clip_path,
+                generated_path=generated_path,
+                window=generation_window,
+                bbox=bbox,
+            )
+        except Exception as exc:
+            log.exception("continuity validation failed")
+            await _emit(
+                job_id,
+                "continuity_validation_unavailable",
+                f"couldn't validate generated seams: {exc}",
+            )
+            return None
+        async with AsyncSessionLocal() as db:
+            current_job = await db.get(Job, job_id)
+            if current_job is not None:
+                current_payload = dict(current_job.payload or {})
+                current_payload["continuity_validation"] = report.metadata()
+                current_job.payload = current_payload
+                await db.commit()
+        await _emit(
+            job_id,
+            "continuity_validation_done",
+            "multi-frame seam and handle validation complete",
+            **report.metadata(),
+        )
+        return report
+
+    await _emit(
+        job_id,
+        "score_start",
+        "sampling generated video for quality and continuity scoring",
+    )
+    score, continuity_report = await asyncio.gather(
+        score_variant(done[0]),
+        validate_continuity(done[0]),
+    )
 
     needs_retry = isinstance(score, dict) and (
         int(score.get("visual_coherence") or 0) < 5
@@ -778,7 +823,10 @@ async def run(job_id: str) -> None:
             retried = await db.get(Variant, variant_id)
             if retried is not None and retried.status == "done":
                 done = [retried]
-                score = await score_variant(retried)
+                score, continuity_report = await asyncio.gather(
+                    score_variant(retried),
+                    validate_continuity(retried),
+                )
             elif retried is not None:
                 await _update_variant(
                     db,

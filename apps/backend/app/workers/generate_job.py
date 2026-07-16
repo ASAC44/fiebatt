@@ -60,6 +60,7 @@ from app.services.generation_quality import (
     corrective_prompt,
     decide_generation_quality,
 )
+from app.services.generation_telemetry import build_local_flow_telemetry
 from app.services.local_compositor import composite_generated_target
 
 log = logging.getLogger("fiebatt.jobs.generate")
@@ -1102,6 +1103,7 @@ async def run(job_id: str) -> None:
                         "corrective attempt failed; retaining the first generated result",
                     )
 
+    local_flow_telemetry: dict[str, Any] | None = None
     async with AsyncSessionLocal() as db:
         current_job = await db.get(Job, job_id)
         if current_job is not None:
@@ -1117,6 +1119,17 @@ async def run(job_id: str) -> None:
                     "selected_model": _provider_model(video_provider),
                 }
             )
+            local_flow_telemetry = build_local_flow_telemetry(
+                payload=current_payload,
+                window=generation_window,
+                continuity=continuity_report,
+                quality_state=quality_state.value,
+                attempts=attempts,
+                generated_seconds=generated_seconds,
+                provider_attempts=provider_attempts,
+                selected_provider=video_provider,
+            )
+            current_payload["local_flow_telemetry"] = local_flow_telemetry
             current_job.payload = current_payload
             await db.commit()
         if isinstance(score, dict):
@@ -1136,6 +1149,14 @@ async def run(job_id: str) -> None:
         else:
             await _emit(job_id, "score_skipped", "scoring was unavailable; continuing")
         await _update_job(db, job_id, status="done")
+
+    if local_flow_telemetry is not None:
+        await _emit(
+            job_id,
+            "local_flow_metrics",
+            "recorded local generation cost and seam metrics",
+            **local_flow_telemetry,
+        )
 
     log.info(
         "[gen.run] job=%s COMPLETE variant_url=%s",
@@ -1157,4 +1178,5 @@ async def run(job_id: str) -> None:
         acceptance_blocked=quality_state == GenerationQualityAction.HARD_FAIL,
         attempts=attempts,
         generated_seconds=generated_seconds,
+        local_flow_telemetry=local_flow_telemetry,
     )

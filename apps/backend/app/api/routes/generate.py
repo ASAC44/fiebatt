@@ -129,6 +129,22 @@ async def generate(
             "planned_context": plan.range_json if plan else None,
             "adaptive_context_enabled": use_plan_range,
             "target_clip_id": body.target_clip_id,
+            "plan_scope": plan.scope if plan else "legacy",
+            "analysis_duration_ms": (
+                (plan.estimate_json or {}).get("analysis_duration_ms", 0.0)
+                if plan
+                else 0.0
+            ),
+            "analysis_frames": (
+                (plan.estimate_json or {}).get("frames_inspected", 0)
+                if plan
+                else 0
+            ),
+            "fixed_window_baseline_seconds": (
+                float(body.end_ts) - float(body.start_ts)
+                if body.start_ts is not None and body.end_ts is not None
+                else (float(proj.duration) if proj.duration <= 5.0 else 3.0)
+            ),
             "committed_timeline_range": {
                 "start": committed_start,
                 "end": committed_end,

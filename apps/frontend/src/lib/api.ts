@@ -142,6 +142,7 @@ export type JobResp = {
   generated_seconds?: number | null;
   provider_attempts?: string[];
   localized_compositing?: Array<{ applied?: boolean; reason?: string }>;
+  local_flow_telemetry?: Record<string, unknown> | null;
 };
 
 export type GenerationExecutionWindow = {
@@ -209,6 +210,7 @@ export type EditPlanResp = {
   provider_reason: string;
   estimate: {
     analysis_mode: string;
+    analysis_duration_ms: number;
     frames_inspected: number;
     expected_generation_calls: number;
     expected_generated_seconds: number;
@@ -224,6 +226,7 @@ export type HealthResp = {
   ok: boolean;
   features?: {
     adaptive_edit_planning?: boolean;
+    hard_failed_acceptance_override?: boolean;
   };
 };
 

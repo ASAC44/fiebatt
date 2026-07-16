@@ -36,3 +36,4 @@ class JobOut(BaseModel):
     generated_seconds: float | None = None
     provider_attempts: list[str] = Field(default_factory=list)
     localized_compositing: list[dict[str, Any]] = Field(default_factory=list)
+    local_flow_telemetry: dict[str, Any] | None = None

@@ -1,3 +1,5 @@
+import time
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -70,6 +72,7 @@ async def create_edit_plan(
     session: SessionModel = Depends(get_session),
     db: AsyncSession = Depends(get_db),
 ):
+    analysis_started = time.perf_counter()
     project = await db.get(Project, body.project_id)
     if project is None or project.session_id != session.id:
         raise HTTPException(status_code=404, detail="project not found")
@@ -131,6 +134,9 @@ async def create_edit_plan(
 
     estimate = {
         "analysis_mode": gate.estimate.analysis_mode,
+        "analysis_duration_ms": round(
+            (time.perf_counter() - analysis_started) * 1000.0, 3
+        ),
         "frames_inspected": resolution.frames_inspected,
         "expected_generation_calls": 1,
         "expected_generated_seconds": context_duration,

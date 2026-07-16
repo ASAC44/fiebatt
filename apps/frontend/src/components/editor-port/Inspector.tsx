@@ -319,6 +319,7 @@ function EditPlanPreview({
         <span>{plan.provider}</span>
         <span>{plan.estimate.expected_generation_calls} call</span>
         <span>{plan.estimate.expected_generated_seconds.toFixed(1)} generated seconds</span>
+        <span>{plan.estimate.analysis_duration_ms.toFixed(0)}ms planning</span>
         <span>{plan.estimate.frames_inspected} frames inspected</span>
       </div>
       {plan.warnings.map((warning) => (

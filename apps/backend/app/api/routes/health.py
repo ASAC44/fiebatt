@@ -16,5 +16,6 @@ async def health():
         "storage_mode": "s3" if settings.s3_enabled else "local",
         "features": {
             "adaptive_edit_planning": settings.adaptive_edit_planning,
+            "hard_failed_acceptance_override": settings.allow_hard_failed_acceptance,
         },
     }

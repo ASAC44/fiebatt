@@ -56,6 +56,7 @@ async def get_job(
         generated_seconds=payload.get("generated_seconds"),
         provider_attempts=payload.get("provider_attempts") or [],
         localized_compositing=payload.get("localized_compositing") or [],
+        local_flow_telemetry=payload.get("local_flow_telemetry"),
         variants=[
             VariantOut(
                 id=v.id,

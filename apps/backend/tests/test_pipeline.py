@@ -55,6 +55,7 @@ async def test_health(client: AsyncClient):
     assert body["ok"] is True
     assert body["ai_mode"] == "stub"
     assert body["features"]["adaptive_edit_planning"] is False
+    assert body["features"]["hard_failed_acceptance_override"] is False
 
 
 @pytest.mark.asyncio

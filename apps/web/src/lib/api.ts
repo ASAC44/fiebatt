@@ -209,6 +209,8 @@ export type CreateEditPlanReq = {
   prompt: string;
   explicit_start_ts?: number;
   explicit_end_ts?: number;
+  source_start_ts?: number;
+  source_end_ts?: number;
 };
 
 export type AcceptResp = {

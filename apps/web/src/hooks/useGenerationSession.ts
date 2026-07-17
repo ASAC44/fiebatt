@@ -222,6 +222,7 @@ export function useGenerationSession({
     allowLegacyFallback = false,
   ): Promise<boolean> {
     if (!clip?.projectId || !selectionId || !prompt.trim()) return false;
+    const baseClip = sourceClip ?? clip;
     setPlanning(true);
     setErr(null);
     setStatus("planning");
@@ -232,6 +233,8 @@ export function useGenerationSession({
         prompt: prompt.trim(),
         explicit_start_ts: explicitRange?.start,
         explicit_end_ts: explicitRange?.end,
+        source_start_ts: baseClip.sourceStart,
+        source_end_ts: baseClip.sourceEnd,
       });
       if (!next.adaptive_generation_enabled) {
         setPlan(null);

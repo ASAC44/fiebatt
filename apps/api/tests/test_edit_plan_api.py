@@ -165,3 +165,62 @@ async def test_provider_constraints_fail_before_generation(client, owned_selecti
     )
     assert response.status_code == 422
     assert "exactly 4, 6, 8 seconds" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_active_source_clip_must_contain_selection(client, owned_selection):
+    project_id, selection_id = owned_selection
+    response = await client.post(
+        "/api/edit-plans",
+        headers={"X-Session-Id": "plan-owner"},
+        json={
+            "project_id": project_id,
+            "selection_id": selection_id,
+            "prompt": "make this person jump",
+            "source_start_ts": 12.0,
+            "source_end_ts": 18.0,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "selection is outside the active source clip"
+
+
+@pytest.mark.asyncio
+async def test_active_source_clip_bounds_reach_resolver(
+    client, owned_selection, monkeypatch
+):
+    project_id, selection_id = owned_selection
+
+    async def resolve(*args, **kwargs):
+        assert kwargs["source_start"] == 7.0
+        assert kwargs["source_end"] == 13.0
+        core = EditCore(start_ts=8.25, end_ts=11.75)
+        return LocalRangeResolution(
+            edit_core=core,
+            generation_context=GenerationContext(
+                start_ts=7.5, end_ts=12.5, edit_core=core
+            ),
+            occurrence_start=7.0,
+            occurrence_end=13.0,
+            analysis_start=7.0,
+            analysis_end=13.0,
+            frames_inspected=25,
+            confidence=0.9,
+        )
+
+    monkeypatch.setattr(route, "resolve_local_range", resolve)
+    response = await client.post(
+        "/api/edit-plans",
+        headers={"X-Session-Id": "plan-owner"},
+        json={
+            "project_id": project_id,
+            "selection_id": selection_id,
+            "prompt": "make this person jump",
+            "source_start_ts": 7.0,
+            "source_end_ts": 13.0,
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["occurrence_start"] == 7.0

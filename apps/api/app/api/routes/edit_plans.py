@@ -82,10 +82,22 @@ async def create_edit_plan(
     if selection.source_revision != project.video_url:
         raise HTTPException(status_code=409, detail="selection is stale for current source")
 
+    source_start = body.source_start_ts if body.source_start_ts is not None else 0.0
+    source_end = body.source_end_ts if body.source_end_ts is not None else project.duration
+    if source_end > project.duration + 1e-3:
+        raise HTTPException(status_code=422, detail="source range exceeds project")
+    if not source_start - 1e-3 <= selection.frame_ts <= source_end + 1e-3:
+        raise HTTPException(status_code=422, detail="selection is outside the active source clip")
+
     explicit_core = None
     if body.explicit_start_ts is not None and body.explicit_end_ts is not None:
         if body.explicit_end_ts > project.duration + 1e-3:
             raise HTTPException(status_code=422, detail="explicit range exceeds project")
+        if (
+            body.explicit_start_ts < source_start - 1e-3
+            or body.explicit_end_ts > source_end + 1e-3
+        ):
+            raise HTTPException(status_code=422, detail="explicit range exceeds active source clip")
         explicit_core = EditCore(
             start_ts=body.explicit_start_ts,
             end_ts=body.explicit_end_ts,
@@ -104,7 +116,12 @@ async def create_edit_plan(
 
     try:
         resolution = await resolve_local_range(
-            project, selection, gate.intent, explicit_core=explicit_core
+            project,
+            selection,
+            gate.intent,
+            explicit_core=explicit_core,
+            source_start=source_start,
+            source_end=source_end,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

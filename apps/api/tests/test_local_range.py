@@ -49,6 +49,49 @@ def test_range_uses_two_sided_handles_without_covering_whole_occurrence():
     assert result.generation_context.end_ts == pytest.approx(12.5)
 
 
+def test_range_never_crosses_active_source_clip():
+    intent = EditIntent(
+        raw_prompt="make this person jump",
+        change_type="motion",
+        estimated_action_seconds=3.5,
+    )
+    result = resolve_window_from_evidence(
+        intent=intent,
+        seed_ts=11.5,
+        duration=30.0,
+        analysis_start=10.0,
+        analysis_end=13.0,
+        shot_start=8.0,
+        shot_end=15.0,
+        tracked_start=9.0,
+        tracked_end=14.0,
+        frames_inspected=13,
+        source_start=10.0,
+        source_end=13.0,
+    )
+
+    assert result.occurrence_start == pytest.approx(10.0)
+    assert result.occurrence_end == pytest.approx(13.0)
+    assert result.generation_context.start_ts == pytest.approx(10.0)
+    assert result.generation_context.end_ts == pytest.approx(13.0)
+
+
+def test_analysis_window_respects_active_source_clip():
+    intent = EditIntent(
+        raw_prompt="make this person jump",
+        change_type="motion",
+        estimated_action_seconds=3.5,
+    )
+
+    assert analysis_window(
+        intent,
+        11.5,
+        30.0,
+        source_start=10.0,
+        source_end=13.0,
+    ) == (10.0, 13.0)
+
+
 @pytest.mark.asyncio
 async def test_resolver_inspects_local_frames_and_reuses_cache(tmp_path):
     clear_local_range_cache()

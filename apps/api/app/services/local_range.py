@@ -35,12 +35,24 @@ def _persistent_change(intent: EditIntent) -> bool:
     return any("complete visible occurrence" in item for item in intent.preservation_requirements)
 
 
-def analysis_window(intent: EditIntent, seed_ts: float, duration: float) -> tuple[float, float]:
+def analysis_window(
+    intent: EditIntent,
+    seed_ts: float,
+    duration: float,
+    *,
+    source_start: float = 0.0,
+    source_end: float | None = None,
+) -> tuple[float, float]:
+    upper = duration if source_end is None else min(duration, source_end)
+    if source_start < 0.0 or upper <= source_start:
+        raise ValueError("active source clip must have positive duration")
+    if seed_ts < source_start - 1e-3 or seed_ts > upper + 1e-3:
+        raise ValueError("selection is outside the active source clip")
     if _persistent_change(intent):
         radius = PERSISTENT_TRACK_BUDGET_SECONDS / 2
     else:
         radius = intent.estimated_action_seconds / 2 + HANDLE_SECONDS + LOCAL_MARGIN_SECONDS
-    return max(0.0, seed_ts - radius), min(duration, seed_ts + radius)
+    return max(source_start, seed_ts - radius), min(upper, seed_ts + radius)
 
 
 def _fit_interval(center: float, length: float, lower: float, upper: float) -> tuple[float, float]:
@@ -70,15 +82,25 @@ def resolve_window_from_evidence(
     frames_inspected: int,
     explicit_core: EditCore | None = None,
     tracking_reached_budget: bool = False,
+    source_start: float = 0.0,
+    source_end: float | None = None,
 ) -> LocalRangeResolution:
-    occurrence_start = max(0.0, shot_start, tracked_start or 0.0)
-    occurrence_end = min(duration, shot_end, tracked_end or duration)
+    upper = duration if source_end is None else min(duration, source_end)
+    tracked_lower = tracked_start if tracked_start is not None else source_start
+    tracked_upper = tracked_end if tracked_end is not None else upper
+    occurrence_start = max(source_start, shot_start, tracked_lower)
+    occurrence_end = min(upper, shot_end, tracked_upper)
     warnings: list[str] = []
     if occurrence_end <= occurrence_start:
         occurrence_start, occurrence_end = analysis_start, analysis_end
         warnings.append("target track was inconclusive; using analyzed shot window")
 
     if explicit_core is not None:
+        if (
+            explicit_core.start_ts < source_start - 1e-3
+            or explicit_core.end_ts > upper + 1e-3
+        ):
+            raise ValueError("explicit range exceeds active source clip")
         core_start = max(occurrence_start, explicit_core.start_ts)
         core_end = min(occurrence_end, explicit_core.end_ts)
         if core_end <= core_start:
@@ -162,7 +184,11 @@ def tracked_span(
 
 
 def _cache_key(
-    selection: SelectionArtifact, intent: EditIntent, explicit_core: EditCore | None
+    selection: SelectionArtifact,
+    intent: EditIntent,
+    explicit_core: EditCore | None,
+    source_start: float,
+    source_end: float,
 ) -> str:
     value = json.dumps(
         {
@@ -170,6 +196,8 @@ def _cache_key(
             "source_revision": selection.source_revision,
             "intent": intent.model_dump(mode="json"),
             "explicit_core": explicit_core.model_dump() if explicit_core else None,
+            "source_start": source_start,
+            "source_end": source_end,
         },
         sort_keys=True,
     )
@@ -184,8 +212,11 @@ async def resolve_local_range(
     explicit_core: EditCore | None = None,
     extract_frame: Callable[[str | Path, float, str | Path], Awaitable[Path]] = ffmpeg.extract_frame,
     track_frames: Callable[..., Awaitable[sam.TrackResult]] = sam.track_frames,
+    source_start: float = 0.0,
+    source_end: float | None = None,
 ) -> LocalRangeResolution:
-    key = _cache_key(selection, intent, explicit_core)
+    bounded_end = project.duration if source_end is None else min(project.duration, source_end)
+    key = _cache_key(selection, intent, explicit_core, source_start, bounded_end)
     cached = _RANGE_CACHE.get(key)
     if cached is not None:
         return cached.model_copy(deep=True)
@@ -200,7 +231,13 @@ async def resolve_local_range(
             seed_mask_path = str(await storage.path_from_url(mask_url))
         except Exception:
             seed_mask_path = None
-    start, end = analysis_window(intent, selection.frame_ts, project.duration)
+    start, end = analysis_window(
+        intent,
+        selection.frame_ts,
+        project.duration,
+        source_start=source_start,
+        source_end=bounded_end,
+    )
     frame_count = max(2, math.floor((end - start) * ANALYSIS_FPS) + 1)
     timestamps = [
         min(end, start + index / ANALYSIS_FPS) for index in range(frame_count)
@@ -257,11 +294,13 @@ async def resolve_local_range(
             _persistent_change(intent)
             and track_start is not None
             and track_end is not None
-            and start > 0.0
-            and end < project.duration
+            and start > source_start
+            and end < bounded_end
             and abs(track_start - start) < 1 / ANALYSIS_FPS
             and abs(track_end - end) < 1 / ANALYSIS_FPS
         ),
+        source_start=source_start,
+        source_end=bounded_end,
     )
     if track.warning:
         resolution.warnings.append(track.warning)

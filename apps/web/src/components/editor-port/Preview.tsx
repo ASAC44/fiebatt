@@ -20,6 +20,7 @@ import { PreviewControls } from "./PreviewControls";
 export function Preview() {
   const { state, dispatch } = useEDL();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const preloadRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const currentClipIdRef = useRef<string | null>(null);
@@ -29,6 +30,9 @@ export function Preview() {
 
   const hit = clipAtTime(state.clips, state.playhead);
   const activeClip = hit?.clip ?? null;
+  const nextClip = hit && hit.index + 1 < state.clips.length
+    ? state.clips[hit.index + 1]
+    : null;
   const total = totalDuration(state.clips);
   const frameTs = hit ? sourceTimeFor(hit.clip, hit.offsetInClip) : null;
 
@@ -130,6 +134,24 @@ export function Preview() {
     c.style.opacity = '0';
   }, []);
 
+  // Warm the next media file before the playhead reaches its boundary.
+  // The visible player still owns playback; this hidden element only makes
+  // metadata and initial bytes available so generated/original swaps do not
+  // wait on a fresh network request.
+  useEffect(() => {
+    const preload = preloadRef.current;
+    if (!preload) return;
+    if (!nextClip || nextClip.url === activeClip?.url) {
+      preload.removeAttribute("src");
+      preload.load();
+      return;
+    }
+    if (preload.getAttribute("src") !== nextClip.url) {
+      preload.src = nextClip.url;
+      preload.load();
+    }
+  }, [activeClip?.url, nextClip?.id, nextClip?.url]);
+
   // mirror active clip into <video>
   useEffect(() => {
     const v = videoRef.current;
@@ -141,6 +163,16 @@ export function Preview() {
     if (clipChanged) {
       transitioningRef.current = false;
       currentClipIdRef.current = activeClip.id;
+      // Timeline operations can create adjacent clips backed by the same
+      // file. Keep the decoded media alive and only seek; reassigning the
+      // same URL would create a visible stop for no reason.
+      const currentUrl = v.getAttribute("src");
+      if (currentUrl === activeClip.url) {
+        v.volume = activeClip.volume;
+        if (Math.abs(v.currentTime - want) > 0.04) v.currentTime = want;
+        if (state.playing && v.paused) void v.play().catch(() => {});
+        return;
+      }
       // Capture last frame before src swap — shown as a freeze overlay to
       // prevent the black-flash flicker during browser decode.
       captureFreeze();
@@ -297,6 +329,7 @@ export function Preview() {
               ref={videoRef}
               className="block max-h-full max-w-full bg-black object-contain"
               playsInline
+              preload="auto"
               onLoadedMetadata={(e) => {
                 const { videoWidth, videoHeight } = e.currentTarget;
                 setVideoSize({
@@ -305,6 +338,15 @@ export function Preview() {
                 });
               }}
               onEnded={handleEnded}
+            />
+            <video
+              ref={preloadRef}
+              aria-hidden="true"
+              className="hidden"
+              muted
+              playsInline
+              preload="auto"
+              tabIndex={-1}
             />
             {/* Freeze-frame canvas: synchronously painted before src swap to
                 suppress the black-flash. Starts hidden (opacity:0); captureFreeze

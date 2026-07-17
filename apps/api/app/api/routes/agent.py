@@ -29,6 +29,8 @@ from app.config.settings import get_settings
 from app.db.session import AsyncSessionLocal
 from app.deps import get_runner, get_session
 from app.models.conversation import Conversation, ChatMessage
+from app.models.project import Project
+from app.models.selection import SelectionArtifact
 from app.models.session import Session as SessionModel
 from app.services.agent_tools import execute_tool
 from app.services import job_events
@@ -206,6 +208,9 @@ around the playhead. Never default to the full timeline. Reel-wide discovery
 requires explicit language such as "everywhere" or "every time". Only ask for
 clarification if the request is genuinely ambiguous in a way the
 context can't resolve.
+- Never invent or copy placeholder selection IDs such as "none". When an
+  active_bbox exists but selection_id is not ready, omit selection_id from
+  create_edit_plan; the backend resolves the matching persisted selection.
 
 CRITICAL — accept_variant is user-driven:
 If the user's message is an explicit acceptance instruction (e.g. contains
@@ -246,14 +251,77 @@ def _build_context_block(body: "AgentChatRequest") -> str:
     duration = (
         f"{body.duration:.3f}s" if body.duration is not None else "unknown"
     )
+    if body.selection_id:
+        selection = body.selection_id
+    elif body.bbox:
+        selection = "pending; backend will resolve it from active_bbox"
+    else:
+        selection = "not selected"
     return (
         "\n\n## Current editor context\n"
         f"- project_id: {body.project_id}\n"
         f"- playhead_ts: {playhead}\n"
         f"- timeline_duration: {duration}\n"
         f"- active_bbox: {_format_bbox(body.bbox)}\n"
-        f"- selection_id: {body.selection_id or 'none'}\n"
+        f"- selection_id: {selection}\n"
     )
+
+
+def _bbox_matches(
+    stored: dict[str, Any],
+    requested: "BBoxParam",
+    *,
+    tolerance: float = 0.005,
+) -> bool:
+    wanted = requested.model_dump()
+    return all(
+        abs(float(stored.get(key, -1.0)) - float(wanted[key])) <= tolerance
+        for key in ("x", "y", "w", "h")
+    )
+
+
+async def _resolve_plan_selection_id(body: "AgentChatRequest") -> str | None:
+    """Resolve frontend selection state without trusting model-authored IDs."""
+    placeholders = {"", "none", "null", "undefined", "pending"}
+    supplied = (body.selection_id or "").strip()
+
+    # SAM and chat start independently. Usually SAM finishes during the first
+    # model call; this short wait closes the remaining race.
+    for attempt in range(11):
+        async with AsyncSessionLocal() as db:
+            project = await db.get(Project, body.project_id)
+            if project is None:
+                return None
+
+            if supplied.lower() not in placeholders:
+                artifact = await db.get(SelectionArtifact, supplied)
+                if (
+                    artifact is not None
+                    and artifact.project_id == project.id
+                    and artifact.source_revision == project.video_url
+                ):
+                    return artifact.id
+
+            if body.bbox is not None:
+                artifacts = (
+                    await db.execute(
+                        select(SelectionArtifact)
+                        .where(
+                            SelectionArtifact.project_id == project.id,
+                            SelectionArtifact.source_revision == project.video_url,
+                        )
+                        .order_by(SelectionArtifact.created_at.desc())
+                        .limit(12)
+                    )
+                ).scalars().all()
+                for artifact in artifacts:
+                    if _bbox_matches(artifact.bbox_json, body.bbox):
+                        return artifact.id
+
+        if body.bbox is None or attempt == 10:
+            break
+        await asyncio.sleep(0.5)
+    return None
 
 # ---- Gemini tool declarations ----
 
@@ -273,7 +341,7 @@ TOOL_DECLARATIONS = [
                 "selection_id": types.Schema(type=types.Type.STRING),
                 "prompt": types.Schema(type=types.Type.STRING),
             },
-            required=["project_id", "selection_id", "prompt"],
+            required=["project_id", "prompt"],
         ),
     ),
     types.FunctionDeclaration(
@@ -1117,8 +1185,14 @@ async def _agent_stream(
             tool_call_id = tc.id
             tool_name = tc.function.name
             tool_args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-            if tool_name == "create_edit_plan" and body.selection_id:
-                tool_args.setdefault("selection_id", body.selection_id)
+            if tool_name == "create_edit_plan":
+                selection_id = await _resolve_plan_selection_id(body)
+                if selection_id:
+                    # Editor state is authoritative. Never trust a placeholder
+                    # or hallucinated ID from the model.
+                    tool_args["selection_id"] = selection_id
+                else:
+                    tool_args.pop("selection_id", None)
             if tool_name == "generate_edit":
                 # Keep attribution separate from the model-authored generation
                 # prompt. The worker emits both for the before/refined card.

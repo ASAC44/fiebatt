@@ -511,11 +511,17 @@ async def _create_edit_plan(
     from app.models.session import Session as SessionModel
     from app.schemas.edit_plan_api import EditPlanRequest
 
+    selection_id = str(args.get("selection_id") or "").strip()
+    if selection_id.lower() in {"", "none", "null", "undefined", "pending"}:
+        raise ValueError(
+            "selection is not ready; wait for object selection to finish and retry"
+        )
+
     try:
         result = await create_edit_plan(
             EditPlanRequest(
                 project_id=args["project_id"],
-                selection_id=args["selection_id"],
+                selection_id=selection_id,
                 prompt=args["prompt"],
                 requested_scope=args.get("requested_scope"),
                 explicit_start_ts=args.get("explicit_start_ts"),

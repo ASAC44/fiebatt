@@ -22,7 +22,9 @@ from app.main import app  # noqa: E402
 from app.db.init import create_all  # noqa: E402
 from app.workers.runner import JobRunner  # noqa: E402
 from app.api.routes.agent import (  # noqa: E402
+    AgentChatRequest,
     _build_messages,
+    _resolve_plan_selection_id,
     _clean_agent_text,
     _detached_agent_relay,
     _parse_dsml_tool_calls,
@@ -31,6 +33,8 @@ from app.api.routes.agent import (  # noqa: E402
 from app.services.agent_tools import execute_tool  # noqa: E402
 from app.db.session import get_db  # noqa: E402
 from app.config.settings import get_settings  # noqa: E402
+from app.models.project import Project  # noqa: E402
+from app.models.selection import SelectionArtifact  # noqa: E402
 
 
 FIXTURE_VIDEO = os.path.join(os.path.dirname(__file__), "fixtures", "test_5s.mp4")
@@ -81,6 +85,39 @@ async def upload_fixture_video(client: AsyncClient) -> dict:
         )
     assert res.status_code == 200
     return res.json()
+
+
+@pytest.mark.asyncio
+async def test_agent_resolves_matching_selection_when_frontend_mask_finishes_late(
+    client: AsyncClient,
+    db_session,
+):
+    upload = await upload_fixture_video(client)
+    project = await db_session.get(Project, upload["project_id"])
+    assert project is not None
+    bbox = {"x": 0.2, "y": 0.3, "w": 0.4, "h": 0.25}
+    artifact = SelectionArtifact(
+        project_id=project.id,
+        frame_ts=1.0,
+        bbox_json=bbox,
+        contours_json=[],
+        mask_url="/media/keyframes/test-mask.png",
+        source_revision=project.video_url,
+    )
+    db_session.add(artifact)
+    await db_session.commit()
+    await db_session.refresh(artifact)
+
+    resolved = await _resolve_plan_selection_id(
+        AgentChatRequest(
+            project_id=project.id,
+            message="make this car green",
+            conversation_id="selection-race",
+            bbox=bbox,
+        )
+    )
+
+    assert resolved == artifact.id
 
 
 def _make_mock_agent_response(

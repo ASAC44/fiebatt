@@ -7,10 +7,41 @@ Validates that:
 """
 
 import os
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 # Force stubs mode for these tests
 os.environ["USE_AI_STUBS"] = "true"
+
+
+@pytest.mark.asyncio
+async def test_qwen_json_mode_explicitly_requests_json(monkeypatch):
+    from app.ai.services import qwen
+
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content='{"ok": true}'))]
+    )
+    client = MagicMock()
+    client.chat.completions.create = AsyncMock(return_value=response)
+    monkeypatch.setattr(qwen, "_make_client", lambda **_kwargs: client)
+    monkeypatch.setattr(
+        qwen,
+        "_provider_config",
+        lambda **_kwargs: ("test-key", qwen.QWEN_BASE_URL, qwen.DEFAULT_MODEL),
+    )
+
+    result = await qwen._chat_json(
+        "Plan the edit.",
+        [{"type": "text", "text": "make the car green"}],
+    )
+
+    request = client.chat.completions.create.await_args.kwargs
+    assert result == '{"ok": true}'
+    assert "json" in request["messages"][0]["content"].lower()
+    assert request["response_format"] == {"type": "json_object"}
+    assert request["extra_body"] == {"enable_thinking": False}
 
 
 @pytest.mark.asyncio

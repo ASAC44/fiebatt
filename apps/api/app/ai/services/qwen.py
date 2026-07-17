@@ -91,10 +91,14 @@ async def _chat_json(
     needs_vision = _content_has_image(user_content)
     client = _make_client(needs_vision=needs_vision)
     _api_key, base_url, configured_model = _provider_config(needs_vision=needs_vision)
+    json_system_prompt = (
+        f"{system_prompt.rstrip()}\n\n"
+        "Return only valid JSON matching the requested schema."
+    )
     resp = await client.chat.completions.create(
         model=configured_model if model == DEFAULT_MODEL else model,
         messages=[
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": json_system_prompt},
             {"role": "user", "content": user_content},
         ],
         response_format={"type": "json_object"},

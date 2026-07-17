@@ -551,6 +551,7 @@ async def run(job_id: str) -> None:
     mask_image_url: str | None = None
     subject_reference_path: str | None = None
     sam_available = False
+    sam_video_available = False
     if subject_frame_ok and bbox and not bbox_is_full_frame:
         try:
             sam_available = await sam_service.is_available()
@@ -584,6 +585,7 @@ async def run(job_id: str) -> None:
         except Exception as exc:
             log.warning("SAM generation conditioning failed; using bbox crop", exc_info=True)
             await _emit(job_id, "sam_error", f"SAM localization failed; using bbox crop: {exc}")
+        sam_video_available = await sam_service.video_tracking_available()
 
     planned_intent: EditIntent | None = None
     raw_planned_intent = payload.get("planned_intent")
@@ -864,7 +866,7 @@ async def run(job_id: str) -> None:
         if (
             not generation_window.adaptive
             or bbox_is_full_frame
-            or not sam_available
+            or not sam_video_available
             or not variant.url
         ):
             return variant

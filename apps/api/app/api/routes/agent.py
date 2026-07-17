@@ -761,9 +761,9 @@ async def _bridge_plan_events(
 
     The ``generate_job`` worker publishes a rich trail of stage events on
     the per-job event bus (plan_start, plan_done, gen_start, variant_done…).
-    The Pro-mode reveal panel consumes these directly via
-    ``/api/jobs/{id}/stream``, but the Vibe-mode agent chat only hears the
-    agent SSE stream — so by default the user never sees that the model is
+    The detailed generation panel consumes these directly via
+    ``/api/jobs/{id}/stream``, while agent chat only hears the agent SSE
+    stream — so by default the user never sees that the model is
     quietly rewriting their one-line prompt into a video generation brief.
 
     This helper bridges the gap for exactly the events that are interesting

@@ -140,6 +140,9 @@ test("upload opens the authoritative project", async ({ page }) => {
 
   await expect(page).toHaveURL(/\/editor\?projectId=project-123$/);
   await expect(page.getByLabel("Project name")).toHaveValue("clip");
+  await expect(page.getByPlaceholder("describe an edit...")).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Vibe" })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "Editor" })).toHaveCount(0);
 });
 
 test("login rejects recursive return paths", async ({ page }) => {

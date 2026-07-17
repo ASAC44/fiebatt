@@ -181,58 +181,6 @@
 }
 .topbar__ghost:hover { border-color: var(--edge-2); color: var(--ink); }
 
-/* vibe / pro toggle pill — subtle chrome rim in off state, fully filled
-   bevel in on state. mirrors the pill-nav aesthetic on the landing page. */
-.topbar__vibe {
-  position: relative;
-  padding: 4px 14px;
-  border-radius: 9999px;
-  font-family: var(--f-mono);
-  font-size: 10px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--ink-fade);
-  background: transparent;
-  border: 1px solid var(--edge);
-  transition:
-    color var(--dur-s) var(--ease),
-    border-color var(--dur-s) var(--ease),
-    background var(--dur-m) var(--ease),
-    box-shadow var(--dur-m) var(--ease);
-  isolation: isolate;
-}
-.topbar__vibe:hover {
-  color: var(--ink);
-  border-color: var(--edge-2);
-  box-shadow: 0 0 22px -8px rgba(232, 232, 232, 0.35);
-}
-.topbar__vibe--on {
-  color: #0a0a0a;
-  border-color: transparent;
-  background:
-    linear-gradient(
-      180deg,
-      #f4f4f4 0%,
-      #d0d0d0 46%,
-      #9a9a9a 50%,
-      #bcbcbc 54%,
-      #e8e8e8 100%
-    );
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.7),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.35),
-    0 0 0 1px rgba(0, 0, 0, 0.45);
-}
-.topbar__vibe--on:hover {
-  filter: brightness(1.06);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.7),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.35),
-    0 0 0 1px rgba(0, 0, 0, 0.45),
-    0 0 32px -10px rgba(190, 220, 255, 0.45);
-}
-
 .topbar__export {
   padding: 4px 16px;
   font-size: 11px;
@@ -382,34 +330,34 @@
   transform: translate(-50%, -50%);
 }
 
-/* ── vibe mode ── */
+/* ── focused editor layout ── */
 /* 60/40 split: video player left, agent chat right */
 
-/* hide left sidebar and timeline in vibe mode */
-.studio--vibe .studio__left,
-.studio--vibe .studio__bottom {
+/* hide low-level media panels from the main workflow */
+.studio--focused .studio__left,
+.studio--focused .studio__bottom {
   display: none !important;
 }
 
 /* hide the left splitter and bottom splitter */
-.studio--vibe .splitter--vertical:first-of-type,
-.studio--vibe .studio__h-splitter-wrap {
+.studio--focused .splitter--vertical:first-of-type,
+.studio--focused .studio__h-splitter-wrap {
   display: none !important;
 }
 
 /* 60/40 grid: center (video) | splitter | right (chat) */
-.studio--vibe .studio__body {
+.studio--focused .studio__body {
   grid-template-columns: minmax(0, 3fr) var(--split-x) minmax(280px, 2fr);
 }
 
-/* right sidebar is visible in vibe mode (agent chat fills it) */
-.studio--vibe .studio__right {
+/* agent chat fills the right side */
+.studio--focused .studio__right {
   display: flex !important;
   flex-direction: column;
   overflow: hidden;
 }
 
-.studio--vibe .agent-chat {
+.studio--focused .agent-chat {
   height: 100%;
   min-height: 0;
   min-width: 0;
@@ -417,27 +365,27 @@
 }
 
 @media (max-width: 900px) {
-  .studio--vibe .studio__body {
+  .studio--focused .studio__body {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(260px, 1fr) minmax(300px, 46vh);
   }
 
-  .studio--vibe .splitter--vertical {
+  .studio--focused .splitter--vertical {
     display: none !important;
   }
 }
 
 /* collapse the timeline row */
-.studio--vibe {
+.studio--focused {
   grid-template-rows: 40px 1fr;
 }
 
 /* hide the timeline toolbar row if it exists */
-.studio--vibe .tbar {
+.studio--focused .tbar {
   display: none !important;
 }
 
 /* make the preview video fill the space */
-.studio--vibe .pv {
+.studio--focused .pv {
   height: 100%;
 }

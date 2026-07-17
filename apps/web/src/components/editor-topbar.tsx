@@ -6,14 +6,11 @@ import type { ReactNode } from "react";
 import { ArrowLeft, Download } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProjectNameEditor } from "@/components/project-name-editor";
 
 export function EditorTopbar({
   projectId,
   projectName,
-  mode = "vibe",
-  onModeChange,
   onImport,
   onCompare,
   onShowShortcuts,
@@ -25,8 +22,6 @@ export function EditorTopbar({
 }: {
   projectId: string | null;
   projectName: string;
-  mode?: "vibe" | "pro";
-  onModeChange?: (mode: "vibe" | "pro") => void;
   onImport?: () => void;
   onCompare?: () => void;
   onShowShortcuts?: () => void;
@@ -76,16 +71,6 @@ export function EditorTopbar({
 
       <div className="flex items-center justify-end gap-1.5">
         {statusSlot}
-        <Tabs value={mode} onValueChange={(value) => onModeChange?.(value as "vibe" | "pro")}>
-          <TabsList className="h-8">
-            <TabsTrigger className="px-3 text-sm" value="vibe">
-              Vibe
-            </TabsTrigger>
-            <TabsTrigger className="px-3 text-sm" value="pro">
-              Editor
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
         <Button className="h-8 px-3 text-sm" onClick={onShowShortcuts} variant="outline">
           Shortcuts
         </Button>

@@ -21,6 +21,7 @@ from app.deps import get_session
 from app.models.project import Project
 from app.models.session import Session as SessionModel
 from app.schemas.timeline import (
+    PersistedEDL,
     TimelineOut,
     TimelineSaveReq,
     TimelineSaveResp,

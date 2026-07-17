@@ -1,10 +1,10 @@
+.env
 .venv/
 .pytest_cache/
-__pycache__/
-*.pyc
+**/__pycache__/
+*.py[cod]
 fiebatt.db
 storage/
-tests/
 tasks/
+tests/
 vision-worker/
-.env

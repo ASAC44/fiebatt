@@ -187,18 +187,39 @@ async def search_keyframes_for_entity(
 async def score_variant(
     original_prompt: str,
     variant_frame_paths: list[str],
-) -> dict[str, int]:
+    *,
+    target_frame_paths: list[str] | None = None,
+    reference_target_path: str | None = None,
+) -> dict[str, int | list[str]]:
     """Score a generated variant on visual coherence and prompt adherence.
 
     Returns:
-        {"visual_coherence": int (1-10), "prompt_adherence": int (1-10)}
+        Scores plus concrete evidence for any failure.
     """
     system_prompt = _load_prompt("quality_score")
-    content: list[dict] = [
-        {"type": "text", "text": f"Original prompt: {original_prompt}"},
-    ]
-    for path in variant_frame_paths:
+    content: list[dict] = [{
+        "type": "text",
+        "text": (
+            "NON-NEGOTIABLE EDIT REQUIREMENT:\n"
+            f"{original_prompt}\n\n"
+            "Judge exact attributes, not general similarity. Full frames show spill "
+            "and scene preservation. Enlarged target crops show whether the selected "
+            "change is correct."
+        ),
+    }]
+    if reference_target_path:
+        content.extend([
+            {"type": "text", "text": "SOURCE TARGET BEFORE EDIT:"},
+            {"type": "image_url", "image_url": {"url": _image_data_url(reference_target_path)}},
+        ])
+    for index, path in enumerate(variant_frame_paths):
+        content.append({"type": "text", "text": f"GENERATED FULL FRAME {index + 1}:"})
         content.append({"type": "image_url", "image_url": {"url": _image_data_url(path)}})
+    for index, path in enumerate(target_frame_paths or []):
+        content.extend([
+            {"type": "text", "text": f"GENERATED TARGET CROP {index + 1}:"},
+            {"type": "image_url", "image_url": {"url": _image_data_url(path)}},
+        ])
 
     text = await _chat_json(system_prompt, content)
     return json.loads(text)

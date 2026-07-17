@@ -2,7 +2,7 @@
 
 Do not change these without pinging the other side — they are the contract.
 """
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 
 class BBoxDict(TypedDict):
@@ -28,6 +28,7 @@ class VariantResult(TypedDict):
 class QualityScore(TypedDict):
     visual_coherence: int
     prompt_adherence: int
+    evidence: NotRequired[list[str]]
 
 
 class EntityIdentity(TypedDict):

@@ -52,6 +52,42 @@ async def test_stub_score_variant():
 
 
 @pytest.mark.asyncio
+async def test_qwen_quality_request_labels_source_and_target_crops(monkeypatch, tmp_path):
+    from app.ai.services import qwen
+
+    paths = {}
+    for name in ("source", "full", "target"):
+        path = tmp_path / f"{name}.png"
+        path.write_bytes(name.encode())
+        paths[name] = str(path)
+
+    captured: dict[str, list[dict]] = {}
+
+    async def fake_chat_json(system_prompt, user_content, model=qwen.DEFAULT_MODEL):
+        captured["content"] = user_content
+        return '{"visual_coherence": 8, "prompt_adherence": 1, "evidence": ["car is white"]}'
+
+    monkeypatch.setattr(qwen, "_chat_json", fake_chat_json)
+    score = await qwen.score_variant(
+        "Make the car green",
+        [paths["full"]],
+        target_frame_paths=[paths["target"]],
+        reference_target_path=paths["source"],
+    )
+
+    labels = [
+        item["text"]
+        for item in captured["content"]
+        if item["type"] == "text"
+    ]
+    assert any("SOURCE TARGET BEFORE EDIT" in label for label in labels)
+    assert any("GENERATED FULL FRAME" in label for label in labels)
+    assert any("GENERATED TARGET CROP" in label for label in labels)
+    assert score["prompt_adherence"] == 1
+    assert score["evidence"] == ["car is white"]
+
+
+@pytest.mark.asyncio
 async def test_stub_identify_entity():
     """gemini.identify_entity returns {description, category, attributes}."""
     from app.ai.services._stubs import gemini

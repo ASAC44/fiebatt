@@ -305,12 +305,20 @@ def _public_url_or_none(url: str) -> str | None:
     return url
 
 
-async def _score_variant_safe(frames: list[str], prompt: str) -> dict | None:
-    # The facade's stable contract is (frames, prompt). The real adapter also
-    # accepts provider-style keyword names, but the local stub intentionally
-    # exposes only this public contract.
+async def _score_variant_safe(
+    frames: list[str],
+    prompt: str,
+    *,
+    target_frames: list[str] | None = None,
+    reference_target_path: str | None = None,
+) -> dict | None:
     try:
-        return await ai.gemini.score_variant(frames, prompt)
+        return await ai.gemini.score_variant(
+            frames,
+            prompt,
+            target_frame_paths=target_frames,
+            reference_target_path=reference_target_path,
+        )
     except Exception:
         log.exception("scoring failed")
         return None
@@ -928,7 +936,27 @@ async def run(job_id: str) -> None:
             log.exception("generated frame sampling failed")
             await _emit(job_id, "score_skipped", f"couldn't sample generated video: {exc}")
             return None
-        return await _score_variant_safe(sampled_frames, generation_prompt)
+        target_frames: list[str] = []
+        if not bbox_is_full_frame and sampled_frames:
+            sample_indexes = sorted({0, len(sampled_frames) // 2, len(sampled_frames) - 1})
+            try:
+                for index in sample_indexes:
+                    target_path, _ = storage.new_path("keyframes", "png")
+                    await ffmpeg.crop_bbox_from_frame(
+                        sampled_frames[index],
+                        bbox,
+                        target_path,
+                    )
+                    target_frames.append(str(target_path))
+            except Exception:
+                log.exception("target crop extraction failed; scoring full frames only")
+                target_frames = []
+        return await _score_variant_safe(
+            sampled_frames,
+            generation_prompt,
+            target_frames=target_frames,
+            reference_target_path=(str(crop_path) if crop_path is not None else None),
+        )
 
     async def validate_continuity(variant: Variant) -> ContinuityReport | None:
         if not variant.url:

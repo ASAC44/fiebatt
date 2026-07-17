@@ -178,11 +178,18 @@ else:
         *,
         original_prompt: str | None = None,
         variant_frame_paths: list[str] | None = None,
+        target_frame_paths: list[str] | None = None,
+        reference_target_path: str | None = None,
     ) -> dict:
         # accept both positional (frames, prompt) and keyword (original_prompt, variant_frame_paths) calling conventions
         p = original_prompt or prompt
         f = variant_frame_paths or frames or []
-        return await _gemini_real.score_variant(original_prompt=p, variant_frame_paths=f)
+        return await _gemini_real.score_variant(
+            original_prompt=p,
+            variant_frame_paths=f,
+            target_frame_paths=target_frame_paths,
+            reference_target_path=reference_target_path,
+        )
 
     async def _identify_entity(crop_path: str) -> dict:
         result = await _gemini_real.identify_entity(crop_path)

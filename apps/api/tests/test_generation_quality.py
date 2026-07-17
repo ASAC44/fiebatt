@@ -95,6 +95,14 @@ def test_production_bad_outputs_cannot_be_marked_clean():
     assert semantic_quality_evidence(
         {"visual_coherence": 8, "prompt_adherence": 1}
     ) == ("prompt adherence 1/10 is below 6/10",)
+    assert semantic_quality_evidence({
+        "visual_coherence": 8,
+        "prompt_adherence": 1,
+        "evidence": ["requested green paint is absent; car remains white"],
+    }) == (
+        "prompt adherence 1/10 is below 6/10",
+        "requested green paint is absent; car remains white",
+    )
     assert semantic_quality_evidence(
         {"visual_coherence": 4, "prompt_adherence": 2}
     ) == (

@@ -48,6 +48,9 @@ async def _gemini_plan_variants(
 async def _gemini_score_variant(
     frames: list[str],
     prompt: str,
+    *,
+    target_frame_paths: list[str] | None = None,
+    reference_target_path: str | None = None,
 ) -> QualityScore:
     await asyncio.sleep(0.1)
     # deterministic-ish pseudo-score derived from prompt length so UI has something to show

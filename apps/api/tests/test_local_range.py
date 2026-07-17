@@ -179,3 +179,66 @@ async def test_resolver_falls_back_when_video_tracker_is_unavailable(tmp_path):
 
     assert result.edit_core.duration == pytest.approx(3.5)
     assert any("bbox fallback used" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_state_change_expands_outward_until_target_is_lost(tmp_path):
+    clear_local_range_cache()
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"unused")
+    project = SimpleNamespace(video_path=str(source), video_url="", duration=100.0)
+    selection = SimpleNamespace(
+        id="selection-state",
+        source_revision="revision-state",
+        frame_ts=50.0,
+        bbox_json={"x": 0.2, "y": 0.1, "w": 0.3, "h": 0.7},
+        mask_url=None,
+    )
+    intent = EditIntent(
+        raw_prompt="make this ball pink",
+        change_type="appearance",
+        duration_policy="continuous_occurrence",
+    )
+    timestamps_by_path = {}
+    tracker_calls = 0
+
+    async def fake_extract(_source, timestamp, output):
+        timestamps_by_path[str(output)] = timestamp
+        cv2.imwrite(str(output), np.full((36, 64, 3), 80, dtype=np.uint8))
+        return output
+
+    async def fake_track(paths, **kwargs):
+        nonlocal tracker_calls
+        tracker_calls += 1
+        frames = []
+        for index, path in enumerate(paths):
+            timestamp = timestamps_by_path[path]
+            frames.append(
+                {
+                    "frame_index": index,
+                    "state": "tracked" if 40.0 <= timestamp <= 60.0 else "lost",
+                    "confidence": 1.0,
+                }
+            )
+        return TrackResult(
+            tracker="test",
+            frames=frames,
+            processed_start_index=0,
+            processed_end_index=len(frames) - 1,
+        )
+
+    result = await resolve_local_range(
+        project,
+        selection,
+        intent,
+        extract_frame=fake_extract,
+        track_frames=fake_track,
+    )
+
+    assert tracker_calls == 3
+    assert result.analysis_start == pytest.approx(23.0)
+    assert result.analysis_end == pytest.approx(77.0)
+    assert result.occurrence_start == pytest.approx(40.0)
+    assert result.occurrence_end == pytest.approx(60.0)
+    assert result.generation_context.start_ts == pytest.approx(39.25)
+    assert result.generation_context.end_ts == pytest.approx(60.75)

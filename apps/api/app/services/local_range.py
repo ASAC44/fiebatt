@@ -20,12 +20,14 @@ from app.schemas.edit_plan import (
     LocalRangeResolution,
 )
 from app.services import ffmpeg, storage
+from app.services import cpu_tracking
 
 
 ANALYSIS_FPS = 4.0
+CONTINUOUS_ANALYSIS_FPS = 2.0
 HANDLE_SECONDS = 0.75
 LOCAL_MARGIN_SECONDS = 1.0
-PERSISTENT_TRACK_BUDGET_SECONDS = 30.0
+INITIAL_CONTINUOUS_RADIUS_SECONDS = 3.0
 SHOT_CHANGE_THRESHOLD = 0.32
 
 _RANGE_CACHE: dict[str, LocalRangeResolution] = {}
@@ -49,7 +51,7 @@ def analysis_window(
     if seed_ts < source_start - 1e-3 or seed_ts > upper + 1e-3:
         raise ValueError("selection is outside the active source clip")
     if _persistent_change(intent):
-        radius = PERSISTENT_TRACK_BUDGET_SECONDS / 2
+        radius = INITIAL_CONTINUOUS_RADIUS_SECONDS
     else:
         radius = intent.estimated_action_seconds / 2 + HANDLE_SECONDS + LOCAL_MARGIN_SECONDS
     return max(source_start, seed_ts - radius), min(upper, seed_ts + radius)
@@ -117,8 +119,10 @@ def resolve_window_from_evidence(
             occurrence_end,
         )
 
-    context_start = max(occurrence_start, core_start - HANDLE_SECONDS)
-    context_end = min(occurrence_end, core_end + HANDLE_SECONDS)
+    # Context belongs to the surrounding shot, not only frames where target
+    # is visible. This preserves real entrance/exit motion for state changes.
+    context_start = max(source_start, shot_start, core_start - HANDLE_SECONDS)
+    context_end = min(upper, shot_end, core_end + HANDLE_SECONDS)
     pre_handle = core_start - context_start
     post_handle = context_end - core_end
     if pre_handle < HANDLE_SECONDS - 0.05:
@@ -211,7 +215,7 @@ async def resolve_local_range(
     *,
     explicit_core: EditCore | None = None,
     extract_frame: Callable[[str | Path, float, str | Path], Awaitable[Path]] = ffmpeg.extract_frame,
-    track_frames: Callable[..., Awaitable[sam.TrackResult]] = sam.track_frames,
+    track_frames: Callable[..., Awaitable[sam.TrackResult]] = cpu_tracking.track_frames,
     source_start: float = 0.0,
     source_end: float | None = None,
 ) -> LocalRangeResolution:
@@ -238,46 +242,105 @@ async def resolve_local_range(
         source_start=source_start,
         source_end=bounded_end,
     )
-    frame_count = max(2, math.floor((end - start) * ANALYSIS_FPS) + 1)
-    timestamps = [
-        min(end, start + index / ANALYSIS_FPS) for index in range(frame_count)
-    ]
-    seed_index = min(range(len(timestamps)), key=lambda index: abs(timestamps[index] - selection.frame_ts))
-
+    analysis_fps = CONTINUOUS_ANALYSIS_FPS if _persistent_change(intent) else ANALYSIS_FPS
+    total_frames_inspected = 0
+    track: sam.TrackResult | None = None
+    shot_start = start
+    shot_end = end
+    track_start: float | None = None
+    track_end: float | None = None
     with tempfile.TemporaryDirectory(prefix="fiebatt-local-range-") as temp_dir:
-        frame_paths = []
-        for index, timestamp in enumerate(timestamps):
-            path = Path(temp_dir) / f"{index:06d}.jpg"
-            await extract_frame(source, timestamp, path)
-            frame_paths.append(str(path))
-        shot_start, shot_end = detect_shot_span(frame_paths, timestamps, seed_index)
-        try:
-            track = await track_frames(
-                frame_paths,
-                seed_frame_index=seed_index,
-                bbox=selection.bbox_json,
-                seed_mask_path=seed_mask_path,
-                max_frames=len(frame_paths),
-                max_seconds=PERSISTENT_TRACK_BUDGET_SECONDS,
-                include_masks=False,
+        iteration = 0
+        while True:
+            frame_dir = Path(temp_dir) / f"window-{iteration}"
+            if extract_frame is ffmpeg.extract_frame:
+                frame_paths, timestamps = await ffmpeg.extract_sampled_frames(
+                    source,
+                    start_ts=start,
+                    end_ts=end,
+                    fps=analysis_fps,
+                    output_dir=frame_dir,
+                )
+            else:
+                frame_count = max(2, math.floor((end - start) * analysis_fps) + 1)
+                timestamps = [
+                    min(end, start + index / analysis_fps)
+                    for index in range(frame_count)
+                ]
+                frame_paths = []
+                frame_dir.mkdir(parents=True, exist_ok=True)
+                for index, timestamp in enumerate(timestamps):
+                    path = frame_dir / f"{index:06d}.jpg"
+                    await extract_frame(source, timestamp, path)
+                    frame_paths.append(str(path))
+            total_frames_inspected += len(timestamps)
+            seed_index = min(
+                range(len(timestamps)),
+                key=lambda index: abs(timestamps[index] - selection.frame_ts),
             )
-        except Exception as exc:
-            track = sam.TrackResult(
-                tracker="bbox_fallback",
-                frames=[
-                    {
-                        "frame_index": index,
-                        "state": "tracked",
-                        "confidence": 0.0,
-                    }
-                    for index in range(len(frame_paths))
-                ],
-                processed_start_index=0,
-                processed_end_index=len(frame_paths) - 1,
-                warning=f"video tracking unavailable; bbox fallback used ({type(exc).__name__})",
+            shot_start, shot_end = detect_shot_span(
+                frame_paths, timestamps, seed_index
             )
+            try:
+                track = await track_frames(
+                    frame_paths,
+                    seed_frame_index=seed_index,
+                    bbox=selection.bbox_json,
+                    seed_mask_path=seed_mask_path,
+                    max_frames=len(frame_paths),
+                    max_seconds=30.0,
+                    include_masks=False,
+                )
+            except Exception as exc:
+                track = sam.TrackResult(
+                    tracker="bbox_fallback",
+                    frames=[
+                        {
+                            "frame_index": index,
+                            "state": "tracked",
+                            "confidence": 0.0,
+                        }
+                        for index in range(len(frame_paths))
+                    ],
+                    processed_start_index=0,
+                    processed_end_index=len(frame_paths) - 1,
+                    warning=(
+                        "video tracking unavailable; bbox fallback used with shot boundaries "
+                        f"({type(exc).__name__})"
+                    ),
+                )
+            track_start, track_end = tracked_span(
+                track.frames, timestamps, seed_index
+            )
+            if not _persistent_change(intent):
+                break
 
-    track_start, track_end = tracked_span(track.frames, timestamps, seed_index)
+            tolerance = 1.1 / analysis_fps
+            first_ts = timestamps[0]
+            last_ts = timestamps[-1]
+            expand_left = (
+                start > source_start + 1e-3
+                and track_start is not None
+                and abs(track_start - first_ts) <= tolerance
+                and abs(shot_start - first_ts) <= tolerance
+            )
+            expand_right = (
+                end < bounded_end - 1e-3
+                and track_end is not None
+                and abs(track_end - last_ts) <= tolerance
+                and abs(shot_end - last_ts) <= tolerance
+            )
+            if not expand_left and not expand_right:
+                break
+            span = end - start
+            next_start = max(source_start, start - span) if expand_left else start
+            next_end = min(bounded_end, end + span) if expand_right else end
+            if abs(next_start - start) < 1e-6 and abs(next_end - end) < 1e-6:
+                break
+            start, end = next_start, next_end
+            iteration += 1
+
+    assert track is not None
     resolution = resolve_window_from_evidence(
         intent=intent,
         seed_ts=selection.frame_ts,
@@ -288,17 +351,9 @@ async def resolve_local_range(
         shot_end=shot_end,
         tracked_start=track_start,
         tracked_end=track_end,
-        frames_inspected=len(timestamps),
+        frames_inspected=total_frames_inspected,
         explicit_core=explicit_core,
-        tracking_reached_budget=(
-            _persistent_change(intent)
-            and track_start is not None
-            and track_end is not None
-            and start > source_start
-            and end < bounded_end
-            and abs(track_start - start) < 1 / ANALYSIS_FPS
-            and abs(track_end - end) < 1 / ANALYSIS_FPS
-        ),
+        tracking_reached_budget=False,
         source_start=source_start,
         source_end=bounded_end,
     )

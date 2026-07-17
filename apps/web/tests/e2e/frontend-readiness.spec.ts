@@ -25,7 +25,8 @@ async function installApi(
   timeline?: unknown,
   jobs?: {
     agentSse: string;
-    current: () => unknown;
+    current: () => unknown | null;
+    onAgentChat?: () => void;
   },
 ) {
   await page.route("**/api/**", async (route) => {
@@ -33,6 +34,7 @@ async function installApi(
     const path = new URL(request.url()).pathname;
 
     if (path === "/api/agent/chat" && jobs) {
+      jobs.onAgentChat?.();
       return route.fulfill({
         body: jobs.agentSse,
         contentType: "text/event-stream",
@@ -43,7 +45,8 @@ async function installApi(
       return json(route, jobs.current());
     }
     if (path === `/api/projects/${project.project_id}/generation-jobs` && jobs) {
-      return json(route, [jobs.current()]);
+      const current = jobs.current();
+      return json(route, current ? [current] : []);
     }
 
     if (path === "/api/me") {
@@ -228,8 +231,9 @@ test("compare opens original and complete edited timeline side by side", async (
 });
 
 test("generation preview returns after leaving and reopening editor", async ({ page }) => {
+  let started = false;
   let finished = false;
-  const currentJob = () => ({
+  const currentJob = () => started ? ({
     job_id: "job-navigation",
     kind: "generate",
     status: finished ? "done" : "processing",
@@ -250,7 +254,7 @@ test("generation preview returns after leaving and reopening editor", async ({ p
           error: null,
         }]
       : [],
-  });
+  }) : null;
   const agentSse = [
     "event: suggestion",
     `data: ${JSON.stringify({ edit: {
@@ -269,6 +273,7 @@ test("generation preview returns after leaving and reopening editor", async ({ p
   await installApi(page, [project], undefined, {
     agentSse,
     current: currentJob,
+    onAgentChat: () => { started = true; },
   });
   await page.goto(`/editor?projectId=${project.project_id}`);
   await page.getByPlaceholder("describe an edit...").fill("make the car green");

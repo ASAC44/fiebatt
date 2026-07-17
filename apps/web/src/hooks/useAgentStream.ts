@@ -288,7 +288,11 @@ export function useAgentStream(projectId?: string | null) {
           }
         }
 
-        const jobs = await listGenerationJobs(projectId, 10);
+        const jobsResponse = await listGenerationJobs(projectId, 10);
+        // A stale proxy response must not break the entire chat on reopen.
+        // Treat anything other than the documented array as an empty job list;
+        // the next poll or refresh can restore the preview normally.
+        const jobs = Array.isArray(jobsResponse) ? jobsResponse : [];
         const latestJob = jobs.find(
           (job) =>
             !job.accepted &&

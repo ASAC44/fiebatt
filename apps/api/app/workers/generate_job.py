@@ -94,6 +94,25 @@ def _provider_model(provider: str) -> str:
     }.get(provider, provider)
 
 
+def _planned_edit_prompt(user_prompt: str, plan: dict[str, Any]) -> str:
+    """Keep the user's requirement while adding the grounded planner detail."""
+    planned = str(
+        plan.get("prompt_for_video_edit")
+        or plan.get("prompt_for_runway")
+        or plan.get("prompt_for_veo")
+        or ""
+    ).strip()
+    requirement = user_prompt.strip()
+    if not planned or planned.casefold() == requirement.casefold():
+        return requirement
+    return (
+        "NON-NEGOTIABLE USER REQUIREMENT:\n"
+        f"{requirement}\n\n"
+        "GROUNDED VIDEO-EDIT INSTRUCTION:\n"
+        f"{planned}"
+    )
+
+
 async def _update_job(db: AsyncSession, job_id: str, **fields) -> None:
     job = await db.get(Job, job_id)
     if job is None:
@@ -588,6 +607,7 @@ async def run(job_id: str) -> None:
 
     plan = list(plans)[0]
     plan["_video_gen_provider"] = video_provider
+    generation_prompt = _planned_edit_prompt(prompt, plan)
 
     intent = str(plan.get("intent") or "").lower()
     subject_reference_effective: str | None = (
@@ -608,7 +628,7 @@ async def run(job_id: str) -> None:
         "tone": plan.get("tone"),
         "color_grading": plan.get("color_grading"),
         "region_emphasis": plan.get("region_emphasis"),
-        "prompt": prompt,
+        "prompt": generation_prompt,
     }
     await _emit(
         job_id,
@@ -687,9 +707,9 @@ async def run(job_id: str) -> None:
 
     def prompt_for_provider(provider: str, correction: str = "") -> str:
         base = (
-            protected_context_prompt(prompt, generation_window)
+            protected_context_prompt(generation_prompt, generation_window)
             if provider in {"wan", "happyhorse"} and source_video_url is not None
-            else prompt
+            else generation_prompt
         )
         return base + correction
 
@@ -905,7 +925,7 @@ async def run(job_id: str) -> None:
             log.exception("generated frame sampling failed")
             await _emit(job_id, "score_skipped", f"couldn't sample generated video: {exc}")
             return None
-        return await _score_variant_safe(sampled_frames, prompt)
+        return await _score_variant_safe(sampled_frames, generation_prompt)
 
     async def validate_continuity(variant: Variant) -> ContinuityReport | None:
         if not variant.url:

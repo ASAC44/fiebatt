@@ -9,7 +9,7 @@ from app.ai.services.provider_capabilities import (  # noqa: E402
     validate_provider_duration,
 )
 from app.workers import generate_job  # noqa: E402
-from app.workers.generate_job import _public_url_or_none  # noqa: E402
+from app.workers.generate_job import _planned_edit_prompt, _public_url_or_none  # noqa: E402
 
 
 def test_public_url_gate_accepts_remote_https():
@@ -69,3 +69,19 @@ def test_source_edit_mode_falls_back_by_provider_capability():
     assert select_source_edit_mode(
         "veo", duration=8.0, source_video=True, mask_available=True
     ) == "image_conditioned"
+
+
+def test_generation_uses_grounded_plan_without_losing_user_requirement():
+    prompt = _planned_edit_prompt(
+        "Make the car green",
+        {
+            "prompt_for_video_edit": (
+                "Change only the painted body panels to vivid green. Preserve "
+                "windows, tires, reflections, road, and surrounding vehicles."
+            )
+        },
+    )
+
+    assert "Make the car green" in prompt
+    assert "painted body panels to vivid green" in prompt
+    assert "Preserve windows, tires" in prompt

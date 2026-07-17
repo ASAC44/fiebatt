@@ -152,7 +152,10 @@ else:
         # give every variant a conditioning_strategy default so the worker
         # never has to second-guess a missing field.
         for v in variants:
-            v.setdefault("prompt_for_runway", v.get("prompt_for_veo", ""))
+            v.setdefault(
+                "prompt_for_runway",
+                v.get("prompt_for_video_edit") or v.get("prompt_for_veo", ""),
+            )
             strategy = str(v.get("conditioning_strategy", "")).lower()
             if strategy not in ("first_frame", "text_only"):
                 intent = str(v.get("intent", "")).lower()

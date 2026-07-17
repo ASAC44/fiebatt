@@ -19,7 +19,11 @@ async function json(route: Route, body: unknown, status = 200) {
   });
 }
 
-async function installApi(page: Page, projects: typeof project[] = []) {
+async function installApi(
+  page: Page,
+  projects: typeof project[] = [],
+  timeline?: unknown,
+) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -41,8 +45,9 @@ async function installApi(page: Page, projects: typeof project[] = []) {
       return json(route, { ...project, segments: [], entities: [] });
     }
     if (path === `/api/timeline/${project.project_id}`) {
-      return json(route, {
+      return json(route, timeline ?? {
         project_id: project.project_id,
+        duration: project.duration,
         segments: [{
           start_ts: 0,
           end_ts: 4,
@@ -100,4 +105,75 @@ test("login rejects recursive return paths", async ({ page }) => {
   await page.getByRole("button", { name: "Log in" }).click();
 
   await expect(page).toHaveURL(/\/projects$/);
+});
+
+test("compare opens original and complete edited timeline side by side", async ({ page }) => {
+  await installApi(page, [project], {
+    project_id: project.project_id,
+    duration: 4,
+    segments: [],
+    edl: {
+      updated_at: 1,
+      sources: [
+        {
+          id: "source-1",
+          kind: "source",
+          url: "/test-video.mp4",
+          duration: 4,
+          fps: 24,
+          project_id: project.project_id,
+          label: "clip",
+        },
+        {
+          id: "generated-1",
+          kind: "generated",
+          url: "/generated.mp4",
+          duration: 2,
+          fps: 24,
+          project_id: project.project_id,
+          label: "applied edit",
+        },
+      ],
+      clips: [
+        {
+          id: "clip-original",
+          kind: "source",
+          url: "/test-video.mp4",
+          source_start: 0,
+          source_end: 2,
+          media_duration: 4,
+          volume: 1,
+          label: "clip",
+          project_id: project.project_id,
+          source_asset_id: "source-1",
+        },
+        {
+          id: "clip-generated",
+          kind: "generated",
+          url: "/generated.mp4",
+          source_start: 0,
+          source_end: 2,
+          media_duration: 2,
+          volume: 1,
+          label: "applied edit",
+          project_id: project.project_id,
+          source_asset_id: "generated-1",
+        },
+      ],
+    },
+  });
+  await page.goto(`/editor?projectId=${project.project_id}`);
+  await expect(page.getByLabel("Project name")).toHaveValue("clip");
+
+  await page.getByRole("button", { name: "Compare" }).click();
+
+  await expect(page.getByLabel("Original video")).toBeVisible();
+  await expect(page.getByLabel("Edited timeline preview")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Single view" })).toBeVisible();
+
+  await page.getByLabel("Compare playhead").fill("3");
+  await expect(page.getByLabel("Edited timeline preview")).toHaveAttribute(
+    "src",
+    "/generated.mp4",
+  );
 });

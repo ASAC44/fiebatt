@@ -14,11 +14,14 @@ import {
 export function CompareOverlay({ onClose }: { onClose: () => void }) {
   const { state } = useEDL();
   const original = state.sources.find((asset) => asset.kind === "source") ?? state.sources[0] ?? null;
-  const total = totalDuration(state.clips);
-  const [playhead, setPlayhead] = useState(() => Math.min(state.playhead, total || state.playhead));
+  const editedDuration = totalDuration(state.clips);
+  const comparisonDuration = Math.max(original?.duration ?? 0, editedDuration);
+  const [playhead, setPlayhead] = useState(() =>
+    Math.min(state.playhead, comparisonDuration || state.playhead),
+  );
   const [playing, setPlaying] = useState(false);
   const [singleView, setSingleView] = useState<"original" | "edited">("original");
-  const [sideBySide, setSideBySide] = useState(false);
+  const [sideBySide, setSideBySide] = useState(true);
   const originalRef = useRef<HTMLVideoElement>(null);
   const editedRef = useRef<HTMLVideoElement>(null);
   const editedClipIdRef = useRef<string | null>(null);
@@ -90,7 +93,7 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
       return;
     }
 
-    const restart = total > 0 && playhead >= total - 0.05;
+    const restart = comparisonDuration > 0 && playhead >= comparisonDuration - 0.05;
     const nextPlayhead = restart ? 0 : playhead;
     lastTickRef.current = null;
     setPlayhead(nextPlayhead);
@@ -100,7 +103,7 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
       void Promise.allSettled([originalVideo.play(), editedVideo.play()]);
       setPlaying(true);
     });
-  }, [playhead, playing, syncVideos, total]);
+  }, [comparisonDuration, playhead, playing, syncVideos]);
 
   useEffect(() => {
     if (!playing) {
@@ -116,10 +119,10 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
       const delta = (now - lastTickRef.current) / 1000;
       lastTickRef.current = now;
       setPlayhead((current) => {
-        const next = Math.min(total, current + delta);
-        if (next >= total) {
+        const next = Math.min(comparisonDuration, current + delta);
+        if (next >= comparisonDuration) {
           setPlaying(false);
-          return total;
+          return comparisonDuration;
         }
         return next;
       });
@@ -130,7 +133,7 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
     return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
-  }, [playing, total]);
+  }, [comparisonDuration, playing]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -160,7 +163,7 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
       <header className="flex h-12 items-center justify-between border-b border-border px-4">
         <div>
           <div className="text-sm font-medium">Compare</div>
-          <div className="text-xs text-muted-foreground">Original and edited timeline play together.</div>
+          <div className="text-xs text-muted-foreground">Original video and full edited timeline play together.</div>
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -178,7 +181,7 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
             {sideBySide ? "Single view" : "Side by side"}
           </Button>
           <span className="font-mono text-xs text-muted-foreground">
-            {formatTime(playhead)} / {formatTime(total)}
+            {formatTime(playhead)} / {formatTime(comparisonDuration)}
           </span>
           <Button size="icon-sm" variant="ghost" onClick={onClose} aria-label="Close compare">
             <X />
@@ -188,10 +191,23 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
 
       <main className={`grid min-h-0 flex-1 ${sideBySide ? "grid-cols-2 gap-px bg-border" : "grid-cols-1 bg-background"}`}>
         <ComparePane label="Original" asset={original} hidden={!showOriginal}>
-          <video ref={originalRef} src={original.url} muted playsInline className="h-full w-full bg-black object-contain" />
+          <video
+            ref={originalRef}
+            src={original.url}
+            muted
+            playsInline
+            aria-label="Original video"
+            className="h-full w-full bg-black object-contain"
+          />
         </ComparePane>
-        <ComparePane label="Modified" clip={activeClip} hidden={!showEdited}>
-          <video ref={editedRef} muted playsInline className="h-full w-full bg-black object-contain" />
+        <ComparePane label="Edited timeline" clip={activeClip} hidden={!showEdited}>
+          <video
+            ref={editedRef}
+            muted
+            playsInline
+            aria-label="Edited timeline preview"
+            className="h-full w-full bg-black object-contain"
+          />
         </ComparePane>
       </main>
 
@@ -206,7 +222,7 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
           aria-label="Compare playhead"
           className="h-1 flex-1 accent-primary"
           min={0}
-          max={Math.max(total, 0.001)}
+          max={Math.max(comparisonDuration, 0.001)}
           step={0.01}
           type="range"
           value={playhead}

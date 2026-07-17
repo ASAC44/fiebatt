@@ -58,6 +58,17 @@ _DSML_PARAMETER = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+_EDIT_COMMAND = re.compile(
+    r"\b(?:make|change|turn|give|add|remove|replace|animate|move|run|jump|walk|dance|"
+    r"paint|color|resize|transform|fix)\b",
+    re.IGNORECASE,
+)
+_NON_GENERATING_EDIT_REQUEST = re.compile(
+    r"\b(?:status|progress|why|how|what|when|where|which|compare|export|download|"
+    r"apply|undo|revert|rename)\b",
+    re.IGNORECASE,
+)
+
 
 @dataclass(slots=True)
 class _ParsedFunction:
@@ -264,6 +275,17 @@ def _build_context_block(body: "AgentChatRequest") -> str:
         f"- timeline_duration: {duration}\n"
         f"- active_bbox: {_format_bbox(body.bbox)}\n"
         f"- selection_id: {selection}\n"
+    )
+
+
+def _requires_selected_generation(body: "AgentChatRequest") -> bool:
+    """True only for a clear edit command aimed at an active selected region."""
+    if body.bbox is None:
+        return False
+    message = body.message.strip()
+    return bool(
+        _EDIT_COMMAND.search(message)
+        and not _NON_GENERATING_EDIT_REQUEST.search(message)
     )
 
 
@@ -1369,6 +1391,116 @@ async def _agent_stream(
 
         if generation_started:
             break
+
+    # A selected imperative edit is a command, not an open-ended question.
+    # Qwen can inspect frames then answer in prose without ever emitting the
+    # required tool call. Finish the deterministic plan → generate path here
+    # so the editor never reports a successful chat turn with no render.
+    if not generation_started and _requires_selected_generation(body):
+        log.warning(
+            "[agent.chat] req=%s model stopped before generation; enforcing selected edit pipeline",
+            req_id,
+        )
+        selection_id = await _resolve_plan_selection_id(body)
+        if not selection_id:
+            yield sse_event(
+                "error",
+                {"message": "Could not prepare the selected subject. Draw the selection again and retry."},
+            )
+        else:
+            plan_result: dict[str, Any] | None = None
+            if active_plan_id is None:
+                plan_call_id = f"enforced-plan-{uuid.uuid4().hex[:12]}"
+                plan_args = {
+                    "project_id": body.project_id,
+                    "selection_id": selection_id,
+                    "prompt": body.message,
+                }
+                if body.video_gen_provider:
+                    plan_args["video_gen_provider"] = body.video_gen_provider
+                _tool_calls_log.append({"id": plan_call_id, "tool": "create_edit_plan", "args": plan_args})
+                yield sse_event("tool_call_start", {
+                    "id": plan_call_id,
+                    "tool": "create_edit_plan",
+                    "args": plan_args,
+                })
+                try:
+                    async with AsyncSessionLocal() as tool_db:
+                        plan_result = await execute_tool(
+                            tool_name="create_edit_plan",
+                            args=plan_args,
+                            db=tool_db,
+                            session_id=session_id,
+                            runner=runner,
+                        )
+                    active_plan_id = str(plan_result["plan_id"])
+                    yield sse_event("tool_call_end", {
+                        "id": plan_call_id,
+                        "tool": "create_edit_plan",
+                        "result": plan_result,
+                        "status": "done",
+                    })
+                except Exception as exc:
+                    log.exception("enforced edit plan failed")
+                    yield sse_event("tool_call_end", {
+                        "id": plan_call_id,
+                        "tool": "create_edit_plan",
+                        "result": {"error": str(exc)},
+                        "status": "error",
+                    })
+
+            if active_plan_id is not None:
+                generate_call_id = f"enforced-generate-{uuid.uuid4().hex[:12]}"
+                generate_args = {
+                    "project_id": body.project_id,
+                    "plan_id": active_plan_id,
+                    "user_prompt": body.message,
+                }
+                if body.video_gen_provider:
+                    generate_args["video_gen_provider"] = body.video_gen_provider
+                _tool_calls_log.append({"id": generate_call_id, "tool": "generate_edit", "args": generate_args})
+                yield sse_event("tool_call_start", {
+                    "id": generate_call_id,
+                    "tool": "generate_edit",
+                    "args": generate_args,
+                })
+                try:
+                    async with AsyncSessionLocal() as tool_db:
+                        generation_result = await execute_tool(
+                            tool_name="generate_edit",
+                            args=generate_args,
+                            db=tool_db,
+                            session_id=session_id,
+                            runner=runner,
+                        )
+                    yield sse_event("tool_call_end", {
+                        "id": generate_call_id,
+                        "tool": "generate_edit",
+                        "result": generation_result,
+                        "status": "done",
+                    })
+                    job_id = str(generation_result["job_id"])
+                    core = (plan_result or {}).get("edit_core") or {}
+                    yield sse_event("suggestion", {
+                        "edit": {
+                            "job_id": job_id,
+                            "start_ts": core.get("start_ts"),
+                            "end_ts": core.get("end_ts"),
+                            "bbox_hint": body.bbox.model_dump(),
+                            "suggestion": body.message,
+                        },
+                    })
+                    async for evt in _bridge_plan_events(job_id, timeout_s=25.0):
+                        yield evt
+                    generation_started = True
+                except Exception as exc:
+                    log.exception("enforced generation failed")
+                    yield sse_event("tool_call_end", {
+                        "id": generate_call_id,
+                        "tool": "generate_edit",
+                        "result": {"error": str(exc)},
+                        "status": "error",
+                    })
 
     # ── persist agent response ──
     try:

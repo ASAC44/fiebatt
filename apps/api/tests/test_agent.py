@@ -793,6 +793,59 @@ async def test_agent_chat_with_function_call(client: AsyncClient, live_agent_set
 
 
 @pytest.mark.asyncio
+async def test_selected_edit_is_generated_when_model_stops_after_inspection(
+    client: AsyncClient,
+    live_agent_settings,
+):
+    """A clear selected edit must not silently end as a prose-only chat turn."""
+    mock_client = _mock_agent_client(
+        _make_mock_agent_response("I inspected the selected person."),
+    )
+
+    async def no_plan_events(*_args, **_kwargs):
+        if False:
+            yield ""
+
+    async def execute(tool_name, args, **_kwargs):
+        if tool_name == "create_edit_plan":
+            assert args["selection_id"] == "selection-1"
+            return {
+                "plan_id": "plan-1",
+                "edit_core": {"start_ts": 1.0, "end_ts": 4.0},
+            }
+        assert tool_name == "generate_edit"
+        assert args["plan_id"] == "plan-1"
+        assert args["user_prompt"] == "make this man run"
+        return {"job_id": "job-1", "status": "pending"}
+
+    with patch("app.api.routes.agent.AsyncOpenAI", return_value=mock_client), \
+         patch("app.api.routes.agent._resolve_plan_selection_id", new=AsyncMock(return_value="selection-1")), \
+         patch("app.api.routes.agent.execute_tool", new=AsyncMock(side_effect=execute)), \
+         patch("app.api.routes.agent._bridge_plan_events", no_plan_events):
+        res = await client.post(
+            "/api/agent/chat",
+            json={
+                "project_id": "test-proj",
+                "message": "make this man run",
+                "conversation_id": "conv-enforced-edit",
+                "bbox": {"x": 0.2, "y": 0.2, "w": 0.3, "h": 0.4},
+            },
+            headers=headers(),
+        )
+
+    assert res.status_code == 200
+    events = _parse_sse_events(res.text)
+    started_tools = [
+        event["data"]["tool"]
+        for event in events
+        if event["event"] == "tool_call_start"
+    ]
+    assert started_tools == ["create_edit_plan", "generate_edit"]
+    suggestion = next(event for event in events if event["event"] == "suggestion")
+    assert suggestion["data"]["edit"]["job_id"] == "job-1"
+
+
+@pytest.mark.asyncio
 async def test_agent_chat_recovers_raw_dsml_tool_call(client: AsyncClient, live_agent_settings):
     raw_call = """I will inspect it.
 <｜DSML｜function_calls>

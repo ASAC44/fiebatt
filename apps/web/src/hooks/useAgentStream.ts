@@ -14,10 +14,12 @@ import {
   getJob,
   getConversationMessages,
   getSessionId,
+  listGenerationJobs,
   listConversations,
   type ChatMessageResp,
 } from "@/lib/api";
 import { redirectToLogin } from "@/lib/auth";
+import { cleanAgentText } from "@/lib/agent-text";
 import {
   useAgent,
   type AgentAction,
@@ -54,6 +56,41 @@ function agentChatUrl(): string {
   return "/api/agent/chat";
 }
 
+type PendingAgentTurn = {
+  startedAt: number;
+  prompt: string;
+  jobId?: string;
+};
+
+const PENDING_TURN_PREFIX = "fiebatt.pending-agent-turn.";
+const PLAN_RECOVERY_TIMEOUT_MS = 7 * 60 * 1000;
+
+function pendingTurnKey(projectId: string): string {
+  return `${PENDING_TURN_PREFIX}${projectId}`;
+}
+
+function readPendingTurn(projectId: string): PendingAgentTurn | null {
+  try {
+    const raw = localStorage.getItem(pendingTurnKey(projectId));
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<PendingAgentTurn>;
+    if (typeof value.startedAt !== "number" || typeof value.prompt !== "string") {
+      return null;
+    }
+    return value as PendingAgentTurn;
+  } catch {
+    return null;
+  }
+}
+
+function writePendingTurn(projectId: string, turn: PendingAgentTurn): void {
+  localStorage.setItem(pendingTurnKey(projectId), JSON.stringify(turn));
+}
+
+function clearPendingTurn(projectId: string): void {
+  localStorage.removeItem(pendingTurnKey(projectId));
+}
+
 // ─── hook ─────────────────────────────────────────────────────────────
 
 export function useAgentStream(projectId?: string | null) {
@@ -61,9 +98,59 @@ export function useAgentStream(projectId?: string | null) {
   const abortRef = useRef<AbortController | null>(null);
   const inFlightRef = useRef(false);
   const generationWatchRef = useRef<AbortController | null>(null);
+  const watchedJobIdRef = useRef<string | null>(null);
   const loadedRef = useRef<string | null>(null);
+  const conversationHydrationRef = useRef<Promise<void> | null>(null);
   const conversationIdRef = useRef(state.conversationId);
   conversationIdRef.current = state.conversationId;
+
+  const watchGeneration = useCallback(async (jobId: string) => {
+    if (watchedJobIdRef.current === jobId) return;
+    generationWatchRef.current?.abort();
+    const watch = new AbortController();
+    generationWatchRef.current = watch;
+    watchedJobIdRef.current = jobId;
+    dispatch({ type: "resume_job_watch", activity: "video job queued…" });
+    try {
+      while (!watch.signal.aborted) {
+        const job = await getJob(jobId);
+        if (watch.signal.aborted) return;
+        const ready = job.variants.filter((variant) => variant.url);
+        const failed = job.variants.filter((variant) => variant.status === "error");
+        if (job.status === "done" || job.status === "error") {
+          if (projectId) clearPendingTurn(projectId);
+          if (ready.length > 0) {
+            dispatch({ type: "add_variant_preview", jobId, variants: ready });
+            dispatch({ type: "set_activity", activity: "preview ready — choose a variant" });
+          } else {
+            dispatch({
+              type: "add_error",
+              message: job.error || failed[0]?.error || "Video generation failed without a usable preview.",
+            });
+          }
+          return;
+        }
+        dispatch({
+          type: "set_activity",
+          activity: `${job.status === "processing" ? "rendering" : "queued"} · ${ready.length}/${job.variants.length || 1} previews ready…`,
+        });
+        await new Promise((resolve) => window.setTimeout(resolve, 1500));
+      }
+    } catch (error) {
+      if (!watch.signal.aborted) {
+        dispatch({
+          type: "add_error",
+          message: `Could not read generation status: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      }
+    } finally {
+      if (generationWatchRef.current === watch) {
+        generationWatchRef.current = null;
+        watchedJobIdRef.current = null;
+        dispatch({ type: "end_stream" });
+      }
+    }
+  }, [dispatch, projectId]);
 
   // hydrate the most recent conversation for this project on mount
   useEffect(() => {
@@ -76,7 +163,7 @@ export function useAgentStream(projectId?: string | null) {
     }
     loadedRef.current = projectId;
 
-    (async () => {
+    const hydration = (async () => {
       try {
         const convos = await listConversations(projectId);
         if (convos.length === 0) {
@@ -117,6 +204,7 @@ export function useAgentStream(projectId?: string | null) {
         console.warn("[agent] failed to load conversation:", err);
       }
     })();
+    conversationHydrationRef.current = hydration;
   }, [projectId, dispatch]);
 
   const sendMessage = useCallback(
@@ -135,6 +223,7 @@ export function useAgentStream(projectId?: string | null) {
       abortRef.current = controller;
       let timedOut = false;
       let sawDone = false;
+      let generationQueued = false;
       const timeout = window.setTimeout(() => {
         timedOut = true;
         dispatch({
@@ -144,51 +233,8 @@ export function useAgentStream(projectId?: string | null) {
         controller.abort();
       }, 7 * 60 * 1000);
 
-      const watchGeneration = async (jobId: string) => {
-        generationWatchRef.current?.abort();
-        const watch = new AbortController();
-        generationWatchRef.current = watch;
-        dispatch({ type: "set_activity", activity: "video job queued…" });
-        try {
-          while (!watch.signal.aborted) {
-            const job = await getJob(jobId);
-            if (watch.signal.aborted) return;
-            const ready = job.variants.filter((variant) => variant.url);
-            const failed = job.variants.filter((variant) => variant.status === "error");
-            if (job.status === "done" || job.status === "error") {
-              if (ready.length > 0) {
-                dispatch({ type: "add_variant_preview", jobId, variants: ready });
-                dispatch({ type: "set_activity", activity: "preview ready — choose a variant" });
-              } else {
-                dispatch({
-                  type: "add_error",
-                  message: job.error || failed[0]?.error || "Video generation failed without a usable preview.",
-                });
-              }
-              return;
-            }
-            dispatch({
-              type: "set_activity",
-              activity: `${job.status === "processing" ? "rendering" : "queued"} · ${ready.length}/${job.variants.length || 1} previews ready…`,
-            });
-            await new Promise((resolve) => window.setTimeout(resolve, 1500));
-          }
-        } catch (error) {
-          if (!watch.signal.aborted) {
-            dispatch({
-              type: "add_error",
-              message: `Could not read generation status: ${error instanceof Error ? error.message : String(error)}`,
-            });
-          }
-        } finally {
-          if (generationWatchRef.current === watch) {
-            generationWatchRef.current = null;
-            dispatch({ type: "end_stream" });
-          }
-        }
-      };
-
       // Optimistic UI: show the user message immediately
+      writePendingTurn(projectId, { startedAt: Date.now(), prompt: message });
       dispatch({ type: "add_user_message", text: message });
       dispatch({ type: "start_stream" });
 
@@ -276,10 +322,19 @@ export function useAgentStream(projectId?: string | null) {
                 const data = JSON.parse(dataStr) as Record<string, unknown>;
                 eventCount++;
                 if (currentEvent === "done") sawDone = true;
-                handleSSEEvent(dispatch, currentEvent, data);
+                handleSSEEvent(dispatch, currentEvent, data, message);
                 if (currentEvent === "suggestion") {
                   const edit = data.edit as { job_id?: string } | undefined;
-                  if (edit?.job_id) void watchGeneration(edit.job_id);
+                  if (edit?.job_id) {
+                    generationQueued = true;
+                    const pending = readPendingTurn(projectId);
+                    writePendingTurn(projectId, {
+                      startedAt: pending?.startedAt ?? Date.now(),
+                      prompt: pending?.prompt ?? message,
+                      jobId: edit.job_id,
+                    });
+                    void watchGeneration(edit.job_id);
+                  }
                 }
               } catch (err) {
                 console.warn(
@@ -317,6 +372,7 @@ export function useAgentStream(projectId?: string | null) {
         }
       } finally {
         window.clearTimeout(timeout);
+        if (sawDone && !generationQueued) clearPendingTurn(projectId);
         // Keep the input/status card alive while the detached generation
         // watcher is polling for a preview after the chat stream ends.
         if (!generationWatchRef.current) dispatch({ type: "end_stream" });
@@ -324,8 +380,71 @@ export function useAgentStream(projectId?: string | null) {
         inFlightRef.current = false;
       }
     },
-    [state.messages, state.conversationId, dispatch],
+    [state.messages, state.conversationId, dispatch, watchGeneration],
   );
+
+  // A page change only closes browser delivery. The backend agent turn and
+  // generation keep running. On return, find the job created for that turn
+  // and restore polling (including a preview that finished while away).
+  useEffect(() => {
+    if (!projectId) return;
+    const pending = readPendingTurn(projectId);
+    if (!pending) return;
+
+    let cancelled = false;
+    const recover = async () => {
+      // Conversation hydration replaces message rows. Wait for it before
+      // adding a recovered preview so a slower history request cannot erase it.
+      await conversationHydrationRef.current;
+      if (cancelled) return;
+      dispatch({
+        type: "resume_job_watch",
+        activity: pending.jobId ? "restoring video job…" : "finishing edit plan…",
+      });
+      const deadline = pending.startedAt + PLAN_RECOVERY_TIMEOUT_MS;
+      while (!cancelled && Date.now() <= deadline) {
+        try {
+          if (pending.jobId) {
+            await watchGeneration(pending.jobId);
+            return;
+          }
+          const jobs = await listGenerationJobs(projectId, 10);
+          if (cancelled) return;
+          const earliest = pending.startedAt - 30_000;
+          const candidate = jobs.find((job) => {
+            if (job.accepted) return false;
+            const createdAt = job.created_at ? Date.parse(job.created_at) : 0;
+            return createdAt >= earliest;
+          });
+          if (candidate) {
+            writePendingTurn(projectId, { ...pending, jobId: candidate.job_id });
+            await watchGeneration(candidate.job_id);
+            return;
+          }
+        } catch {
+          // Network or planning may still be settling. Retry until deadline.
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+      }
+      if (!cancelled) {
+        clearPendingTurn(projectId);
+        dispatch({
+          type: "add_error",
+          message: "Could not restore the edit job. Please try the edit again.",
+        });
+      }
+    };
+
+    void recover();
+    return () => {
+      cancelled = true;
+    };
+  }, [dispatch, projectId, watchGeneration]);
+
+  useEffect(() => () => {
+    abortRef.current?.abort();
+    generationWatchRef.current?.abort();
+  }, []);
 
   const stopStream = useCallback(() => {
     abortRef.current?.abort();
@@ -336,6 +455,7 @@ export function useAgentStream(projectId?: string | null) {
 
   const clearChat = useCallback(async () => {
     abortRef.current?.abort();
+    if (projectId) clearPendingTurn(projectId);
     const oldId = state.conversationId;
     dispatch({ type: "clear_messages" });
 
@@ -379,7 +499,7 @@ function dbMessageToAgentMessage(msg: ChatMessageResp): AgentMessage | null {
     case "agent":
       return {
         type: "agent",
-        text: (content.text as string) ?? "",
+        text: cleanAgentText((content.text as string) ?? ""),
         ts,
         streaming: false,
       };
@@ -446,6 +566,7 @@ function handleSSEEvent(
   dispatch: React.Dispatch<AgentAction>,
   event: string,
   data: Record<string, unknown>,
+  currentUserPrompt = "",
 ): void {
   _logSSE(event, data);
 
@@ -560,7 +681,7 @@ function handleSSEEvent(
       dispatch({
         type: "prompt_plan_started",
         jobId,
-        userPrompt: (data.user_prompt as string | undefined) ?? "",
+        userPrompt: currentUserPrompt || (data.user_prompt as string | undefined) || "",
       });
       break;
     }

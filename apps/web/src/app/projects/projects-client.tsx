@@ -11,6 +11,7 @@ import {
   listProjects,
   logout,
   me,
+  updateProject,
   type Me,
   type ProjectListItem,
 } from "@/lib/api";
@@ -67,6 +68,20 @@ export function ProjectsClient() {
     } catch (err) {
       setItems(previous);
       setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleRename(projectId: string, name: string) {
+    try {
+      const updated = await updateProject(projectId, name);
+      setItems((current) =>
+        current?.map((item) =>
+          item.project_id === projectId ? { ...item, name: updated.name } : item,
+        ) ?? current,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      throw err;
     }
   }
 
@@ -165,6 +180,7 @@ export function ProjectsClient() {
                 lastEdited={formatRelative(project.created_at)}
                 meta={`${formatDuration(project.duration)} · ${project.width}x${project.height}`}
                 onDelete={() => handleDelete(project.project_id)}
+                onRename={(name) => handleRename(project.project_id, name)}
                 title={project.name}
                 videoUrl={project.video_url}
               />

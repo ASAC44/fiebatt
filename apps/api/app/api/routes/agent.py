@@ -10,11 +10,13 @@ model until it finishes.
 import asyncio
 import json
 import logging
+import re
 import uuid
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
 from pydantic import BaseModel
@@ -33,6 +35,80 @@ from app.services import job_events
 
 log = logging.getLogger("fiebatt.agent")
 router = APIRouter(prefix="/agent", tags=["agent"])
+
+
+_TOOL_MARKUP_START = re.compile(
+    r"<\s*(?:(?:[|｜]\s*)?DSML(?:\s*[|｜])?\s*)?"
+    r"(?:function[\s_]?calls?|tool[\s_]?calls?|invoke\b|parameter\b)",
+    re.IGNORECASE,
+)
+_DSML_INVOKE = re.compile(
+    r'<\s*(?:(?:[|｜]\s*)?DSML(?:\s*[|｜])?\s*)?invoke\s+name="([^"]+)"[^>]*>'
+    r"(.*?)"
+    r"</\s*(?:(?:[|｜]\s*)?DSML(?:\s*[|｜])?\s*)?invoke\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_DSML_PARAMETER = re.compile(
+    r'<\s*(?:(?:[|｜]\s*)?DSML(?:\s*[|｜])?\s*)?parameter\s+'
+    r'name="([^"]+)"(?:\s+string="(true|false)")?[^>]*>'
+    r"(.*?)"
+    r"</\s*(?:(?:[|｜]\s*)?DSML(?:\s*[|｜])?\s*)?parameter\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+@dataclass(slots=True)
+class _ParsedFunction:
+    name: str
+    arguments: str
+
+
+@dataclass(slots=True)
+class _ParsedToolCall:
+    id: str
+    function: _ParsedFunction
+
+
+def _clean_agent_text(text: str) -> str:
+    """Return user-facing prose before any leaked tool protocol block."""
+    marker = _TOOL_MARKUP_START.search(text)
+    visible = text[:marker.start()] if marker else text
+    return visible.strip()
+
+
+def _parse_dsml_tool_calls(text: str) -> list[_ParsedToolCall]:
+    """Recover DeepSeek-style DSML calls leaked into message content."""
+    parsed: list[_ParsedToolCall] = []
+    for index, invoke in enumerate(_DSML_INVOKE.finditer(text)):
+        name, body = invoke.groups()
+        arguments: dict[str, Any] = {}
+        for parameter in _DSML_PARAMETER.finditer(body):
+            key, is_string, raw_value = parameter.groups()
+            value = raw_value.strip()
+            if (is_string or "false").lower() != "true":
+                try:
+                    arguments[key] = json.loads(value)
+                except json.JSONDecodeError:
+                    arguments[key] = value
+            else:
+                arguments[key] = value
+        if not arguments:
+            try:
+                direct = json.loads(body.strip())
+                if isinstance(direct, dict):
+                    arguments = direct
+            except json.JSONDecodeError:
+                pass
+        parsed.append(
+            _ParsedToolCall(
+                id=f"dsml-{uuid.uuid4().hex[:12]}-{index}",
+                function=_ParsedFunction(
+                    name=name,
+                    arguments=json.dumps(arguments),
+                ),
+            )
+        )
+    return parsed
 
 # ---- request schema ----
 
@@ -761,9 +837,9 @@ async def _bridge_plan_events(
 
     The ``generate_job`` worker publishes a rich trail of stage events on
     the per-job event bus (plan_start, plan_done, gen_start, variant_done…).
-    The Pro-mode reveal panel consumes these directly via
-    ``/api/jobs/{id}/stream``, but the Vibe-mode agent chat only hears the
-    agent SSE stream — so by default the user never sees that the model is
+    The detailed generation panel consumes these directly via
+    ``/api/jobs/{id}/stream``, while agent chat only hears the agent SSE
+    stream — so by default the user never sees that the model is
     quietly rewriting their one-line prompt into a video generation brief.
 
     This helper bridges the gap for exactly the events that are interesting
@@ -887,7 +963,6 @@ def _build_messages(
 
 async def _agent_stream(
     *,
-    request: Request,
     body: AgentChatRequest,
     session_id: str,
     runner: Any,
@@ -988,16 +1063,15 @@ async def _agent_stream(
             )
             choice = response.choices[0]
             msg = choice.message
-            text = msg.content or ""
-            tool_calls = msg.tool_calls or []
+            raw_text = msg.content or ""
+            tool_calls: list[Any] = list(msg.tool_calls or [])
+            if not tool_calls:
+                tool_calls = _parse_dsml_tool_calls(raw_text)
+            text = _clean_agent_text(raw_text)
         except Exception as exc:
             log.exception("[agent.chat] req=%s %s API call failed on turn %d", req_id, provider_name, turn)
             yield sse_event("error", {"message": f"{provider_name} API error: {exc}"})
             yield sse_event("done", {})
-            return
-
-        if await request.is_disconnected():
-            log.info("Client disconnected during agent loop")
             return
 
         if text:
@@ -1036,6 +1110,10 @@ async def _agent_stream(
             tool_args = json.loads(tc.function.arguments) if tc.function.arguments else {}
             if tool_name == "create_edit_plan" and body.selection_id:
                 tool_args.setdefault("selection_id", body.selection_id)
+            if tool_name == "generate_edit":
+                # Keep attribution separate from the model-authored generation
+                # prompt. The worker emits both for the before/refined card.
+                tool_args["user_prompt"] = body.message
             if tool_name in {"create_edit_plan", "generate_edit"} and body.video_gen_provider:
                 tool_args["video_gen_provider"] = body.video_gen_provider
 
@@ -1186,13 +1264,47 @@ async def _agent_stream(
     yield sse_event("done", {})
 
 
+# Keep strong references so Python cannot collect detached agent turns while
+# Qwen is planning or queueing their generation job.
+_agent_turn_tasks: set[asyncio.Task[None]] = set()
+
+
+async def _detached_agent_relay(
+    source: AsyncGenerator[str, None],
+) -> AsyncGenerator[str, None]:
+    """Relay SSE while letting agent orchestration survive client navigation."""
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def consume() -> None:
+        try:
+            async for event in source:
+                await queue.put(event)
+        except Exception as exc:
+            log.exception("detached agent turn failed")
+            await queue.put(sse_event("error", {"message": str(exc)}))
+            await queue.put(sse_event("done", {}))
+        finally:
+            await queue.put(None)
+
+    task = asyncio.create_task(consume(), name=f"agent-turn:{uuid.uuid4().hex[:8]}")
+    _agent_turn_tasks.add(task)
+    task.add_done_callback(_agent_turn_tasks.discard)
+
+    # Closing this relay only drops browser delivery. The consumer keeps
+    # running, persists its conversation, and starts any requested video job.
+    while True:
+        event = await queue.get()
+        if event is None:
+            return
+        yield event
+
+
 # ---- route ----
 
 
 @router.post("/chat")
 async def agent_chat(
     body: AgentChatRequest,
-    request: Request,
     session: SessionModel = Depends(get_session),
     runner=Depends(get_runner),
 ) -> StreamingResponse:
@@ -1205,11 +1317,12 @@ async def agent_chat(
     needs them instead.
     """
     return StreamingResponse(
-        _agent_stream(
-            request=request,
-            body=body,
-            session_id=session.id,
-            runner=runner,
+        _detached_agent_relay(
+            _agent_stream(
+                body=body,
+                session_id=session.id,
+                runner=runner,
+            ),
         ),
         media_type="text/event-stream",
         headers={

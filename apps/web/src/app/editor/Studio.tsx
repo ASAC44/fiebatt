@@ -19,7 +19,6 @@ import {
 } from "@/stores/edl";
 import { Preview } from "@/components/editor-port/Preview";
 import { CompareOverlay } from "@/components/editor-port/CompareOverlay";
-import { Inspector } from "@/components/editor-port/Inspector";
 import { Timeline } from "@/components/editor-port/Timeline";
 import { Library } from "@/components/editor-port/Library";
 import { UploadDrop } from "@/components/editor-port/UploadDrop";
@@ -225,7 +224,6 @@ function StudioInner({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [hydrateError, setHydrateError] = useState<string | null>(null);
   const [hydrateAttempt, setHydrateAttempt] = useState(0);
-  const [mode, setMode] = useState<'vibe' | 'pro'>('vibe');
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
   const [hydratingProject, setHydratingProject] = useState(Boolean(initialProject));
@@ -270,9 +268,9 @@ function StudioInner({
 
   // The "effective" project id is the one AgentChat actually sends to the
   // backend — it falls back to whatever source the user just uploaded in
-  // vibe mode so the chat keeps working even before we've persisted a
+  // focused layout so chat keeps working even before we've persisted a
   // reopen-able reel. The timeline-refresh listener MUST key on this same
-  // fallback chain, otherwise uploading-in-vibe-mode silently skips the
+  // fallback chain, otherwise a newly uploaded project silently skips the
   // listener attach and ``accept_variant`` lands on the server but the
   // preview never updates. (This was the "pressing apply does nothing"
   // bug — initialProject was undefined, so projectId was undefined, so
@@ -380,7 +378,7 @@ function StudioInner({
 
         // Prefer the saved initialProject snapshot (from ?reopen=), but
         // fall back to constructing one from the live EDL source asset —
-        // this is the vibe-mode upload path where the parent route never
+        // this is the upload path where the parent route never
         // provided an initialProject prop. Without this fallback the
         // handler aborted via the ref mismatch and the preview stayed
         // frozen on the original clip.
@@ -659,7 +657,7 @@ function StudioInner({
       : "Export";
 
   return (
-    <main className={`studio ${mode === 'vibe' ? 'studio--vibe' : ''}`} ref={rootRef}>
+    <main className="studio studio--focused" ref={rootRef}>
       <input
         ref={fileInputRef}
         type="file"
@@ -674,8 +672,6 @@ function StudioInner({
       <EditorTopbar
         projectId={projectId ?? null}
         projectName={projectLabel || "Untitled video"}
-        mode={mode}
-        onModeChange={setMode}
         onImport={projectId ? undefined : () => fileInputRef.current?.click()}
         onCompare={() => {
           dispatch({ type: "set_playing", playing: false });
@@ -927,16 +923,7 @@ function StudioInner({
         />
 
         <aside className="studio__right">
-          {mode === 'vibe' ? (
-            <AgentChat projectId={continuityProjectId} />
-          ) : (
-            <Inspector
-              mode={mode}
-              continuity={continuity}
-              projectId={continuityProjectId}
-              showAiTab={mode === "pro"}
-            />
-          )}
+          <AgentChat projectId={continuityProjectId} />
         </aside>
       </section>
 

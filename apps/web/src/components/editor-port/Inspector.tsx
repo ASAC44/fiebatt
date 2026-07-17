@@ -17,32 +17,20 @@ import "./inspector.css";
 type Tab = "ai" | "continuity" | "basic" | "info" | "agent";
 
 export function Inspector({
-  mode = "pro",
   continuity,
   projectId,
-  showAiTab = mode === "pro",
 }: {
-  mode?: "vibe" | "pro";
   continuity: ContinuityDashboardController;
   projectId: string | null;
-  showAiTab?: boolean;
 }) {
   const [tab, setTab] = useState<Tab>("ai");
   const { state } = useEDL();
   const selected = state.clips.find((c) => c.id === state.selectedId) ?? null;
 
-  useEffect(() => {
-    if (!showAiTab && tab === "ai") {
-      setTab("continuity");
-    }
-  }, [showAiTab, tab]);
-
   return (
     <div className="insp">
       <nav className="insp__tabs">
-        {showAiTab && (
-          <InspTab active={tab === "ai"} onClick={() => setTab("ai")} icon="sparkles" label="AI" />
-        )}
+        <InspTab active={tab === "ai"} onClick={() => setTab("ai")} icon="sparkles" label="AI" />
         <InspTab active={tab === "continuity"} onClick={() => setTab("continuity")} icon="select" label="Flow" />
         <InspTab active={tab === "basic"} onClick={() => setTab("basic")} icon="sliders" label="Basic" />
         <InspTab active={tab === "info"} onClick={() => setTab("info")} icon="info" label="Info" />
@@ -50,7 +38,7 @@ export function Inspector({
       </nav>
 
       <div className="insp__body">
-        {showAiTab && tab === "ai" && <AiTab continuity={continuity} />}
+        {tab === "ai" && <AiTab continuity={continuity} />}
         {tab === "continuity" && <ContinuityTab continuity={continuity} />}
         {tab === "basic" && <BasicTab />}
         {tab === "info" && <InfoTab continuity={continuity} />}

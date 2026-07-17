@@ -19,10 +19,32 @@ async function json(route: Route, body: unknown, status = 200) {
   });
 }
 
-async function installApi(page: Page, projects: typeof project[] = []) {
+async function installApi(
+  page: Page,
+  projects: typeof project[] = [],
+  timeline?: unknown,
+  jobs?: {
+    agentSse: string;
+    current: () => unknown;
+  },
+) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+
+    if (path === "/api/agent/chat" && jobs) {
+      return route.fulfill({
+        body: jobs.agentSse,
+        contentType: "text/event-stream",
+        status: 200,
+      });
+    }
+    if (path === "/api/jobs/job-navigation" && jobs) {
+      return json(route, jobs.current());
+    }
+    if (path === `/api/projects/${project.project_id}/generation-jobs` && jobs) {
+      return json(route, [jobs.current()]);
+    }
 
     if (path === "/api/me") {
       return json(route, {
@@ -38,11 +60,16 @@ async function installApi(page: Page, projects: typeof project[] = []) {
     if (path === "/api/health") return json(route, { ok: true, features: {} });
     if (path === "/api/upload") return json(route, project);
     if (path === `/api/projects/${project.project_id}`) {
+      if (request.method() === "PATCH") {
+        const body = request.postDataJSON() as { name: string };
+        return json(route, { ...project, name: body.name });
+      }
       return json(route, { ...project, segments: [], entities: [] });
     }
     if (path === `/api/timeline/${project.project_id}`) {
-      return json(route, {
+      return json(route, timeline ?? {
         project_id: project.project_id,
+        duration: project.duration,
         segments: [{
           start_ts: 0,
           end_ts: 4,
@@ -67,6 +94,30 @@ test("project library shows only saved projects", async ({ page }) => {
   await expect(page.locator("article")).toHaveCount(0);
 });
 
+test("project can be renamed from the library", async ({ page }) => {
+  await installApi(page, [project]);
+  await page.goto("/projects");
+
+  await page.getByRole("button", { name: "Rename clip" }).click();
+  await page.getByLabel("Rename clip").fill("Launch cut");
+  await page.getByRole("button", { name: "Save project name" }).click();
+
+  await expect(page.getByText("Launch cut")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Rename Launch cut" })).toBeVisible();
+});
+
+test("project can be renamed from the editor", async ({ page }) => {
+  await installApi(page, [project]);
+  await page.goto(`/editor?projectId=${project.project_id}`);
+
+  const name = page.getByLabel("Project name");
+  await name.fill("Final reel");
+  await name.press("Enter");
+
+  await expect(name).toHaveValue("Final reel");
+  await expect(name).toHaveAttribute("aria-invalid", "false");
+});
+
 test("settings use automatic platform routing", async ({ page }) => {
   await installApi(page);
   await page.goto("/settings");
@@ -89,6 +140,9 @@ test("upload opens the authoritative project", async ({ page }) => {
 
   await expect(page).toHaveURL(/\/editor\?projectId=project-123$/);
   await expect(page.getByLabel("Project name")).toHaveValue("clip");
+  await expect(page.getByPlaceholder("describe an edit...")).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Vibe" })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "Editor" })).toHaveCount(0);
 });
 
 test("login rejects recursive return paths", async ({ page }) => {
@@ -100,4 +154,197 @@ test("login rejects recursive return paths", async ({ page }) => {
   await page.getByRole("button", { name: "Log in" }).click();
 
   await expect(page).toHaveURL(/\/projects$/);
+});
+
+test("compare opens original and complete edited timeline side by side", async ({ page }) => {
+  await installApi(page, [project], {
+    project_id: project.project_id,
+    duration: 4,
+    segments: [],
+    edl: {
+      updated_at: 1,
+      sources: [
+        {
+          id: "source-1",
+          kind: "source",
+          url: "/test-video.mp4",
+          duration: 4,
+          fps: 24,
+          project_id: project.project_id,
+          label: "clip",
+        },
+        {
+          id: "generated-1",
+          kind: "generated",
+          url: "/generated.mp4",
+          duration: 2,
+          fps: 24,
+          project_id: project.project_id,
+          label: "applied edit",
+        },
+      ],
+      clips: [
+        {
+          id: "clip-original",
+          kind: "source",
+          url: "/test-video.mp4",
+          source_start: 0,
+          source_end: 2,
+          media_duration: 4,
+          volume: 1,
+          label: "clip",
+          project_id: project.project_id,
+          source_asset_id: "source-1",
+        },
+        {
+          id: "clip-generated",
+          kind: "generated",
+          url: "/generated.mp4",
+          source_start: 0,
+          source_end: 2,
+          media_duration: 2,
+          volume: 1,
+          label: "applied edit",
+          project_id: project.project_id,
+          source_asset_id: "generated-1",
+        },
+      ],
+    },
+  });
+  await page.goto(`/editor?projectId=${project.project_id}`);
+  await expect(page.getByLabel("Project name")).toHaveValue("clip");
+
+  await page.getByRole("button", { name: "Compare" }).click();
+
+  await expect(page.getByLabel("Original video")).toBeVisible();
+  await expect(page.getByLabel("Edited timeline preview")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Single view" })).toBeVisible();
+
+  await page.getByLabel("Compare playhead").fill("3");
+  await expect(page.getByLabel("Edited timeline preview")).toHaveAttribute(
+    "src",
+    "/generated.mp4",
+  );
+});
+
+test("generation preview returns after leaving and reopening editor", async ({ page }) => {
+  let finished = false;
+  const currentJob = () => ({
+    job_id: "job-navigation",
+    kind: "generate",
+    status: finished ? "done" : "processing",
+    error: null,
+    created_at: new Date().toISOString(),
+    accepted: false,
+    start_ts: 0,
+    end_ts: 3,
+    variants: finished
+      ? [{
+          id: "variant-navigation",
+          index: 0,
+          status: "done",
+          url: "/generated-navigation.mp4",
+          description: "finished while away",
+          visual_coherence: 8,
+          prompt_adherence: 8,
+          error: null,
+        }]
+      : [],
+  });
+  const agentSse = [
+    "event: suggestion",
+    `data: ${JSON.stringify({ edit: {
+      job_id: "job-navigation",
+      start_ts: 0,
+      end_ts: 3,
+      suggestion: "make the car green",
+    } })}`,
+    "",
+    "event: done",
+    "data: {}",
+    "",
+    "",
+  ].join("\n");
+
+  await installApi(page, [project], undefined, {
+    agentSse,
+    current: currentJob,
+  });
+  await page.goto(`/editor?projectId=${project.project_id}`);
+  await page.getByPlaceholder("describe an edit...").fill("make the car green");
+  await page.getByRole("button", { name: "send message" }).click();
+  await expect(page.getByText(/rendering|queued/).first()).toBeVisible();
+  await expect.poll(() => page.evaluate(() =>
+    localStorage.getItem("fiebatt.pending-agent-turn.project-123"),
+  )).not.toBeNull();
+
+  await page.goto("/projects");
+  finished = true;
+  await page.goto(`/editor?projectId=${project.project_id}`);
+
+  await expect(page.getByText("finished while away")).toBeVisible();
+  await expect(page.getByRole("button", { name: "apply" })).toBeVisible();
+});
+
+test("prompt card separates user request from refined prompt", async ({ page }) => {
+  const agentSse = [
+    "event: prompt_plan_started",
+    `data: ${JSON.stringify({
+      job_id: "job-prompt",
+      user_prompt: "A polished emerald vehicle with exact color consistency.",
+    })}`,
+    "",
+    "event: prompt_plan",
+    `data: ${JSON.stringify({
+      job_id: "job-prompt",
+      plan: {
+        prompt: "A polished emerald vehicle with exact color consistency.",
+        intent: "appearance change",
+      },
+    })}`,
+    "",
+    "event: done",
+    "data: {}",
+    "",
+    "",
+  ].join("\n");
+  await installApi(page, [project], undefined, {
+    agentSse,
+    current: () => ({}),
+  });
+  await page.goto(`/editor?projectId=${project.project_id}`);
+  await page.getByPlaceholder("describe an edit...").fill("make the car green");
+  await page.getByRole("button", { name: "send message" }).click();
+
+  await expect(page.locator(".prompt-plan__user")).toHaveText("make the car green");
+  await expect(page.locator(".prompt-plan__content")).toHaveText(
+    "A polished emerald vehicle with exact color consistency.",
+  );
+  await expect(page.locator(".prompt-plan__lane-k")).toHaveText(["you", "refined"]);
+});
+
+test("agent reply never shows raw tool markup", async ({ page }) => {
+  const leaked = `Working on it.
+<｜DSML｜function_calls>
+<｜DSML｜invoke name="analyze_video">
+<｜DSML｜parameter name="project_id" string="true">project-123</｜DSML｜parameter>`;
+  const agentSse = [
+    "event: token",
+    `data: ${JSON.stringify({ text: leaked })}`,
+    "",
+    "event: done",
+    "data: {}",
+    "",
+    "",
+  ].join("\n");
+  await installApi(page, [project], undefined, {
+    agentSse,
+    current: () => ({}),
+  });
+  await page.goto(`/editor?projectId=${project.project_id}`);
+  await page.getByPlaceholder("describe an edit...").fill("inspect this video");
+  await page.getByRole("button", { name: "send message" }).click();
+
+  await expect(page.getByText("Working on it.")).toBeVisible();
+  await expect(page.getByText(/DSML|function_calls|functioncall/i)).toHaveCount(0);
 });

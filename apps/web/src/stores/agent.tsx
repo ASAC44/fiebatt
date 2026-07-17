@@ -14,6 +14,7 @@ import {
   type Dispatch,
   type ReactNode,
 } from "react";
+import { cleanAgentText, hasAgentToolMarkup } from "@/lib/agent-text";
 
 // ─── types ────────────────────────────────────────────────────────────
 
@@ -71,7 +72,13 @@ export interface PromptPlan {
 
 export type AgentMessage =
   | { type: "user"; text: string; ts: number }
-  | { type: "agent"; text: string; ts: number; streaming?: boolean }
+  | {
+      type: "agent";
+      text: string;
+      ts: number;
+      streaming?: boolean;
+      toolMarkupSuppressed?: boolean;
+    }
   | {
       type: "tool_call";
       id: string;
@@ -116,6 +123,7 @@ export interface AgentState {
 export type AgentAction =
   | { type: "add_user_message"; text: string }
   | { type: "start_stream" }
+  | { type: "resume_job_watch"; activity: string }
   | { type: "set_activity"; activity: string | null }
   | { type: "append_token"; text: string }
   | { type: "end_stream" }
@@ -186,6 +194,13 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
         ],
       };
 
+    case "resume_job_watch":
+      return {
+        ...state,
+        streaming: true,
+        activity: action.activity,
+      };
+
     case "set_activity":
       return { ...state, activity: action.activity };
 
@@ -193,7 +208,13 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
       const msgs = [...state.messages];
       const last = msgs[msgs.length - 1];
       if (last && last.type === "agent" && last.streaming) {
-        msgs[msgs.length - 1] = { ...last, text: last.text + action.text };
+        if (last.toolMarkupSuppressed) return state;
+        const combined = last.text + action.text;
+        msgs[msgs.length - 1] = {
+          ...last,
+          text: cleanAgentText(combined),
+          toolMarkupSuppressed: hasAgentToolMarkup(combined),
+        };
       }
       return { ...state, messages: msgs };
     }
@@ -333,7 +354,9 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
           {
             type: "prompt_plan",
             jobId: action.jobId,
-            userPrompt: "",
+            userPrompt: [...state.messages]
+              .reverse()
+              .find((message) => message.type === "user")?.text ?? "",
             plan: action.plan,
             vendor: null,
             ts: now,

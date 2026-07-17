@@ -129,6 +129,8 @@ export type JobResp = {
   status: JobStatus;
   variants: Variant[];
   error: string | null;
+  created_at?: string | null;
+  accepted?: boolean;
   /** authoritative edit window accepted by the backend */
   start_ts: number | null;
   end_ts: number | null;
@@ -540,6 +542,13 @@ export const generateVariant = generate;
 
 export function getJob(id: string): Promise<JobResp> {
   return request(`/api/jobs/${id}`);
+}
+
+export function listGenerationJobs(
+  projectId: string,
+  limit = 10,
+): Promise<JobResp[]> {
+  return request(`/api/projects/${projectId}/generation-jobs?limit=${limit}`);
 }
 
 export function accept(job_id: string, variant_index: number): Promise<AcceptResp> {

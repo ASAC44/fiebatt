@@ -285,9 +285,9 @@ async def _resolve_plan_selection_id(body: "AgentChatRequest") -> str | None:
     placeholders = {"", "none", "null", "undefined", "pending"}
     supplied = (body.selection_id or "").strip()
 
-    # SAM and chat start independently. Usually SAM finishes during the first
-    # model call; this short wait closes the remaining race.
-    for attempt in range(11):
+    # SAM and chat start independently. Give the precise artifact a short
+    # chance to land, then persist the user's bbox as a safe planning target.
+    for attempt in range(3):
         async with AsyncSessionLocal() as db:
             project = await db.get(Project, body.project_id)
             if project is None:
@@ -318,9 +318,44 @@ async def _resolve_plan_selection_id(body: "AgentChatRequest") -> str | None:
                     if _bbox_matches(artifact.bbox_json, body.bbox):
                         return artifact.id
 
-        if body.bbox is None or attempt == 10:
+        if body.bbox is None or attempt == 2:
             break
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.25)
+
+    if body.bbox is not None:
+        async with AsyncSessionLocal() as db:
+            project = await db.get(Project, body.project_id)
+            if project is None:
+                return None
+            bbox = body.bbox.model_dump()
+            x, y = bbox["x"], bbox["y"]
+            right, bottom = x + bbox["w"], y + bbox["h"]
+            artifact = SelectionArtifact(
+                project_id=project.id,
+                frame_ts=min(
+                    max(float(body.playhead_ts or 0.0), 0.0),
+                    max(float(project.duration) - 0.001, 0.0),
+                ),
+                bbox_json=bbox,
+                contours_json=[[
+                    [x, y],
+                    [right, y],
+                    [right, bottom],
+                    [x, bottom],
+                ]],
+                mask_url="",
+                subject_reference_url=None,
+                sam_score=None,
+                source_revision=project.video_url,
+            )
+            db.add(artifact)
+            await db.commit()
+            await db.refresh(artifact)
+            log.warning(
+                "[agent.chat] SAM selection unavailable; using persisted bbox target %s",
+                artifact.id,
+            )
+            return artifact.id
     return None
 
 # ---- Gemini tool declarations ----

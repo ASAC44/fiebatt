@@ -197,11 +197,15 @@ async def _validate_outer_boundaries(
         checks[0][1].add("post")
     else:
         checks.append((len(chunks) - 1, {"post"}))
+    original_source = await storage.materialize_source(
+        project.video_path,
+        project.video_url,
+    )
     for index, boundaries in checks:
         chunk = chunks[index]
         source_path, _ = storage.new_path("clips", "mp4")
         await ffmpeg.extract_clip(
-            project.video_path,
+            original_source,
             chunk.context_start,
             chunk.context_end,
             source_path,

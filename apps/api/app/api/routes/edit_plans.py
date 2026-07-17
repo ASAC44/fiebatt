@@ -130,7 +130,11 @@ async def create_edit_plan(
         planning_frame = ""
         try:
             frame_path, _ = storage.new_path("keyframes", "jpg")
-            await ffmpeg.extract_frame(project.video_path, selection.frame_ts, frame_path)
+            source_path = await storage.materialize_source(
+                project.video_path,
+                project.video_url,
+            )
+            await ffmpeg.extract_frame(source_path, selection.frame_ts, frame_path)
             planning_frame = str(frame_path)
         except Exception:
             log.warning("semantic planning frame unavailable", exc_info=True)

@@ -51,7 +51,11 @@ async def _run_one(
     # extract the clip for this appearance
     clip_path, _ = storage.new_path("clips", "mp4")
     try:
-        await ffmpeg.extract_clip(proj.video_path, start_ts, end_ts, clip_path)
+        original_source = await storage.materialize_source(
+            proj.video_path,
+            proj.video_url,
+        )
+        await ffmpeg.extract_clip(original_source, start_ts, end_ts, clip_path)
     except Exception as e:
         log.exception("propagate extract failed")
         async with AsyncSessionLocal() as db:
@@ -119,7 +123,10 @@ async def _run_one(
                 # AI and source frames creates the same ghosted box artifact
                 # as the export path's old dissolve.
                 await ffmpeg.simple_replace(
-                    base=live_proj.video_path,
+                    base=await storage.materialize_source(
+                        live_proj.video_path,
+                        live_proj.video_url,
+                    ),
                     replacement=normalized,
                     at_ts=start_ts,
                     duration=end_ts - start_ts,

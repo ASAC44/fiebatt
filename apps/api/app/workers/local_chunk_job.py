@@ -73,7 +73,8 @@ async def _reference_subject(
         except Exception:
             log.warning("stored subject reference unavailable; rebuilding it", exc_info=True)
     frame_path, _ = storage.new_path("keyframes", "jpg")
-    await ffmpeg.extract_frame(project.video_path, selection.frame_ts, frame_path)
+    source_path = await storage.materialize_source(project.video_path, project.video_url)
+    await ffmpeg.extract_frame(source_path, selection.frame_ts, frame_path)
     return await ffmpeg.crop_bbox_from_frame(frame_path, selection.bbox_json)
 
 

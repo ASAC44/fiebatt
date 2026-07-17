@@ -468,7 +468,8 @@ async def _identify_region(
 
     frame_path = str(frames_dir / f"{proj.id}_{frame_ts:.3f}.png")
     try:
-        await ffmpeg.extract_frame(proj.video_path, frame_ts, frame_path)
+        source_path = await storage.materialize_source(proj.video_path, proj.video_url)
+        await ffmpeg.extract_frame(source_path, frame_ts, frame_path)
     except Exception as exc:
         raise ValueError(f"frame extraction failed: {exc}") from exc
 

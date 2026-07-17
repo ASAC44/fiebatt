@@ -140,9 +140,13 @@ async def _prepare_source_clip(
     chunk: GlobalGenerationChunk,
     previous: PreviousChunk | None,
 ) -> Path:
+    original_source = await storage.materialize_source(
+        project.video_path,
+        project.video_url,
+    )
     source_path, _ = storage.new_path("clips", "mp4")
     await ffmpeg.extract_clip(
-        project.video_path,
+        original_source,
         chunk.context_start,
         chunk.context_end,
         source_path,

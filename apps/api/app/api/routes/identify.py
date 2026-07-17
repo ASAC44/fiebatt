@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.services import gemini
-from app.services import ffmpeg as async_ffmpeg
+from app.services import ffmpeg as async_ffmpeg, storage
 from app.config.settings import get_settings
 from app.db.session import get_db
 from app.deps import get_session
@@ -50,7 +50,8 @@ async def identify(
 
     frame_path = str(frames_dir / f"{proj.id}_{body.frame_ts:.3f}.png")
     try:
-        await async_ffmpeg.extract_frame(proj.video_path, body.frame_ts, frame_path)
+        source_path = await storage.materialize_source(proj.video_path, proj.video_url)
+        await async_ffmpeg.extract_frame(source_path, body.frame_ts, frame_path)
     except Exception as exc:
         log.exception("ffmpeg frame extraction failed for project %s at ts=%.3f", proj.id, body.frame_ts)
         raise HTTPException(status_code=500, detail=f"frame extraction failed: {exc}") from exc

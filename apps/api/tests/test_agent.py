@@ -120,6 +120,34 @@ async def test_agent_resolves_matching_selection_when_frontend_mask_finishes_lat
     assert resolved == artifact.id
 
 
+@pytest.mark.asyncio
+async def test_agent_persists_bbox_target_when_sam_selection_is_unavailable(
+    client: AsyncClient,
+    db_session,
+):
+    upload = await upload_fixture_video(client)
+    project = await db_session.get(Project, upload["project_id"])
+    assert project is not None
+    bbox = {"x": 0.1, "y": 0.2, "w": 0.3, "h": 0.4}
+
+    resolved = await _resolve_plan_selection_id(
+        AgentChatRequest(
+            project_id=project.id,
+            message="make this bus yellow",
+            conversation_id="bbox-fallback",
+            playhead_ts=1.25,
+            bbox=bbox,
+        )
+    )
+
+    assert resolved is not None
+    artifact = await db_session.get(SelectionArtifact, resolved)
+    assert artifact is not None
+    assert artifact.bbox_json == bbox
+    assert artifact.sam_score is None
+    assert artifact.contours_json
+
+
 def _make_mock_agent_response(
     text: str = "I can help you edit that video.",
     *,

@@ -140,6 +140,44 @@ async def test_identify_endpoint(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_mask_falls_back_to_bbox_when_sam_is_unavailable(
+    client: AsyncClient,
+    monkeypatch,
+):
+    if not os.path.exists(FIXTURE_VIDEO):
+        pytest.skip("test fixture video not found")
+    with open(FIXTURE_VIDEO, "rb") as f:
+        upload_res = await client.post(
+            "/api/upload",
+            files={"file": ("test.mp4", f, "video/mp4")},
+            headers=headers(),
+        )
+
+    async def unavailable_sam(**_kwargs):
+        raise RuntimeError("vision worker unavailable")
+
+    monkeypatch.setattr(
+        "app.api.routes.mask.ai.sam.bbox_to_mask_result",
+        unavailable_sam,
+    )
+    response = await client.post(
+        "/api/mask",
+        json={
+            "project_id": upload_res.json()["project_id"],
+            "frame_ts": 1.0,
+            "bbox": {"x": 0.2, "y": 0.25, "w": 0.4, "h": 0.35},
+        },
+        headers=headers(),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["selection_id"]
+    assert body["contour"]
+    assert body["score"] is None
+
+
+@pytest.mark.asyncio
 async def test_generate_poll_accept(client: AsyncClient):
     """generate → poll → accept → verify timeline"""
     if not os.path.exists(FIXTURE_VIDEO):

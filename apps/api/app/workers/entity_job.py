@@ -69,6 +69,10 @@ async def run(job_id: str) -> None:
             source_segment_end = source_segment.end_ts
         await db.commit()
 
+    source_video_path = str(
+        await storage.materialize_source(source_video_path, source_video_url)
+    )
+
     # pull the reference frame crop now (was previously done synchronously
     # inside /api/accept; moved here so the HTTP response is instant).
     reference_crop_path: str | None = None
@@ -144,7 +148,7 @@ async def run(job_id: str) -> None:
             log.info("reusing %d cached keyframes for project %s", len(existing), proj.id)
         else:
             keyframes = await ffmpeg.extract_keyframes(
-                proj.video_path, KEYFRAMES_PER_SECOND, cached_pattern
+                source_video_path, KEYFRAMES_PER_SECOND, cached_pattern
             )
         keyframe_paths: list[str] = []
         keyframe_url_by_path: dict[str, str] = {}

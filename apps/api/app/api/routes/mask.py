@@ -36,38 +36,42 @@ async def mask(
     if body.bbox.x + body.bbox.w > 1.0001 or body.bbox.y + body.bbox.h > 1.0001:
         raise HTTPException(status_code=422, detail="bbox extends outside the frame")
 
-    # Extract the frame from the video at the requested timestamp
+    # Railway scratch storage is ephemeral. Restore the durable upload first.
     frame_path, _ = storage.new_path("keyframes", "jpg")
     try:
-        await ffmpeg.extract_frame(proj.video_path, body.frame_ts, frame_path)
+        source_path = await storage.materialize_source(proj.video_path, proj.video_url)
+        await ffmpeg.extract_frame(source_path, body.frame_ts, frame_path)
     except Exception as e:
         log.exception("frame extraction failed")
         raise HTTPException(status_code=500, detail=f"frame extraction failed: {e}")
 
-    # Call SAM to get a segmentation mask
+    mask_path: Path
+    mask_score: float | None
     try:
         mask_result = await ai.sam.bbox_to_mask_result(
             frame_path=str(frame_path),
             bbox=body.bbox.model_dump(),
         )
-    except (httpx.ConnectError, httpx.ConnectTimeout, OSError) as e:
-        log.warning("GPU worker unavailable: %s", e)
-        raise HTTPException(status_code=503, detail="GPU worker unavailable")
-    except httpx.HTTPStatusError as e:
-        log.exception("SAM segmentation failed")
-        raise HTTPException(status_code=502, detail=f"SAM segmentation failed: {e}")
+        mask_path = Path(mask_result.path)
+        mask_score = mask_result.score
     except Exception as e:
-        log.exception("SAM segmentation failed")
-        raise HTTPException(status_code=500, detail=f"SAM segmentation failed: {e}")
+        # Planning can safely use a bbox mask. Never deadlock editing because
+        # an optional segmentation worker is unavailable.
+        if isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout, OSError, httpx.HTTPStatusError)):
+            log.warning("SAM unavailable; using bbox selection: %s", e)
+        else:
+            log.exception("SAM failed; using bbox selection")
+        mask_path = _bbox_fallback_mask(frame_path, body.bbox.model_dump())
+        mask_score = None
 
     # Convert mask image to contour points normalized to [0, 1]
-    contours = _mask_to_contours(mask_result.path)
+    contours = _mask_to_contours(str(mask_path))
 
-    mask_url = await storage.publish(Path(mask_result.path), content_type="image/png")
+    mask_url = await storage.publish(mask_path, content_type="image/png")
     subject_reference_url: str | None = None
     try:
         subject_reference_path = ai.sam.create_subject_reference(
-            str(frame_path), mask_result.path
+            str(frame_path), str(mask_path)
         )
         subject_reference_url = await storage.publish(
             Path(subject_reference_path), content_type="image/png"
@@ -82,7 +86,7 @@ async def mask(
         contours_json=contours,
         mask_url=mask_url,
         subject_reference_url=subject_reference_url,
-        sam_score=mask_result.score,
+        sam_score=mask_score,
         source_revision=proj.video_url,
     )
     db.add(artifact)
@@ -91,7 +95,7 @@ async def mask(
 
     # Clean up temporary mask file
     try:
-        Path(mask_result.path).unlink(missing_ok=True)
+        mask_path.unlink(missing_ok=True)
     except Exception:
         pass
 
@@ -101,8 +105,29 @@ async def mask(
         selection_id=artifact.id,
         mask_url=mask_url,
         subject_reference_url=subject_reference_url,
-        score=mask_result.score,
+        score=mask_score,
     )
+
+
+def _bbox_fallback_mask(frame_path: Path, bbox: dict[str, float]) -> Path:
+    """Create a deterministic rectangular mask when SAM is unavailable."""
+    import cv2  # type: ignore[import-untyped]
+    import numpy as np
+
+    frame = cv2.imread(str(frame_path), cv2.IMREAD_COLOR)
+    if frame is None:
+        raise ValueError("failed to read selection frame")
+    height, width = frame.shape[:2]
+    left = max(0, min(width - 1, round(bbox["x"] * width)))
+    top = max(0, min(height - 1, round(bbox["y"] * height)))
+    right = max(left + 1, min(width, round((bbox["x"] + bbox["w"]) * width)))
+    bottom = max(top + 1, min(height, round((bbox["y"] + bbox["h"]) * height)))
+    mask = np.zeros((height, width), dtype=np.uint8)
+    mask[top:bottom, left:right] = 255
+    path, _ = storage.new_path("masks", "png")
+    if not cv2.imwrite(str(path), mask):
+        raise ValueError("failed to write fallback selection mask")
+    return path
 
 
 def _mask_to_contours(mask_path: str) -> list[list[list[float]]]:

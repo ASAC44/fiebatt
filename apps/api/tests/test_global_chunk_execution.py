@@ -141,7 +141,9 @@ async def test_source_preparation_injects_previous_overlap(monkeypatch, tmp_path
     monkeypatch.setattr(execution.storage, "path_from_url", path_from_url)
     monkeypatch.setattr(execution.ffmpeg, "prepend_video_handoff", prepend)
 
-    project = SimpleNamespace(video_path=tmp_path / "project.mp4")
+    project_path = tmp_path / "project.mp4"
+    project_path.write_bytes(b"source")
+    project = SimpleNamespace(video_path=project_path, video_url="/project")
     chunk = SimpleNamespace(
         context_start=9.25,
         context_end=14.0,

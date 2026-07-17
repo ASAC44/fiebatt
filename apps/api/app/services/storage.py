@@ -297,6 +297,17 @@ async def path_from_url(url: str) -> Path:
     return local
 
 
+async def materialize_source(local_path: str | Path, source_url: str) -> Path:
+    """Return usable local media, restoring ephemeral files from object storage."""
+    local = Path(local_path)
+    if local.is_file():
+        return local
+    restored = await path_from_url(source_url)
+    if not restored.is_file():
+        raise FileNotFoundError(f"source media is unavailable: {restored}")
+    return restored
+
+
 # ── high-level: upload / write ──────────────────────────────────────
 
 

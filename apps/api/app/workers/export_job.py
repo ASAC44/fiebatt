@@ -148,6 +148,7 @@ async def _render_edl(
     as an index into which variant files exist."""
     scratch_parts: list[Path] = []
     render_id = uuid.uuid4().hex[:12]
+    original_source = await storage.materialize_source(proj.video_path, proj.video_url)
 
     for i, clip in enumerate(edl.clips):
         if clip.source_end - clip.source_start < 0.02:
@@ -159,7 +160,7 @@ async def _render_edl(
         # the clip points at it (spares us a re-download per clip). every
         # other source (generated variant, uploaded library asset) goes
         # through path_from_url which caches to scratch.
-        src = Path(proj.video_path) if clip.url == proj.video_url else None
+        src = original_source if clip.url == proj.video_url else None
         if src is None or not src.exists():
             src = await storage.path_from_url(clip.url)
 
@@ -201,6 +202,7 @@ async def _render_timeline(
     """Materialize the ordered timeline items into a single MP4."""
     scratch_parts: list[Path] = []
     render_id = uuid.uuid4().hex[:12]
+    original_source = await storage.materialize_source(proj.video_path, proj.video_url)
 
     for i, item in enumerate(items):
         part_path = storage.path_for("exports", f"_part_{render_id}_{i:04d}.mp4")
@@ -210,10 +212,7 @@ async def _render_timeline(
             src = await storage.path_from_url(item.url)
         else:
             # originals always come from the project's source video
-            src = Path(proj.video_path)
-            if not src.exists():
-                # scratch was wiped; pull the source back from S3
-                src = await storage.path_from_url(proj.video_url)
+            src = original_source
 
         await _render_span(
             src,
@@ -235,7 +234,7 @@ async def _render_timeline(
             try:
                 ref_frame = storage.path_for("exports", f"_ref_{render_id}_{i:04d}.jpg")
                 ref_ts = min(item.end_ts + 0.1, proj.duration - 0.1)
-                await ffmpeg.extract_frame(proj.video_path, ref_ts, ref_frame)
+                await ffmpeg.extract_frame(original_source, ref_ts, ref_frame)
                 matched = storage.path_for("exports", f"_matched_{render_id}_{i:04d}.mp4")
                 await color_svc.match_color_histogram(part_path, ref_frame, matched)
                 part_path = matched

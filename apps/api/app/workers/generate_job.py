@@ -348,6 +348,8 @@ async def run(job_id: str) -> None:
         prompt = job.prompt or ""
         reference_frame_ts = float(job.reference_frame_ts or start_ts)
         payload = dict(job.payload or {})
+        project_video_path = proj.video_path
+        project_video_url = proj.video_url
         generation_window = resolve_generation_window(
             start_ts,
             end_ts,
@@ -380,6 +382,18 @@ async def run(job_id: str) -> None:
         })
         job.payload = payload
         await db.commit()
+
+    try:
+        source_video_path = await storage.materialize_source(
+            project_video_path,
+            project_video_url,
+        )
+    except Exception as exc:
+        error = f"source video unavailable: {exc}"
+        async with AsyncSessionLocal() as db:
+            await _update_job(db, job_id, status="error", error=error[:500])
+        await _emit_terminal(job_id, "error", error)
+        return
 
     bbox_w = float(bbox.get("w", 0.0))
     bbox_h = float(bbox.get("h", 0.0))
@@ -432,7 +446,7 @@ async def run(job_id: str) -> None:
 
     async def _do_extract_clip() -> tuple[Path, str]:
         await ffmpeg.extract_clip(
-            proj.video_path,
+            source_video_path,
             clip_start_ts,
             clip_end_ts,
             clip_tmp_path,
@@ -443,7 +457,7 @@ async def run(job_id: str) -> None:
     async def _do_extract_subject_frame() -> tuple[Path, bool]:
         try:
             await ffmpeg.extract_frame(
-                proj.video_path,
+                source_video_path,
                 reference_frame_ts,
                 subject_frame_path,
             )
@@ -461,7 +475,7 @@ async def run(job_id: str) -> None:
     async def _do_extract_start_anchor() -> tuple[Path, bool]:
         try:
             await ffmpeg.extract_frame(
-                proj.video_path,
+                source_video_path,
                 start_anchor_ts,
                 start_anchor_path,
             )
@@ -478,7 +492,7 @@ async def run(job_id: str) -> None:
 
     async def _do_extract_end_frame() -> tuple[Path, bool]:
         try:
-            await ffmpeg.extract_frame(proj.video_path, end_anchor_ts, end_frame_path)
+            await ffmpeg.extract_frame(source_video_path, end_anchor_ts, end_frame_path)
             await storage.publish(end_frame_path, content_type="image/jpeg")
             return end_frame_path, True
         except Exception as e:

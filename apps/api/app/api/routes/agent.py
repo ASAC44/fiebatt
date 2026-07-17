@@ -1031,6 +1031,10 @@ async def _agent_stream(
             tool_args = json.loads(tc.function.arguments) if tc.function.arguments else {}
             if tool_name == "create_edit_plan" and body.selection_id:
                 tool_args.setdefault("selection_id", body.selection_id)
+            if tool_name == "generate_edit":
+                # Keep attribution separate from the model-authored generation
+                # prompt. The worker emits both for the before/refined card.
+                tool_args["user_prompt"] = body.message
             if tool_name in {"create_edit_plan", "generate_edit"} and body.video_gen_provider:
                 tool_args["video_gen_provider"] = body.video_gen_provider
 

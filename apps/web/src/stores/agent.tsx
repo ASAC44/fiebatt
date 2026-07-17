@@ -341,7 +341,9 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
           {
             type: "prompt_plan",
             jobId: action.jobId,
-            userPrompt: "",
+            userPrompt: [...state.messages]
+              .reverse()
+              .find((message) => message.type === "user")?.text ?? "",
             plan: action.plan,
             vendor: null,
             ts: now,

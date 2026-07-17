@@ -697,3 +697,42 @@ async def test_agent_chat_with_function_call(client: AsyncClient, live_agent_set
     tc_end = next(e for e in events if e["event"] == "tool_call_end")
     assert tc_end["data"]["status"] == "done"
     assert tc_end["data"]["result"]["project_id"] == "test-proj"
+
+
+@pytest.mark.asyncio
+async def test_generate_tool_keeps_original_user_prompt(client: AsyncClient, live_agent_settings):
+    """Model-authored generation text must not replace user attribution."""
+    response = _make_mock_agent_response(
+        "",
+        tool_calls=[_make_tool_call("generate_edit", {
+            "project_id": "test-proj",
+            "start_ts": 0,
+            "end_ts": 3,
+            "bbox": {"x": 0, "y": 0, "w": 1, "h": 1},
+            "prompt": "A lime-green automobile with stable geometry.",
+        })],
+    )
+    mock_client = _mock_agent_client(response)
+
+    async def no_plan_events(*_args, **_kwargs):
+        if False:
+            yield ""
+
+    with patch("app.api.routes.agent.AsyncOpenAI", return_value=mock_client), \
+         patch("app.api.routes.agent.execute_tool", new_callable=AsyncMock) as mock_exec, \
+         patch("app.api.routes.agent._bridge_plan_events", no_plan_events):
+        mock_exec.return_value = {"job_id": "job-1", "status": "pending"}
+        res = await client.post(
+            "/api/agent/chat",
+            json={
+                "project_id": "test-proj",
+                "message": "make the car green",
+                "conversation_id": "conv-original-prompt",
+            },
+            headers=headers(),
+        )
+
+    assert res.status_code == 200
+    args = mock_exec.await_args.kwargs["args"]
+    assert args["prompt"] == "A lime-green automobile with stable geometry."
+    assert args["user_prompt"] == "make the car green"

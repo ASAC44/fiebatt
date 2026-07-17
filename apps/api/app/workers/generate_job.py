@@ -588,7 +588,7 @@ async def run(job_id: str) -> None:
             if planned_intent is not None and planned_intent.grounded_edit is not None
             else "asking Qwen to structure the edit plan"
         ),
-        user_prompt=prompt,
+        user_prompt=str(payload.get("user_prompt") or prompt),
         bbox=bbox,
         duration=segment_duration,
     )

@@ -655,6 +655,7 @@ async def _generate_edit(
         reference_frame_ts=reference_frame_ts,
         payload={
             "video_gen_provider": video_gen_provider or "auto",
+            "user_prompt": str(args.get("user_prompt") or prompt),
             "plan_id": plan.id if plan else None,
             "planned_context": plan.range_json if plan else None,
             "planned_intent": plan.intent_json if plan else None,

@@ -282,3 +282,40 @@ test("generation preview returns after leaving and reopening editor", async ({ p
   await expect(page.getByText("finished while away")).toBeVisible();
   await expect(page.getByRole("button", { name: "apply" })).toBeVisible();
 });
+
+test("prompt card separates user request from refined prompt", async ({ page }) => {
+  const agentSse = [
+    "event: prompt_plan_started",
+    `data: ${JSON.stringify({
+      job_id: "job-prompt",
+      user_prompt: "A polished emerald vehicle with exact color consistency.",
+    })}`,
+    "",
+    "event: prompt_plan",
+    `data: ${JSON.stringify({
+      job_id: "job-prompt",
+      plan: {
+        prompt: "A polished emerald vehicle with exact color consistency.",
+        intent: "appearance change",
+      },
+    })}`,
+    "",
+    "event: done",
+    "data: {}",
+    "",
+    "",
+  ].join("\n");
+  await installApi(page, [project], undefined, {
+    agentSse,
+    current: () => ({}),
+  });
+  await page.goto(`/editor?projectId=${project.project_id}`);
+  await page.getByPlaceholder("describe an edit...").fill("make the car green");
+  await page.getByRole("button", { name: "send message" }).click();
+
+  await expect(page.locator(".prompt-plan__user")).toHaveText("make the car green");
+  await expect(page.locator(".prompt-plan__content")).toHaveText(
+    "A polished emerald vehicle with exact color consistency.",
+  );
+  await expect(page.locator(".prompt-plan__lane-k")).toHaveText(["you", "refined"]);
+});

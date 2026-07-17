@@ -688,7 +688,7 @@ function VariantPreviewCard({
 
 // ─── prompt plan card ────────────────────────────────────────────────
 //
-// Surfaces the prompt-rewriting layer so users can SEE what the AI
+// Surfaces the prompt-rewriting layer so users can see what the system
 // turned their one-liner into before it gets dispatched for generation.
 // Without this the whole "intelligent prompt expansion" value prop is
 // invisible to the user and the edit feels like a black box. Shows the
@@ -734,7 +734,7 @@ function PromptPlanCard({
       )}
 
       <div className="prompt-plan__lane">
-        <span className="prompt-plan__lane-k">qwen</span>
+        <span className="prompt-plan__lane-k">refined</span>
         {ready ? (
           <p className="prompt-plan__content">
             {plan.prompt || plan.prompt_for_veo || plan.description || "(no prompt returned)"}

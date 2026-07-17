@@ -321,7 +321,7 @@ export function useAgentStream(projectId?: string | null) {
                 const data = JSON.parse(dataStr) as Record<string, unknown>;
                 eventCount++;
                 if (currentEvent === "done") sawDone = true;
-                handleSSEEvent(dispatch, currentEvent, data);
+                handleSSEEvent(dispatch, currentEvent, data, message);
                 if (currentEvent === "suggestion") {
                   const edit = data.edit as { job_id?: string } | undefined;
                   if (edit?.job_id) {
@@ -565,6 +565,7 @@ function handleSSEEvent(
   dispatch: React.Dispatch<AgentAction>,
   event: string,
   data: Record<string, unknown>,
+  currentUserPrompt = "",
 ): void {
   _logSSE(event, data);
 
@@ -679,7 +680,7 @@ function handleSSEEvent(
       dispatch({
         type: "prompt_plan_started",
         jobId,
-        userPrompt: (data.user_prompt as string | undefined) ?? "",
+        userPrompt: currentUserPrompt || (data.user_prompt as string | undefined) || "",
       });
       break;
     }

@@ -1,6 +1,9 @@
+"use client";
+
 import Link from "next/link";
 import Image from "next/image";
-import { ArrowRight, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowRight, Check, Pencil, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -14,6 +17,7 @@ export type ProjectCardProps = {
   videoUrl?: string;
   imageUrl?: string;
   onDelete?: () => void;
+  onRename?: (name: string) => void | Promise<void>;
   placeholderClassName?: string;
 };
 
@@ -26,8 +30,51 @@ export function ProjectCard({
   videoUrl,
   imageUrl,
   onDelete,
+  onRename,
   placeholderClassName,
 }: ProjectCardProps) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(title);
+  const [saving, setSaving] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.select();
+  }, [editing]);
+
+  async function saveRename() {
+    const name = draft.trim();
+    if (!onRename || saving) return;
+    if (!name) {
+      setDraft(title);
+      setRenameError("Name cannot be empty.");
+      return;
+    }
+    if (name === title) {
+      setEditing(false);
+      setRenameError(null);
+      return;
+    }
+    setSaving(true);
+    setRenameError(null);
+    try {
+      await onRename(name);
+      setEditing(false);
+    } catch {
+      setRenameError("Could not rename project.");
+      inputRef.current?.focus();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function cancelRename() {
+    setDraft(title);
+    setRenameError(null);
+    setEditing(false);
+  }
+
   return (
     <article className="group overflow-hidden rounded-lg border border-border bg-background p-2 transition-colors hover:border-primary/25 hover:bg-muted/45">
       <Link className="block" href={href}>
@@ -62,7 +109,48 @@ export function ProjectCard({
 
       <div className="flex items-center justify-between gap-3 p-2 pt-4">
         <div className="min-w-0">
-          <p className="truncate font-medium">{title}</p>
+          {editing ? (
+            <div className="flex items-center gap-1">
+              <input
+                ref={inputRef}
+                aria-label={`Rename ${title}`}
+                className="h-8 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-sm font-medium outline-none focus:border-primary"
+                disabled={saving}
+                maxLength={120}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void saveRename();
+                  if (event.key === "Escape") cancelRename();
+                }}
+                value={draft}
+              />
+              <Button
+                aria-label="Save project name"
+                disabled={saving}
+                onClick={() => void saveRename()}
+                size="icon-sm"
+                type="button"
+                variant="ghost"
+              >
+                <Check />
+              </Button>
+              <Button
+                aria-label="Cancel rename"
+                disabled={saving}
+                onClick={cancelRename}
+                size="icon-sm"
+                type="button"
+                variant="ghost"
+              >
+                <X />
+              </Button>
+            </div>
+          ) : (
+            <p className="truncate font-medium">{title}</p>
+          )}
+          {renameError ? (
+            <p className="text-xs text-destructive" role="alert">{renameError}</p>
+          ) : null}
           <p className="text-sm text-muted-foreground transition-opacity group-hover:opacity-0">
             {meta}
           </p>
@@ -71,6 +159,18 @@ export function ProjectCard({
           </p>
         </div>
         <div className="flex gap-2">
+          {onRename && !editing ? (
+            <Button
+              aria-label={`Rename ${title}`}
+              className="opacity-0 transition-opacity group-hover:opacity-100"
+              onClick={() => setEditing(true)}
+              size="icon-sm"
+              type="button"
+              variant="ghost"
+            >
+              <Pencil />
+            </Button>
+          ) : null}
           <Link
             aria-label={`Open ${title}`}
             className="flex size-8 items-center justify-center text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"

@@ -60,6 +60,10 @@ async function installApi(
     if (path === "/api/health") return json(route, { ok: true, features: {} });
     if (path === "/api/upload") return json(route, project);
     if (path === `/api/projects/${project.project_id}`) {
+      if (request.method() === "PATCH") {
+        const body = request.postDataJSON() as { name: string };
+        return json(route, { ...project, name: body.name });
+      }
       return json(route, { ...project, segments: [], entities: [] });
     }
     if (path === `/api/timeline/${project.project_id}`) {
@@ -88,6 +92,30 @@ test("project library shows only saved projects", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "No projects yet" })).toBeVisible();
   await expect(page.getByRole("link", { name: "New video" }).first()).toBeVisible();
   await expect(page.locator("article")).toHaveCount(0);
+});
+
+test("project can be renamed from the library", async ({ page }) => {
+  await installApi(page, [project]);
+  await page.goto("/projects");
+
+  await page.getByRole("button", { name: "Rename clip" }).click();
+  await page.getByLabel("Rename clip").fill("Launch cut");
+  await page.getByRole("button", { name: "Save project name" }).click();
+
+  await expect(page.getByText("Launch cut")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Rename Launch cut" })).toBeVisible();
+});
+
+test("project can be renamed from the editor", async ({ page }) => {
+  await installApi(page, [project]);
+  await page.goto(`/editor?projectId=${project.project_id}`);
+
+  const name = page.getByLabel("Project name");
+  await name.fill("Final reel");
+  await name.press("Enter");
+
+  await expect(name).toHaveValue("Final reel");
+  await expect(name).toHaveAttribute("aria-invalid", "false");
 });
 
 test("settings use automatic platform routing", async ({ page }) => {

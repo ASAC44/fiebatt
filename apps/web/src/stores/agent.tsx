@@ -306,7 +306,11 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
       return {
         ...state,
         messages: [
-          ...state.messages,
+          ...state.messages.filter(
+            (message) =>
+              message.type !== "variant_preview" ||
+              message.jobId !== action.jobId,
+          ),
           {
             type: "variant_preview",
             jobId: action.jobId,

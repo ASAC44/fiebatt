@@ -16,7 +16,9 @@ import {
   getSessionId,
   listGenerationJobs,
   listConversations,
+  streamJobEvents,
   type ChatMessageResp,
+  type JobStreamEvent,
 } from "@/lib/api";
 import { redirectToLogin } from "@/lib/auth";
 import { cleanAgentText } from "@/lib/agent-text";
@@ -91,6 +93,28 @@ function clearPendingTurn(projectId: string): void {
   localStorage.removeItem(pendingTurnKey(projectId));
 }
 
+function generationActivity(event: JobStreamEvent): string {
+  const labels: Record<string, string> = {
+    queued: "preparing edit window…",
+    extract_clip: "preparing source context…",
+    extract_frame: "capturing subject reference…",
+    plan_start: "refining edit instructions…",
+    plan_done: "edit instructions ready…",
+    gen_start: "sending edit to video model…",
+    gen_submit: "video model accepted render…",
+    gen_done: "video render received…",
+    score_start: "checking visual quality and transitions…",
+    continuity_validation_done: "transition check complete…",
+    continuity_validation_unavailable: "finishing quality review…",
+    gen_retry: "improving first render…",
+    gen_provider_fallback: "trying backup video model…",
+    gen_retry_rejected: "keeping stronger render…",
+    done: "preview ready…",
+  };
+  if (event.stage === "gen_poll") return event.msg.replace(/\.\.\./g, "…");
+  return labels[event.stage] ?? event.msg.replace(/\.\.\./g, "…");
+}
+
 // ─── hook ─────────────────────────────────────────────────────────────
 
 export function useAgentStream(projectId?: string | null) {
@@ -111,6 +135,16 @@ export function useAgentStream(projectId?: string | null) {
     generationWatchRef.current = watch;
     watchedJobIdRef.current = jobId;
     dispatch({ type: "resume_job_watch", activity: "video job queued…" });
+    let detailedProgressAt = 0;
+    let detailedStage = "";
+    const eventStream = streamJobEvents(jobId, {
+      onEvent: (event) => {
+        detailedProgressAt = Date.now();
+        detailedStage = event.stage;
+        dispatch({ type: "set_activity", activity: generationActivity(event) });
+      },
+    });
+    const watchStartedAt = Date.now();
     try {
       while (!watch.signal.aborted) {
         const job = await getJob(jobId);
@@ -142,10 +176,22 @@ export function useAgentStream(projectId?: string | null) {
           }
           return;
         }
-        dispatch({
-          type: "set_activity",
-          activity: `${job.status === "processing" ? "rendering" : "queued"} · ${ready.length}/${job.variants.length || 1} previews ready…`,
-        });
+        if (Date.now() - detailedProgressAt > 8000) {
+          const stageStartedAt = detailedProgressAt || watchStartedAt;
+          const elapsed = Math.max(1, Math.round((Date.now() - stageStartedAt) / 1000));
+          const reviewing =
+            detailedStage.startsWith("score") ||
+            detailedStage.startsWith("continuity");
+          dispatch({
+            type: "set_activity",
+            activity:
+              job.status === "processing"
+                ? reviewing
+                  ? `checking quality and transitions · ${elapsed}s elapsed…`
+                  : `video model rendering · ${elapsed}s elapsed…`
+                : "waiting for video model…",
+          });
+        }
         await new Promise((resolve) => window.setTimeout(resolve, 1500));
       }
     } catch (error) {
@@ -156,6 +202,7 @@ export function useAgentStream(projectId?: string | null) {
         });
       }
     } finally {
+      eventStream.abort();
       if (generationWatchRef.current === watch) {
         generationWatchRef.current = null;
         watchedJobIdRef.current = null;
@@ -182,34 +229,59 @@ export function useAgentStream(projectId?: string | null) {
           // create a fresh conversation
           const convo = await createConversation(projectId);
           dispatch({ type: "set_conversation_id", id: convo.id });
-          return;
+          // Job restoration still runs below; conversations and generated
+          // previews have separate durable sources.
+        } else {
+          const latest = convos[0];
+          dispatch({ type: "set_conversation_id", id: latest.id });
+
+          if (latest.message_count > 0) {
+            const msgs = await getConversationMessages(latest.id);
+            const hydrated = msgs
+              .map(dbMessageToAgentMessage)
+              .filter(Boolean) as AgentMessage[];
+            const persistable = hydrated.filter((m) => {
+              if (m.type === "error") return false;
+              if (m.type === "tool_call" && m.status === "error") return false;
+              if (m.type === "suggestion") return false;
+              if (m.type === "prompt_plan") return false;
+              return true;
+            });
+            dispatch({ type: "hydrate_messages", messages: persistable });
+          }
         }
 
-        // load the most recent conversation
-        const latest = convos[0];
-        dispatch({ type: "set_conversation_id", id: latest.id });
-
-        if (latest.message_count > 0) {
-          const msgs = await getConversationMessages(latest.id);
-          const hydrated = msgs
-            .map(dbMessageToAgentMessage)
-            .filter(Boolean) as AgentMessage[];
-          // Drop transient UI-only rows (errors from older sessions, stale
-          // tool_call cards whose jobs no longer exist, and suggestion
-          // cards tied to dead jobs). These used to leak through and
-          // show a red "generation failed" card the instant the user
-          // reopened the reel, even though the current backend is healthy.
-          const persistable = hydrated.filter((m) => {
-            if (m.type === "error") return false;
-            if (m.type === "tool_call" && m.status === "error") return false;
-            if (m.type === "suggestion") return false;
-            // prompt_plan cards are tied to a live job_id; there's no
-            // point re-showing the "prompt rewrite" for a job the
-            // user already accepted/dismissed sessions ago.
-            if (m.type === "prompt_plan") return false;
-            return true;
-          });
-          dispatch({ type: "hydrate_messages", messages: persistable });
+        const jobs = await listGenerationJobs(projectId, 10);
+        const latestJob = jobs.find(
+          (job) =>
+            !job.accepted &&
+            (job.status === "pending" ||
+              job.status === "processing" ||
+              (job.status === "done" && job.variants.some((variant) => variant.url))),
+        );
+        if (latestJob) {
+          const ready = latestJob.variants.filter((variant) => variant.url);
+          if (ready.length > 0 && latestJob.status === "done") {
+            dispatch({
+              type: "add_variant_preview",
+              jobId: latestJob.job_id,
+              variants: ready,
+              timelineStart:
+                latestJob.execution_window?.core_start ?? latestJob.start_ts,
+              timelineEnd: latestJob.execution_window?.core_end ?? latestJob.end_ts,
+              mediaStart: latestJob.execution_window?.edit_start_offset ?? 0,
+              mediaEnd:
+                latestJob.execution_window?.edit_end_offset ??
+                (latestJob.start_ts != null && latestJob.end_ts != null
+                  ? latestJob.end_ts - latestJob.start_ts
+                  : null),
+            });
+          } else if (
+            latestJob.status === "pending" ||
+            latestJob.status === "processing"
+          ) {
+            void watchGeneration(latestJob.job_id);
+          }
         }
       } catch (err) {
         // non-fatal — just start fresh
@@ -217,7 +289,7 @@ export function useAgentStream(projectId?: string | null) {
       }
     })();
     conversationHydrationRef.current = hydration;
-  }, [projectId, dispatch]);
+  }, [projectId, dispatch, watchGeneration]);
 
   const sendMessage = useCallback(
     async ({
@@ -584,7 +656,7 @@ function handleSSEEvent(
 
   switch (event) {
     case "token":
-      dispatch({ type: "set_activity", activity: "agent is thinking…" });
+      dispatch({ type: "set_activity", activity: "understanding your request…" });
       dispatch({ type: "append_token", text: data.text as string });
       break;
 
@@ -592,7 +664,15 @@ function handleSSEEvent(
       const id = data.id as string;
       const tool = data.tool as string;
       _toolsById.set(id, tool);
-      dispatch({ type: "set_activity", activity: `${tool.replace(/_/g, " ")}…` });
+      const activities: Record<string, string> = {
+        create_edit_plan: "planning edit window…",
+        identify_region: "identifying selected subject…",
+        generate_edit: "starting video render…",
+      };
+      dispatch({
+        type: "set_activity",
+        activity: activities[tool] ?? `${tool.replace(/_/g, " ")}…`,
+      });
       dispatch({
         type: "tool_call_start",
         id,

@@ -13,7 +13,7 @@ from app.models.job import Job
 from app.models.project import Project
 from app.models.session import Session as SessionModel
 from app.schemas.job import JobOut, VariantOut
-from app.services import job_events
+from app.services import job_events, storage
 
 router = APIRouter(tags=["jobs"])
 
@@ -47,7 +47,7 @@ def _job_out(job: Job) -> JobOut:
                 id=v.id,
                 index=v.index,
                 status=v.status,  # type: ignore[arg-type]
-                url=v.url,
+                url=storage.normalize_url_like(v.url, fallback=v.url) if v.url else None,
                 description=v.description,
                 visual_coherence=v.visual_coherence,
                 prompt_adherence=v.prompt_adherence,

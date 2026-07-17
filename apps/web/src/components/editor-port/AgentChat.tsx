@@ -1,5 +1,4 @@
-/* eslint-disable react/no-unescaped-entities */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Badge } from "@/components/ui/badge";
@@ -43,6 +42,14 @@ export function AgentChat({ projectId }: AgentChatProps) {
   const messagesRef = useRef<HTMLDivElement>(null);
   const lastMessage = messages[messages.length - 1];
   const lastAgentText = lastMessage?.type === "agent" ? lastMessage.text : "";
+  const readyJobIds = useMemo(
+    () => new Set(
+      messages
+        .filter((message) => message.type === "variant_preview")
+        .map((message) => message.jobId),
+    ),
+    [messages],
+  );
 
   useEffect(() => {
     const node = messagesRef.current;
@@ -424,6 +431,7 @@ export function AgentChat({ projectId }: AgentChatProps) {
               onApplyVariant={handleApplyVariant}
               applyingVariant={applyingVariant}
               appliedVariant={appliedVariant}
+              readyJobIds={readyJobIds}
             />
           ))}
         </div>
@@ -449,12 +457,14 @@ function MessageRenderer({
   onApplyVariant,
   applyingVariant,
   appliedVariant,
+  readyJobIds,
 }: {
   message: AgentMessage;
   onDismissSuggestion: (ts: number) => void;
   onApplyVariant: (jobId: string, variantIndex: number) => void | Promise<void>;
   applyingVariant: string | null;
   appliedVariant: string | null;
+  readyJobIds: Set<string>;
 }) {
   switch (message.type) {
     case "user":
@@ -525,6 +535,7 @@ function MessageRenderer({
           <SuggestionCard
             edit={message.edit}
             accepted={message.accepted}
+            ready={Boolean(message.edit.job_id && readyJobIds.has(message.edit.job_id))}
             onDismiss={() => onDismissSuggestion(message.ts)}
           />
         </div>
@@ -554,10 +565,12 @@ function MessageRenderer({
 function SuggestionCard({
   edit,
   accepted,
+  ready,
   onDismiss,
 }: {
   edit: SuggestedEdit;
   accepted?: boolean;
+  ready: boolean;
   onDismiss: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -571,7 +584,7 @@ function SuggestionCard({
         onClick={() => setExpanded((value) => !value)}
         aria-expanded={expanded}
       >
-        generating edit
+        {ready ? "video render ready" : "video render queued"}
       </button>
 
       {expanded && (
@@ -599,7 +612,9 @@ function SuggestionCard({
       ) : (
         expanded && <div className="suggestion-card__actions">
           <span className="suggestion-card__rationale" style={{ margin: 0, flex: 1 }}>
-            rendering… apply from the variant preview once it's ready
+            {ready
+              ? "preview ready below"
+              : "rendering… apply from the preview once it's ready"}
           </span>
           <button
             type="button"

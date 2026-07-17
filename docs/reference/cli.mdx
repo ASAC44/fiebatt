@@ -18,6 +18,30 @@ description: "CLI for the fiebatt AI video editor — prompt-driven video editin
   </div>
 </div>
 
+## Command layout
+
+Commands are grouped by the resource they operate on:
+
+```bash
+fiebatt projects                 # list projects
+fiebatt projects get PROJECT_ID
+fiebatt projects upload VIDEO
+fiebatt projects analyze PROJECT_ID
+
+fiebatt edits generate [OPTIONS]
+fiebatt edits score [OPTIONS]
+fiebatt edits accept [OPTIONS]
+
+fiebatt jobs get JOB_ID
+fiebatt entities get ENTITY_ID
+fiebatt batch generate --edits edits.json
+fiebatt batch accept --accepts accepts.json
+```
+
+Run `fiebatt GROUP --help` to see the commands in a group. The earlier flat
+spellings, such as `fiebatt generate` and `fiebatt job`, remain available as
+compatibility aliases but are omitted from top-level help.
+
 ## Installation and Agent Setup
 
 To install the fiebatt CLI and set up the agent skill for prompt-driven video editing, follow these steps:

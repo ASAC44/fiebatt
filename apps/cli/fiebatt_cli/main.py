@@ -34,6 +34,18 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+# Group the public CLI by resource. The original flat commands remain
+# available as hidden aliases for existing scripts.
+projects_app = typer.Typer(
+    help="Upload, inspect, and manage video projects.",
+    invoke_without_command=True,
+    no_args_is_help=False,
+)
+edits_app = typer.Typer(help="Create, refine, and apply video edits.")
+jobs_app = typer.Typer(help="Inspect asynchronous jobs.")
+entities_app = typer.Typer(help="Inspect tracked video entities.")
+batch_app = typer.Typer(help="Run generation and acceptance in batches.")
+
 
 @app.callback()
 def main(
@@ -63,33 +75,71 @@ def main(
 # ── Register command groups ─────────────────────────────────────────────
 
 app.add_typer(auth.app, name="auth")
+app.add_typer(projects_app, name="projects")
+app.add_typer(edits_app, name="edits")
+app.add_typer(jobs_app, name="jobs")
+app.add_typer(entities_app, name="entities")
+app.add_typer(batch_app, name="batch")
+
+
+@projects_app.callback()
+def projects(ctx: typer.Context) -> None:
+    """List projects when no project subcommand is supplied."""
+    if ctx.invoked_subcommand is None:
+        projects_cmd.list_projects()
+
+
+projects_app.command(name="get")(projects_cmd.get_project)
+projects_app.command(name="upload")(upload_cmd.upload)
+projects_app.command(name="analyze")(analyze_cmd.analyze)
+projects_app.command(name="timeline")(timeline_cmd.timeline)
+projects_app.command(name="preview")(preview_cmd.preview)
+projects_app.command(name="snapshot")(snapshot_cmd.snapshot)
+projects_app.command(name="revert")(snapshot_cmd.revert)
+projects_app.command(name="export")(export_cmd.export)
+
+edits_app.command(name="identify")(identify_cmd.identify)
+edits_app.command(name="mask")(mask_cmd.mask)
+edits_app.command(name="generate")(generate_cmd.generate)
+edits_app.command(name="accept")(accept_cmd.accept)
+edits_app.command(name="propagate")(propagate_cmd.propagate)
+edits_app.command(name="split")(split_cmd.split)
+edits_app.command(name="trim")(trim_cmd.trim)
+edits_app.command(name="grade")(grade_cmd.grade)
+edits_app.command(name="score")(score_cmd.score)
+edits_app.command(name="remix")(remix_cmd.remix)
+edits_app.command(name="narrate")(narrate_cmd.narrate)
+
+jobs_app.command(name="get")(jobs_cmd.get_job)
+entities_app.command(name="get")(entities_cmd.get_entity)
+batch_app.command(name="generate")(batch_cmd.batch_generate)
+batch_app.command(name="accept")(batch_cmd.batch_accept)
 
 # ── Register top-level commands ─────────────────────────────────────────
 
-app.command(name="upload")(upload_cmd.upload)
-app.command(name="projects")(projects_cmd.list_projects)
-app.command(name="project")(projects_cmd.get_project)
-app.command(name="generate")(generate_cmd.generate)
-app.command(name="job")(jobs_cmd.get_job)
-app.command(name="accept")(accept_cmd.accept)
-app.command(name="identify")(identify_cmd.identify)
-app.command(name="mask")(mask_cmd.mask)
-app.command(name="entity")(entities_cmd.get_entity)
-app.command(name="propagate")(propagate_cmd.propagate)
-app.command(name="timeline")(timeline_cmd.timeline)
-app.command(name="preview")(preview_cmd.preview)
-app.command(name="split")(split_cmd.split)
-app.command(name="trim")(trim_cmd.trim)
-app.command(name="snapshot")(snapshot_cmd.snapshot)
-app.command(name="revert")(snapshot_cmd.revert)
-app.command(name="grade")(grade_cmd.grade)
-app.command(name="score")(score_cmd.score)
-app.command(name="remix")(remix_cmd.remix)
-app.command(name="batch-generate")(batch_cmd.batch_generate)
-app.command(name="batch-accept")(batch_cmd.batch_accept)
-app.command(name="narrate")(narrate_cmd.narrate)
-app.command(name="export")(export_cmd.export)
-app.command(name="analyze")(analyze_cmd.analyze)
+app.command(name="upload", hidden=True)(upload_cmd.upload)
+app.command(name="project", hidden=True)(projects_cmd.get_project)
+app.command(name="generate", hidden=True)(generate_cmd.generate)
+app.command(name="job", hidden=True)(jobs_cmd.get_job)
+app.command(name="accept", hidden=True)(accept_cmd.accept)
+app.command(name="identify", hidden=True)(identify_cmd.identify)
+app.command(name="mask", hidden=True)(mask_cmd.mask)
+app.command(name="entity", hidden=True)(entities_cmd.get_entity)
+app.command(name="propagate", hidden=True)(propagate_cmd.propagate)
+app.command(name="timeline", hidden=True)(timeline_cmd.timeline)
+app.command(name="preview", hidden=True)(preview_cmd.preview)
+app.command(name="split", hidden=True)(split_cmd.split)
+app.command(name="trim", hidden=True)(trim_cmd.trim)
+app.command(name="snapshot", hidden=True)(snapshot_cmd.snapshot)
+app.command(name="revert", hidden=True)(snapshot_cmd.revert)
+app.command(name="grade", hidden=True)(grade_cmd.grade)
+app.command(name="score", hidden=True)(score_cmd.score)
+app.command(name="remix", hidden=True)(remix_cmd.remix)
+app.command(name="batch-generate", hidden=True)(batch_cmd.batch_generate)
+app.command(name="batch-accept", hidden=True)(batch_cmd.batch_accept)
+app.command(name="narrate", hidden=True)(narrate_cmd.narrate)
+app.command(name="export", hidden=True)(export_cmd.export)
+app.command(name="analyze", hidden=True)(analyze_cmd.analyze)
 
 
 if __name__ == "__main__":

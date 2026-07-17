@@ -21,7 +21,7 @@ class TestHelpOutput:
         assert "fiebatt" in result.output.lower()
 
     def test_generate_help_shows_options(self) -> None:
-        result = runner.invoke(app, ["generate", "--help"])
+        result = runner.invoke(app, ["edits", "generate", "--help"])
         assert result.exit_code == 0
         output = ANSI_ESCAPE.sub("", result.output)
         assert "--project" in output
@@ -37,6 +37,18 @@ class TestHelpOutput:
     def test_projects_help(self) -> None:
         result = runner.invoke(app, ["projects", "--help"])
         assert result.exit_code == 0
+
+    def test_help_organizes_commands_by_resource(self) -> None:
+        result = runner.invoke(app, ["--help"])
+        output = ANSI_ESCAPE.sub("", result.output)
+
+        assert result.exit_code == 0
+        assert "projects" in output
+        assert "edits" in output
+        assert "jobs" in output
+        assert "entities" in output
+        assert "batch" in output
+        assert "batch-generate" not in output
 
 
 class TestAuthStatus:
@@ -90,6 +102,32 @@ class TestProjectsCommand:
         result = runner.invoke(app, ["projects"])
         assert result.exit_code == 0
         mock_client_cls.return_value.list_projects.assert_called_once()
+
+    @patch("fiebatt_cli.commands.projects.FiebattClient")
+    @patch("fiebatt_cli.commands.projects.get_client_kwargs")
+    def test_projects_get(
+        self,
+        mock_kwargs: MagicMock,
+        mock_client_cls: MagicMock,
+    ) -> None:
+        mock_kwargs.return_value = {
+            "base_url": "http://localhost:8000",
+            "session_id": "sess-123",
+            "token": None,
+        }
+        mock_client_cls.return_value.get_project.return_value = {"id": "p1"}
+
+        result = runner.invoke(app, ["projects", "get", "p1"])
+        assert result.exit_code == 0
+        mock_client_cls.return_value.get_project.assert_called_once_with("p1")
+
+
+class TestCompatibilityAliases:
+    """Legacy flat commands continue to work but stay out of top-level help."""
+
+    def test_legacy_generate_alias(self) -> None:
+        result = runner.invoke(app, ["generate", "--help"])
+        assert result.exit_code == 0
 
 
 class TestJsonFlag:

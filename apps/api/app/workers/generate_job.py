@@ -349,7 +349,7 @@ async def run(job_id: str) -> None:
         reference_frame_ts = float(job.reference_frame_ts or start_ts)
         payload = dict(job.payload or {})
         project_video_path = proj.video_path
-        project_video_url = proj.video_url
+        project_video_url = str(payload.get("source_revision") or proj.video_url)
         generation_window = resolve_generation_window(
             start_ts,
             end_ts,
@@ -384,10 +384,13 @@ async def run(job_id: str) -> None:
         await db.commit()
 
     try:
-        source_video_path = await storage.materialize_source(
-            project_video_path,
-            project_video_url,
-        )
+        if project_video_url == proj.video_url:
+            source_video_path = await storage.materialize_source(
+                project_video_path,
+                project_video_url,
+            )
+        else:
+            source_video_path = await storage.path_from_url(project_video_url)
     except Exception as exc:
         error = f"source video unavailable: {exc}"
         async with AsyncSessionLocal() as db:

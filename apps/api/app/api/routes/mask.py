@@ -13,6 +13,7 @@ from app.models.selection import SelectionArtifact
 from app.models.session import Session as SessionModel
 from app.schemas.mask import MaskRequest, MaskResponse
 from app.services import ffmpeg, storage
+from app.services.edit_source import materialize_edit_source, source_for_timeline_clip
 
 log = logging.getLogger("fiebatt.mask")
 
@@ -29,8 +30,12 @@ async def mask(
     if proj is None or proj.session_id != session.id:
         raise HTTPException(status_code=404, detail="project not found")
 
-    if body.frame_ts > proj.duration + 1e-3:
-        raise HTTPException(status_code=422, detail="frame_ts past project duration")
+    try:
+        edit_source = source_for_timeline_clip(proj, body.target_clip_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if body.frame_ts > edit_source.duration + 1e-3:
+        raise HTTPException(status_code=422, detail="frame_ts past selected clip duration")
 
     # bbox sanity: x+w and y+h in [0,1]
     if body.bbox.x + body.bbox.w > 1.0001 or body.bbox.y + body.bbox.h > 1.0001:
@@ -39,7 +44,7 @@ async def mask(
     # Railway scratch storage is ephemeral. Restore the durable upload first.
     frame_path, _ = storage.new_path("keyframes", "jpg")
     try:
-        source_path = await storage.materialize_source(proj.video_path, proj.video_url)
+        source_path = await materialize_edit_source(proj, edit_source)
         await ffmpeg.extract_frame(source_path, body.frame_ts, frame_path)
     except Exception as e:
         log.exception("frame extraction failed")
@@ -87,7 +92,7 @@ async def mask(
         mask_url=mask_url,
         subject_reference_url=subject_reference_url,
         sam_score=mask_score,
-        source_revision=proj.video_url,
+        source_revision=edit_source.url,
     )
     db.add(artifact)
     await db.commit()

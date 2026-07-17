@@ -40,6 +40,7 @@ from app.services.global_chunk_planner import (
     split_evidence_from_track_frames,
 )
 from app.services import ffmpeg, storage
+from app.services.edit_source import materialize_edit_source, source_for_selection
 
 
 router = APIRouter(prefix="/edit-plans", tags=["edit-plans"])
@@ -101,20 +102,22 @@ async def create_edit_plan(
     selection = await db.get(SelectionArtifact, body.selection_id)
     if selection is None or selection.project_id != project.id:
         raise HTTPException(status_code=404, detail="selection not found")
-    if selection.source_revision != project.video_url:
-        raise HTTPException(status_code=409, detail="selection is stale for current source")
+    try:
+        edit_source = source_for_selection(project, selection)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     source_start = body.source_start_ts if body.source_start_ts is not None else 0.0
-    source_end = body.source_end_ts if body.source_end_ts is not None else project.duration
-    if source_end > project.duration + 1e-3:
-        raise HTTPException(status_code=422, detail="source range exceeds project")
+    source_end = body.source_end_ts if body.source_end_ts is not None else edit_source.duration
+    if source_end > edit_source.duration + 1e-3:
+        raise HTTPException(status_code=422, detail="source range exceeds selected clip")
     if not source_start - 1e-3 <= selection.frame_ts <= source_end + 1e-3:
         raise HTTPException(status_code=422, detail="selection is outside the active source clip")
 
     explicit_core = None
     if body.explicit_start_ts is not None and body.explicit_end_ts is not None:
-        if body.explicit_end_ts > project.duration + 1e-3:
-            raise HTTPException(status_code=422, detail="explicit range exceeds project")
+        if body.explicit_end_ts > edit_source.duration + 1e-3:
+            raise HTTPException(status_code=422, detail="explicit range exceeds selected clip")
         if (
             body.explicit_start_ts < source_start - 1e-3
             or body.explicit_end_ts > source_end + 1e-3
@@ -130,10 +133,7 @@ async def create_edit_plan(
         planning_frame = ""
         try:
             frame_path, _ = storage.new_path("keyframes", "jpg")
-            source_path = await storage.materialize_source(
-                project.video_path,
-                project.video_url,
-            )
+            source_path = await materialize_edit_source(project, edit_source)
             await ffmpeg.extract_frame(source_path, selection.frame_ts, frame_path)
             planning_frame = str(frame_path)
         except Exception:
@@ -177,6 +177,16 @@ async def create_edit_plan(
             detail="occurrence discovery is not available in the local planning rollout",
         )
 
+    range_source_path = None
+    if selection.source_revision != project.video_url:
+        try:
+            range_source_path = await materialize_edit_source(project, edit_source)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="selected follow-up video is unavailable; draw the selection again",
+            ) from exc
+
     try:
         resolution = await resolve_local_range(
             project,
@@ -185,6 +195,8 @@ async def create_edit_plan(
             explicit_core=explicit_core,
             source_start=source_start,
             source_end=source_end,
+            source_path=range_source_path,
+            source_duration=edit_source.duration,
         )
     except EditWindowLimitError as exc:
         raise HTTPException(
@@ -217,7 +229,7 @@ async def create_edit_plan(
             planned_chunks = plan_occurrence_chunks(
                 occurrence_start=resolution.edit_core.start_ts,
                 occurrence_end=resolution.edit_core.end_ts,
-                project_duration=project.duration,
+                project_duration=edit_source.duration,
                 requested_provider=body.video_gen_provider,
                 split_evidence=split_evidence_from_track_frames(
                     resolution.tracked_frames
@@ -237,6 +249,13 @@ async def create_edit_plan(
         provider_error = validate_provider_duration(provider, context.duration)
         if provider_error:
             raise HTTPException(status_code=422, detail=provider_error)
+    # The chunk compositor currently anchors outer seams against the original
+    # upload. Never let it silently replace a follow-up edit with old footage.
+    if len(planned_chunks) > 1 and selection.source_revision != project.video_url:
+        raise HTTPException(
+            status_code=422,
+            detail="follow-up edits must fit one 15-second render window",
+        )
     capabilities = VIDEO_PROVIDER_CAPABILITIES[provider]
     provider_reason = (
         f"selected {provider} for source-video context"
@@ -284,7 +303,7 @@ async def create_edit_plan(
         provider=provider,
         provider_reason=provider_reason,
         warnings_json=warnings,
-        source_revision=project.video_url,
+        source_revision=selection.source_revision,
     )
     db.add(plan)
     await db.flush()

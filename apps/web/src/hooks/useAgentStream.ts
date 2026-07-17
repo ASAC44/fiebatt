@@ -43,6 +43,7 @@ interface SendMessageOptions {
   duration?: number | null;
   bbox?: { x: number; y: number; w: number; h: number } | null;
   selectionId?: string | null;
+  targetClipId?: string | null;
 }
 
 /**
@@ -335,6 +336,7 @@ export function useAgentStream(projectId?: string | null) {
       duration,
       bbox,
       selectionId,
+      targetClipId,
     }: SendMessageOptions) => {
       // Do not create duplicate backend jobs while one turn is active.
       if (inFlightRef.current) return;
@@ -393,6 +395,7 @@ export function useAgentStream(projectId?: string | null) {
             duration: duration ?? null,
             bbox: bbox ?? null,
             selection_id: selectionId ?? null,
+            target_clip_id: targetClipId ?? null,
           }),
         });
 

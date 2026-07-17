@@ -20,6 +20,7 @@ from app.deps import get_session
 from app.models.project import Project
 from app.models.session import Session as SessionModel
 from app.schemas.identify import IdentifyRequest, IdentifyResponse
+from app.services.edit_source import materialize_edit_source, source_for_timeline_clip
 
 log = logging.getLogger("fiebatt.identify")
 router = APIRouter(tags=["identify"])
@@ -36,8 +37,12 @@ async def identify(
     if proj is None or proj.session_id != session.id:
         raise HTTPException(status_code=404, detail="project not found")
 
-    if body.frame_ts > proj.duration + 1e-3:
-        raise HTTPException(status_code=422, detail="frame_ts past project duration")
+    try:
+        edit_source = source_for_timeline_clip(proj, body.target_clip_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if body.frame_ts > edit_source.duration + 1e-3:
+        raise HTTPException(status_code=422, detail="frame_ts past selected clip duration")
 
     # bbox sanity: x+w and y+h in [0,1]
     if body.bbox.x + body.bbox.w > 1.0001 or body.bbox.y + body.bbox.h > 1.0001:
@@ -50,7 +55,7 @@ async def identify(
 
     frame_path = str(frames_dir / f"{proj.id}_{body.frame_ts:.3f}.png")
     try:
-        source_path = await storage.materialize_source(proj.video_path, proj.video_url)
+        source_path = await materialize_edit_source(proj, edit_source)
         await async_ffmpeg.extract_frame(source_path, body.frame_ts, frame_path)
     except Exception as exc:
         log.exception("ffmpeg frame extraction failed for project %s at ts=%.3f", proj.id, body.frame_ts)

@@ -292,7 +292,9 @@ function coreReducer(state: State, a: Action): State {
         const playhead = Math.max(0, Math.min(totalDuration(state.clips), a.t));
         const prevClipId = clipAtTime(state.clips, state.playhead)?.clip.id ?? null;
         const nextClipId = clipAtTime(state.clips, playhead)?.clip.id ?? null;
-        if (prevClipId !== nextClipId) {
+        // A box describes one decoded frame. Keeping it while seeking inside
+        // the same clip can silently target a different object.
+        if (prevClipId !== nextClipId || Math.abs(playhead - state.playhead) > 0.08) {
           return { ...clearEditState(state), playhead };
         }
         return { ...state, playhead };

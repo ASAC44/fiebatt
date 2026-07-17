@@ -229,14 +229,17 @@ async def resolve_local_range(
     track_frames: Callable[..., Awaitable[sam.TrackResult]] = cpu_tracking.track_frames,
     source_start: float = 0.0,
     source_end: float | None = None,
+    source_path: str | Path | None = None,
+    source_duration: float | None = None,
 ) -> LocalRangeResolution:
-    bounded_end = project.duration if source_end is None else min(project.duration, source_end)
+    duration = float(source_duration if source_duration is not None else project.duration)
+    bounded_end = duration if source_end is None else min(duration, source_end)
     key = _cache_key(selection, intent, explicit_core, source_start, bounded_end)
     cached = _RANGE_CACHE.get(key)
     if cached is not None:
         return cached.model_copy(deep=True)
 
-    source = Path(project.video_path)
+    source = Path(source_path) if source_path is not None else Path(project.video_path)
     if not source.exists():
         source = await storage.path_from_url(project.video_url)
     seed_mask_path: str | None = None
@@ -249,7 +252,7 @@ async def resolve_local_range(
     start, end = analysis_window(
         intent,
         selection.frame_ts,
-        project.duration,
+        duration,
         source_start=source_start,
         source_end=bounded_end,
     )
@@ -409,7 +412,7 @@ async def resolve_local_range(
     resolution = resolve_window_from_evidence(
         intent=intent,
         seed_ts=selection.frame_ts,
-        duration=project.duration,
+        duration=duration,
         analysis_start=start,
         analysis_end=end,
         shot_start=observed_shot_start,

@@ -42,13 +42,13 @@ export function Preview() {
   // might not be looking at the AI tab when they draw one. The effect
   // keys off bbox + projectId so it fires once per region, not per frame.
   const bbox = state.bbox;
-  const projectId = activeClip?.kind === "source" ? (activeClip.projectId ?? null) : null;
+  const projectId = activeClip?.projectId ?? null;
   useEffect(() => {
     if (!bbox || !projectId || frameTs == null || state.playing) return;
     const controller = new AbortController();
     let cancelled = false;
     dispatch({ type: "set_identified", entity: null, loading: true });
-    identifyRegion(projectId, frameTs, bbox, controller.signal)
+    identifyRegion(projectId, frameTs, bbox, activeClip?.id, controller.signal)
       .then((resp) => {
         if (cancelled) return;
         dispatch({
@@ -80,7 +80,7 @@ export function Preview() {
     const controller = new AbortController();
     let cancelled = false;
     dispatch({ type: "set_mask", mask: null });
-    getMask(projectId, frameTs, bbox, controller.signal)
+    getMask(projectId, frameTs, bbox, activeClip?.id, controller.signal)
       .then((resp) => {
         if (cancelled) return;
         dispatch({

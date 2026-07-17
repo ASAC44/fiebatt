@@ -5,6 +5,7 @@ from app.schemas.common import BBox
 
 class IdentifyRequest(BaseModel):
     project_id: str
+    target_clip_id: str | None = None
     frame_ts: float = Field(ge=0.0)
     bbox: BBox
 

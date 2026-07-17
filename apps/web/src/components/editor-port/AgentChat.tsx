@@ -72,6 +72,15 @@ export function AgentChat({ projectId }: AgentChatProps) {
         duration: totalDuration(edlState.clips),
         bbox: edlState.bbox ?? null,
         selectionId: edlState.mask?.selectionId ?? null,
+        targetClipId: (() => {
+          let cursor = 0;
+          for (const clip of edlState.clips) {
+            const end = cursor + (clip.sourceEnd - clip.sourceStart);
+            if (edlState.playhead <= end) return clip.id;
+            cursor = end;
+          }
+          return null;
+        })(),
       });
     },
     [projectId, sendMessage, edlState.playhead, edlState.clips, edlState.bbox, edlState.mask?.selectionId],

@@ -31,6 +31,7 @@ from app.deps import get_runner, get_session
 from app.models.conversation import Conversation, ChatMessage
 from app.models.project import Project
 from app.models.selection import SelectionArtifact
+from app.services.edit_source import source_for_selection, source_for_timeline_clip
 from app.models.session import Session as SessionModel
 from app.services.agent_tools import execute_tool
 from app.services import job_events
@@ -67,6 +68,10 @@ _NON_GENERATING_EDIT_REQUEST = re.compile(
     r"\b(?:status|progress|why|how|what|when|where|which|compare|export|download|"
     r"apply|undo|revert|rename)\b",
     re.IGNORECASE,
+)
+_RESELECTION_REQUEST = re.compile(
+    r"\b(?:move the playhead|draw (?:a |the )?bounding box|reposition|current selection|select(?:ion)? .*?(?:not|isn't|is not)|need you to)\b",
+    re.I,
 )
 
 
@@ -149,6 +154,7 @@ class AgentChatRequest(BaseModel):
     duration: float | None = None
     bbox: BBoxParam | None = None
     selection_id: str | None = None
+    target_clip_id: str | None = None
     video_gen_provider: Literal["auto", "wan", "happyhorse", "veo", "meshapi_veo"] | None = None
 
 
@@ -275,6 +281,7 @@ def _build_context_block(body: "AgentChatRequest") -> str:
         f"- timeline_duration: {duration}\n"
         f"- active_bbox: {_format_bbox(body.bbox)}\n"
         f"- selection_id: {selection}\n"
+        f"- target_clip_id: {body.target_clip_id or 'original source'}\n"
     )
 
 
@@ -320,9 +327,14 @@ async def _resolve_plan_selection_id(body: "AgentChatRequest") -> str | None:
                 if (
                     artifact is not None
                     and artifact.project_id == project.id
-                    and artifact.source_revision == project.video_url
+                    and abs(artifact.frame_ts - float(body.playhead_ts or artifact.frame_ts)) <= 0.25
                 ):
-                    return artifact.id
+                    try:
+                        source_for_selection(project, artifact)
+                    except ValueError:
+                        pass
+                    else:
+                        return artifact.id
 
             if body.bbox is not None:
                 artifacts = (
@@ -330,14 +342,20 @@ async def _resolve_plan_selection_id(body: "AgentChatRequest") -> str | None:
                         select(SelectionArtifact)
                         .where(
                             SelectionArtifact.project_id == project.id,
-                            SelectionArtifact.source_revision == project.video_url,
                         )
                         .order_by(SelectionArtifact.created_at.desc())
                         .limit(12)
                     )
                 ).scalars().all()
                 for artifact in artifacts:
-                    if _bbox_matches(artifact.bbox_json, body.bbox):
+                    if (
+                        _bbox_matches(artifact.bbox_json, body.bbox)
+                        and abs(artifact.frame_ts - float(body.playhead_ts or artifact.frame_ts)) <= 0.25
+                    ):
+                        try:
+                            source_for_selection(project, artifact)
+                        except ValueError:
+                            continue
                         return artifact.id
 
         if body.bbox is None or attempt == 2:
@@ -349,6 +367,10 @@ async def _resolve_plan_selection_id(body: "AgentChatRequest") -> str | None:
             project = await db.get(Project, body.project_id)
             if project is None:
                 return None
+            try:
+                edit_source = source_for_timeline_clip(project, body.target_clip_id)
+            except ValueError:
+                return None
             bbox = body.bbox.model_dump()
             x, y = bbox["x"], bbox["y"]
             right, bottom = x + bbox["w"], y + bbox["h"]
@@ -356,7 +378,7 @@ async def _resolve_plan_selection_id(body: "AgentChatRequest") -> str | None:
                 project_id=project.id,
                 frame_ts=min(
                     max(float(body.playhead_ts or 0.0), 0.0),
-                    max(float(project.duration) - 0.001, 0.0),
+                    max(edit_source.duration - 0.001, 0.0),
                 ),
                 bbox_json=bbox,
                 contours_json=[[
@@ -368,7 +390,7 @@ async def _resolve_plan_selection_id(body: "AgentChatRequest") -> str | None:
                 mask_url="",
                 subject_reference_url=None,
                 sam_score=None,
-                source_revision=project.video_url,
+                source_revision=edit_source.url,
             )
             db.add(artifact)
             await db.commit()
@@ -1259,6 +1281,8 @@ async def _agent_stream(
             if tool_name == "generate_edit":
                 if active_plan_id:
                     tool_args["plan_id"] = active_plan_id
+                if body.target_clip_id:
+                    tool_args["target_clip_id"] = body.target_clip_id
                 # Keep attribution separate from the model-authored generation
                 # prompt. The worker emits both for the before/refined card.
                 tool_args["user_prompt"] = body.message
@@ -1396,7 +1420,8 @@ async def _agent_stream(
     # Qwen can inspect frames then answer in prose without ever emitting the
     # required tool call. Finish the deterministic plan → generate path here
     # so the editor never reports a successful chat turn with no render.
-    if not generation_started and _requires_selected_generation(body):
+    model_requested_reselection = bool(_RESELECTION_REQUEST.search("".join(_agent_text_parts)))
+    if not generation_started and _requires_selected_generation(body) and not model_requested_reselection:
         log.warning(
             "[agent.chat] req=%s model stopped before generation; enforcing selected edit pipeline",
             req_id,
@@ -1456,6 +1481,8 @@ async def _agent_stream(
                     "plan_id": active_plan_id,
                     "user_prompt": body.message,
                 }
+                if body.target_clip_id:
+                    generate_args["target_clip_id"] = body.target_clip_id
                 if body.video_gen_provider:
                     generate_args["video_gen_provider"] = body.video_gen_provider
                 _tool_calls_log.append({"id": generate_call_id, "tool": "generate_edit", "args": generate_args})

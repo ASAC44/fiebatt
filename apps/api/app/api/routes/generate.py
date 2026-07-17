@@ -15,6 +15,7 @@ from app.models.session import Session as SessionModel
 from app.schemas.edit_plan import LocalRangeResolution
 from app.schemas.generate import GenerateRequest, GenerateResponse
 from app.services.accepted_generation import resolve_committed_timeline_range
+from app.services.edit_source import source_for_selection
 from app.workers import generate_job, local_chunk_job
 
 router = APIRouter(tags=["generate"])
@@ -47,8 +48,13 @@ async def generate(
         ).scalar_one_or_none()
         if plan is None or plan.project_id != proj.id:
             raise HTTPException(status_code=404, detail="edit plan not found")
-        if plan.source_revision != proj.video_url:
-            raise HTTPException(status_code=409, detail="edit plan is stale for current source")
+        selection = await db.get(SelectionArtifact, plan.selection_id)
+        if selection is None or selection.project_id != proj.id:
+            raise HTTPException(status_code=422, detail="edit plan selection is unavailable")
+        try:
+            edit_source = source_for_selection(proj, selection)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     use_plan_range = plan is not None and get_settings().adaptive_edit_planning
     if use_plan_range:
@@ -104,8 +110,9 @@ async def generate(
                 f"(got {length:.2f}s)"
             ),
         )
-    if end_ts > proj.duration + 1e-3:
-        raise HTTPException(status_code=422, detail="end_ts past project duration")
+    source_duration = edit_source.duration if plan is not None else proj.duration
+    if end_ts > source_duration + 1e-3:
+        raise HTTPException(status_code=422, detail="end_ts past selected clip duration")
     generation_length = (
         resolution.generation_context.duration
         if use_plan_range and resolution is not None
@@ -159,6 +166,7 @@ async def generate(
             "planned_intent": plan.intent_json if plan else None,
             "adaptive_context_enabled": use_plan_range,
             "target_clip_id": body.target_clip_id,
+            "source_revision": plan.source_revision if plan else proj.video_url,
             "plan_scope": plan.scope if plan else "legacy",
             "analysis_duration_ms": (
                 (plan.estimate_json or {}).get("analysis_duration_ms", 0.0)

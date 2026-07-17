@@ -635,12 +635,13 @@ export function getMask(
   projectId: string,
   frameTs: number,
   bbox: BBox,
+  targetClipId?: string | null,
   signal?: AbortSignal,
 ): Promise<MaskResp> {
   return request<MaskResp>("/api/mask", {
     method: "POST",
     signal,
-    body: JSON.stringify({ project_id: projectId, frame_ts: frameTs, bbox }),
+    body: JSON.stringify({ project_id: projectId, frame_ts: frameTs, bbox, target_clip_id: targetClipId ?? null }),
   });
 }
 
@@ -649,12 +650,13 @@ export function identifyRegion(
   projectId: string,
   frameTs: number,
   bbox: BBox,
+  targetClipId?: string | null,
   signal?: AbortSignal,
 ): Promise<IdentifyResp> {
   return request<IdentifyResp>("/api/identify", {
     method: "POST",
     signal,
-    body: JSON.stringify({ project_id: projectId, frame_ts: frameTs, bbox }),
+    body: JSON.stringify({ project_id: projectId, frame_ts: frameTs, bbox, target_clip_id: targetClipId ?? null }),
   });
 }
 

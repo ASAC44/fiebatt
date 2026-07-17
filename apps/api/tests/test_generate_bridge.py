@@ -53,10 +53,10 @@ def test_wan_duration_validation_matches_video_edit_api():
     assert validate_provider_duration("wan", 12.0) is not None
 
 
-def test_wan_prefers_tracked_mask_only_when_full_context_fits():
+def test_wan_prefers_current_video_edit_model_for_local_edits():
     assert select_source_edit_mode(
         "wan", duration=4.9, source_video=True, mask_available=True
-    ) == "tracked_mask"
+    ) == "source_video"
     assert select_source_edit_mode(
         "wan", duration=6.0, source_video=True, mask_available=True
     ) == "source_video"

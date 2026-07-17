@@ -33,7 +33,6 @@ VIDEO_PROVIDER_CAPABILITIES: dict[str, VideoProviderCapabilities] = {
         True,
         None,
         10,
-        max_mask_duration=5,
         first_frame=True,
         reference_images=True,
     ),
@@ -100,13 +99,10 @@ def select_source_edit_mode(
     capabilities = VIDEO_PROVIDER_CAPABILITIES.get(provider)
     if capabilities is None or not source_video:
         return "image_conditioned"
-    if (
-        provider == "wan"
-        and mask_available
-        and capabilities.max_mask_duration is not None
-        and duration <= capabilities.max_mask_duration + 0.05
-    ):
-        return "tracked_mask"
+    # Wan 2.7 video-edit is the primary source-edit path. The older VACE 2.1
+    # tracked-mask model produced materially worse instruction adherence in
+    # production and is retained only as an explicit adapter capability, not
+    # selected automatically.
     if capabilities.source_video_edit:
         return "source_video"
     return "image_conditioned"

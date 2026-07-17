@@ -9,7 +9,11 @@ from app.ai.services.provider_capabilities import (  # noqa: E402
     validate_provider_duration,
 )
 from app.workers import generate_job  # noqa: E402
-from app.workers.generate_job import _planned_edit_prompt, _public_url_or_none  # noqa: E402
+from app.workers.generate_job import (  # noqa: E402
+    _planned_edit_prompt,
+    _provider_model,
+    _public_url_or_none,
+)
 
 
 def test_public_url_gate_accepts_remote_https():
@@ -60,6 +64,8 @@ def test_wan_prefers_current_video_edit_model_for_local_edits():
     assert select_source_edit_mode(
         "wan", duration=6.0, source_video=True, mask_available=True
     ) == "source_video"
+    assert _provider_model("wan", "source_video") == "wan2.7-videoedit"
+    assert _provider_model("wan", "tracked_mask") == "wan2.1-vace-plus"
 
 
 def test_source_edit_mode_falls_back_by_provider_capability():

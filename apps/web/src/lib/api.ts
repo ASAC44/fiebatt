@@ -105,6 +105,7 @@ export type JobResp = {
   end_ts: number | null;
   provider?: string | null;
   model?: string | null;
+  edit_mode?: string | null;
   warnings?: string[];
   execution_window?: GenerationExecutionWindow | null;
   continuity_validation?: ContinuityValidation | null;

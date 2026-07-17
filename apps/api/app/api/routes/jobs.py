@@ -47,6 +47,7 @@ async def get_job(
         end_ts=job.end_ts,
         provider=payload.get("selected_provider"),
         model=payload.get("selected_model"),
+        edit_mode=payload.get("selected_edit_mode"),
         warnings=payload.get("warnings") or [],
         execution_window=payload.get("execution_window"),
         continuity_validation=payload.get("continuity_validation"),

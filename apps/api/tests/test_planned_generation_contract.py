@@ -61,11 +61,15 @@ def test_generation_job_exposes_continuity_and_core_preview_metadata():
         generation_attempts=2,
         generated_seconds=8.0,
         provider_attempts=["wan", "veo"],
+        model="wan2.7-videoedit",
+        edit_mode="source_video",
     )
 
     assert response.execution_window["edit_start_offset"] == 1.0
     assert response.continuity_validation["passed"] is True
     assert response.provider_attempts == ["wan", "veo"]
+    assert response.model == "wan2.7-videoedit"
+    assert response.edit_mode == "source_video"
 
 
 def test_agent_defaults_to_local_plan_not_full_timeline():

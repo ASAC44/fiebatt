@@ -27,6 +27,7 @@ class JobOut(BaseModel):
     end_ts: float | None = None
     provider: str | None = None
     model: str | None = None
+    edit_mode: str | None = None
     warnings: list[str] = Field(default_factory=list)
     execution_window: dict[str, Any] | None = None
     continuity_validation: dict[str, Any] | None = None

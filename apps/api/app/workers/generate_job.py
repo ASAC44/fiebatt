@@ -88,7 +88,9 @@ def _provider_label(provider: str) -> str:
 VARIANT_COUNT = 1
 
 
-def _provider_model(provider: str) -> str:
+def _provider_model(provider: str, edit_mode: str | None = None) -> str:
+    if provider == "wan" and edit_mode == "tracked_mask":
+        return "wan2.1-vace-plus"
     return {
         "wan": "wan2.7-videoedit",
         "happyhorse": "happyhorse-1.0-video-edit",
@@ -665,6 +667,7 @@ async def run(job_id: str) -> None:
         source_video=source_video_url is not None,
         mask_available=mask_public_url is not None,
     )
+    selected_model = _provider_model(video_provider, edit_mode)
     mask_frame_id = min(
         round(generation_duration * project_fps) + 1,
         max(
@@ -695,14 +698,6 @@ async def run(job_id: str) -> None:
         warnings.append(
             f"{video_provider} could not access a public source clip; using frame-conditioned generation"
         )
-    if mask_path and video_provider == "wan" and edit_mode == "source_video":
-        warnings.append(
-            "Wan native tracked-mask edits are limited to 5 seconds; using the isolated SAM subject reference"
-        )
-    elif mask_path and video_provider == "wan" and mask_public_url is None:
-        warnings.append(
-            "SAM mask is not provider-accessible; using the isolated SAM subject reference"
-        )
     if video_provider in {"veo", "meshapi_veo"} and conditioning_start_anchor is None:
         warnings.append(
             f"{video_provider} start boundary anchor is unavailable; using text-only generation"
@@ -713,6 +708,8 @@ async def run(job_id: str) -> None:
             current_payload = dict(current_job.payload or {})
             current_payload["warnings"] = warnings
             current_payload["conditioning"] = generation_conditioning.metadata()
+            current_payload["selected_model"] = selected_model
+            current_payload["selected_edit_mode"] = edit_mode
             current_job.payload = current_payload
             await db.commit()
 
@@ -761,7 +758,8 @@ async def run(job_id: str) -> None:
         strategy=strategy,
         conditioned_on=conditioned_on,
         provider=video_provider,
-        model=_provider_model(video_provider),
+        model=selected_model,
+        edit_mode=edit_mode,
         warnings=warnings,
     )
 
@@ -1211,6 +1209,12 @@ async def run(job_id: str) -> None:
         current_job = await db.get(Job, job_id)
         if current_job is not None:
             current_payload = dict(current_job.payload or {})
+            final_edit_mode = select_source_edit_mode(
+                video_provider,
+                duration=generation_duration,
+                source_video=source_video_url is not None,
+                mask_available=mask_public_url is not None,
+            )
             current_payload.update(
                 {
                     "generation_quality_state": quality_state.value,
@@ -1219,7 +1223,8 @@ async def run(job_id: str) -> None:
                     "generated_seconds": generated_seconds,
                     "provider_attempts": provider_attempts,
                     "selected_provider": video_provider,
-                    "selected_model": _provider_model(video_provider),
+                    "selected_model": _provider_model(video_provider, final_edit_mode),
+                    "selected_edit_mode": final_edit_mode,
                 }
             )
             local_flow_telemetry = build_local_flow_telemetry(

@@ -33,6 +33,7 @@ VIDEO_PROVIDER_CAPABILITIES: dict[str, VideoProviderCapabilities] = {
         True,
         None,
         10,
+        max_mask_duration=5,
         first_frame=True,
         reference_images=True,
     ),

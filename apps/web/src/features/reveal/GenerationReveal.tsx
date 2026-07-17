@@ -495,6 +495,12 @@ function GenerationOutcome({ result }: { result: JobResp }) {
           <span>{result.generated_seconds.toFixed(1)} generated seconds</span>
         ) : null}
         <span>provider {providers}</span>
+        {result.model ? (
+          <span>model {result.model}</span>
+        ) : null}
+        {result.edit_mode ? (
+          <span>mode {result.edit_mode.replaceAll("_", " ")}</span>
+        ) : null}
         {composite ? (
           <span>local composite {composite.applied ? "applied" : "skipped"}</span>
         ) : null}

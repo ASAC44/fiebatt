@@ -129,6 +129,7 @@ function AiTab({
     plan,
     planning,
     fallbackNotice,
+    proLimit,
     adaptivePlanningEnabled,
     busy,
     status,
@@ -220,6 +221,12 @@ function AiTab({
         {plan && variants.length === 0 ? (
           <EditPlanPreview plan={plan} busy={planning || busy} onAdjust={adjustPlan} />
         ) : null}
+        {proLimit && variants.length === 0 ? (
+          <ProLimitCard
+            limitSeconds={proLimit.limitSeconds}
+            detectedSeconds={proLimit.detectedSeconds}
+          />
+        ) : null}
         <GenerationReveal
           clip={activeClip}
           bbox={bbox}
@@ -257,6 +264,40 @@ function AiTab({
 
       <ContinuityPanel continuity={continuity} />
     </section>
+  );
+}
+
+function ProLimitCard({
+  limitSeconds,
+  detectedSeconds,
+}: {
+  limitSeconds: number;
+  detectedSeconds: number | null;
+}) {
+  const measured = detectedSeconds == null
+    ? `more than ${limitSeconds.toFixed(0)} seconds`
+    : `${detectedSeconds.toFixed(1)} seconds`;
+  return (
+    <aside className="pro-limit" aria-label="long edit limit">
+      <div className="pro-limit__glow" aria-hidden="true" />
+      <div className="pro-limit__head">
+        <span className="pro-limit__badge mono">PRO · COMING SOON</span>
+        <span className="pro-limit__safe mono">render safely paused</span>
+      </div>
+      <h3>This edit wants a bigger timeline.</h3>
+      <p>
+        We mapped a {measured} subject window, then stopped before starting any
+        video render calls. This workspace currently supports up to {limitSeconds.toFixed(0)} seconds.
+      </p>
+      <ul>
+        <li>edits with more than 30 seconds of motion context</li>
+        <li>automatic continuation across long scenes</li>
+        <li>larger quality-check and retry budgets</li>
+      </ul>
+      <p className="pro-limit__hint mono">
+        For now, trim the source clip or ask for a shorter action.
+      </p>
+    </aside>
   );
 }
 
@@ -317,7 +358,7 @@ function EditPlanPreview({
       </div>
       <div className="edit-plan__meta mono">
         <span>{plan.provider}</span>
-        <span>{plan.estimate.expected_generation_calls} call</span>
+        <span>{plan.estimate.expected_generation_calls} {plan.estimate.expected_generation_calls === 1 ? "call" : "calls"}</span>
         <span>{plan.estimate.expected_generated_seconds.toFixed(1)} generated seconds</span>
         <span>{plan.estimate.analysis_duration_ms.toFixed(0)}ms planning</span>
         <span>{plan.estimate.frames_inspected} frames inspected</span>

@@ -8,6 +8,18 @@ import { redirectToLogin } from "@/lib/auth";
 
 const SESSION_KEY = "fiebatt.session_id";
 
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+    public code?: string,
+    public detail?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 export function getSessionId(): string {
   let sid = localStorage.getItem(SESSION_KEY);
   if (!sid) {
@@ -33,8 +45,25 @@ async function request<T>(
     throw new Error("401 Unauthorized");
   }
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`${res.status} ${res.statusText}: ${text}`);
+    const payload = await res.json().catch(() => null) as {
+      detail?: string | Record<string, unknown>;
+    } | null;
+    const detail = payload?.detail;
+    if (detail && typeof detail === "object") {
+      const message = typeof detail.message === "string"
+        ? detail.message
+        : `${res.status} ${res.statusText}`;
+      throw new ApiError(
+        res.status,
+        message,
+        typeof detail.code === "string" ? detail.code : undefined,
+        detail,
+      );
+    }
+    throw new ApiError(
+      res.status,
+      typeof detail === "string" ? detail : `${res.status} ${res.statusText}`,
+    );
   }
   return res.json();
 }

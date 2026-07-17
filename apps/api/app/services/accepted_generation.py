@@ -151,7 +151,10 @@ def splice_generated_clip_into_edl(
         source_start=media_start,
         source_end=media_end,
         media_duration=media_duration,
-        volume=0.0,
+        # Every accepted local edit is conformed with the matching original
+        # audio. Keep that track audible by default; the editor's normal
+        # volume control remains available for an intentional mute.
+        volume=1.0,
         label="ai edit",
         project_id=project_id,
     )

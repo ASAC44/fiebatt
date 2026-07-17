@@ -279,7 +279,30 @@ async def assemble_global_occurrence(
             with_audio=False,
         )
         spans.append(span_path)
+    video_path, _ = storage.new_path("variants", "mp4")
+    await ffmpeg.concat_video_clips(spans, video_path)
+
+    # Each chunk is intentionally video-only while we choose visual seams.
+    # Restore one continuous original audio span after assembly, rather than
+    # using provider audio or adding silence between chunk boundaries.
+    original_source = await storage.materialize_source(
+        project.video_path,
+        project.video_url,
+    )
+    source_audio_path, _ = storage.new_path("clips", "mp4")
+    await ffmpeg.extract_clip(
+        original_source,
+        occurrence.edit_start,
+        occurrence.edit_end,
+        source_audio_path,
+        with_audio=True,
+    )
     output_path, _ = storage.new_path("variants", "mp4")
-    await ffmpeg.concat_video_clips(spans, output_path)
+    await ffmpeg.conform_generated_edit(
+        video_path,
+        source_audio_path,
+        occurrence.edit_end - occurrence.edit_start,
+        output_path,
+    )
     output_url = await storage.publish(output_path, content_type="video/mp4")
     return AssemblyResult(output_url, seams, continuity)

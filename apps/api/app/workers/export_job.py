@@ -61,20 +61,20 @@ async def _render_clip(
         f"fps={target_fps:.4f}"
     )
     # Keep every rendered part's audio and video exactly the same duration.
-    # `apad` only pads an existing audio stream; it does not create one when
-    # an AI file has no audio.  Feed generated clips an explicit silent track
-    # so concat/xfade never has to reconcile different stream lengths.
+    # AI clips normally carry source audio after conformation. Video-only
+    # legacy/provider files receive a deterministic silent track instead.
     af_parts: list[str] = []
-    if volume < 0.999:
+    source_meta = await ffmpeg.probe(src)
+    use_source_audio = bool(source_meta["has_audio"]) and volume > 0.001
+    if use_source_audio and volume < 0.999:
         af_parts.append(f"volume={max(0.0, min(1.0, volume)):.3f}")
     af_parts.append("apad")
     af = ",".join(af_parts)
 
     cmd = ["ffmpeg", "-y", "-ss", f"{source_start:.3f}", "-i", str(src)]
-    if volume < 0.999:
-        # The generated input may not contain audio at all, so an audio
-        # filter cannot manufacture the stream. Add a deterministic silent
-        # source and map it instead of relying on provider output.
+    if not use_source_audio:
+        # A filter cannot manufacture an absent track. Supply silence so every
+        # concat input still has exactly one aligned audio stream.
         cmd.extend([
             "-f", "lavfi", "-t", f"{duration:.3f}",
             "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
@@ -112,15 +112,14 @@ async def _render_span(
 ) -> None:
     """Render one timeline span to a normalized unit-codec MP4.
 
-    Generated clips are rendered from their own file (0→duration) with
-    silenced audio — AI-generated audio never sounds like the original
-    and would create audible artifacts during the dissolve transition.
-    Original spans seek into the source video with full audio.
+    Generated clips are rendered from their own file (0→duration). Their
+    audio is the original source track restored during conformation. Legacy
+    video-only variants fall back to aligned silence in `_render_clip`.
     """
     if is_generated:
         source_start = media_start
         source_end = media_end
-        volume = 0.0
+        volume = 1.0
     else:
         source_start = span_start
         source_end = span_end
@@ -164,12 +163,11 @@ async def _render_edl(
         if src is None or not src.exists():
             src = await storage.path_from_url(clip.url)
 
-        volume = 0.0 if clip.kind == "generated" else clip.volume
         await _render_clip(
             src,
             source_start=clip.source_start,
             source_end=clip.source_end,
-            volume=volume,
+            volume=clip.volume,
             target_w=proj.width or 1280,
             target_h=proj.height or 720,
             target_fps=proj.fps or 24.0,

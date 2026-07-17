@@ -97,6 +97,7 @@ def test_edl_splice_preserves_manual_order_and_uses_core_inside_padded_media():
     generated_asset = next(asset for asset in result.sources if asset.id == "variant-1")
     assert generated_asset.duration == 6.0
     assert generated_asset.fps == 24.0
+    assert next(clip for clip in result.clips if clip.kind == "generated").volume == 1.0
 
 
 def test_source_range_maps_through_reordered_target_clip_to_timeline_range():
@@ -189,4 +190,4 @@ async def test_export_renders_only_authoritative_media_subrange(monkeypatch, tmp
     )
     assert captured["source_start"] == 1.0
     assert captured["source_end"] == 3.0
-    assert captured["volume"] == 0.0
+    assert captured["volume"] == 1.0

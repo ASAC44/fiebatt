@@ -100,7 +100,11 @@ async def build_timeline(db: AsyncSession, proj: Project) -> list[TimelineItem]:
                 effective_end,
                 seg.source,
                 seg.url,
-                seg.source == "original",
+                # Generated edits are conformed with their source audio.
+                # Older video-only outputs simply play silently in browsers;
+                # marking new generated spans audible avoids muting valid
+                # original dialogue/music in the editor.
+                True,
                 media_start,
                 media_end,
                 media_duration,

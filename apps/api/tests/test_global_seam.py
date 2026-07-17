@@ -125,13 +125,19 @@ async def test_assembly_trims_at_selected_seam_without_crossfade(
         ),
     ]
     occurrence = SimpleNamespace(edit_start=0.5, edit_end=9.5)
-    project = SimpleNamespace(fps=30.0)
+    project = SimpleNamespace(
+        fps=30.0,
+        video_path=str(tmp_path / "source.mp4"),
+        video_url="/source.mp4",
+    )
     extracts = []
     concatenated = []
     reserved = iter(
         [
             (tmp_path / "span-0.mp4", "/span-0"),
             (tmp_path / "span-1.mp4", "/span-1"),
+            (tmp_path / "assembled-video.mp4", "/assembled-video"),
+            (tmp_path / "source-audio.mp4", "/source-audio"),
             (tmp_path / "assembled.mp4", "/assembled"),
         ]
     )
@@ -153,6 +159,15 @@ async def test_assembly_trims_at_selected_seam_without_crossfade(
         concatenated.append((list(paths), Path(output)))
         return Path(output)
 
+    async def materialize_source(_video_path, _video_url):
+        return tmp_path / "source.mp4"
+
+    conformed = []
+
+    async def conform(generated, source, duration, output):
+        conformed.append((Path(generated), Path(source), duration, Path(output)))
+        return Path(output)
+
     async def publish(path, *, content_type):
         return "/media/assembled.mp4"
 
@@ -162,6 +177,8 @@ async def test_assembly_trims_at_selected_seam_without_crossfade(
     monkeypatch.setattr(global_seam.storage, "new_path", lambda *args: next(reserved))
     monkeypatch.setattr(global_seam.ffmpeg, "extract_clip", extract)
     monkeypatch.setattr(global_seam.ffmpeg, "concat_video_clips", concat)
+    monkeypatch.setattr(global_seam.ffmpeg, "conform_generated_edit", conform)
+    monkeypatch.setattr(global_seam.storage, "materialize_source", materialize_source)
     monkeypatch.setattr(global_seam.storage, "publish", publish)
 
     result = await global_seam.assemble_global_occurrence(
@@ -174,4 +191,7 @@ async def test_assembly_trims_at_selected_seam_without_crossfade(
     assert result.seams[0].timestamp == pytest.approx(5.25)
     assert extracts[0][1:3] == pytest.approx((0.5, 5.25))
     assert extracts[1][1:3] == pytest.approx((1.25, 5.5))
+    assert extracts[2][1:3] == pytest.approx((0.5, 9.5))
+    assert extracts[2][4] is True
     assert len(concatenated) == 1
+    assert conformed[0][2] == pytest.approx(9.0)

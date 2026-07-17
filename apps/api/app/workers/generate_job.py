@@ -959,9 +959,12 @@ async def run(job_id: str) -> None:
             return None
         target_frames: list[str] = []
         if not bbox_is_full_frame and sampled_frames:
-            sample_indexes = sorted({0, len(sampled_frames) // 2, len(sampled_frames) - 1})
             try:
-                for index in sample_indexes:
+                # Full frames catch broad spill, but a brief wrong colour or
+                # shape inside the selected target can be too small to judge
+                # there. Score a crop from every chronological sample so a
+                # transient target regression cannot hide between endpoints.
+                for index in range(len(sampled_frames)):
                     target_path, _ = storage.new_path("keyframes", "png")
                     await ffmpeg.crop_bbox_from_frame(
                         sampled_frames[index],

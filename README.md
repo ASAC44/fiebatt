@@ -249,7 +249,7 @@ Important environment groups:
 - auth: `AUTH_JWT_SECRET`, `AUTH_JWT_EXPIRES_MINUTES`
 - media storage: `S3_BUCKET` and standard AWS settings, or local media fallback
 - AI mode: `USE_AI_STUBS`
-- local edit rollout: `ADAPTIVE_EDIT_PLANNING` (defaults off; fixed-window fallback stays available)
+- local edit windows: `ADAPTIVE_EDIT_PLANNING` (defaults on; fixed-window fallback stays available)
 - emergency continuity override: `ALLOW_HARD_FAILED_ACCEPTANCE` (keep off during normal rollout)
 - Mesh API gateway: `MESH_API_KEY`, `MESH_API_BASE_URL`, `MESH_MODEL`, `MESH_VIDEO_MODEL`, `MESH_VIDEO_ENDPOINT`
 - generation provider: `VIDEO_GEN_PROVIDER`, `VEO_MODEL`, `VIDEO_GENERATION_TIMEOUT`

@@ -35,8 +35,8 @@ def test_generate_request_rejects_partial_legacy_shape():
         GenerateRequest(project_id="project-1", start_ts=1.0, end_ts=4.0)
 
 
-def test_adaptive_generation_is_rollout_gated_by_default():
-    assert Settings().adaptive_edit_planning is False
+def test_adaptive_local_generation_is_enabled_by_default():
+    assert Settings().adaptive_edit_planning is True
     assert Settings().global_edit_planning is False
 
 

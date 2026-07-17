@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Icon } from "./Icon";
+import { Button } from "@/components/ui/button";
 import "./upload-drop.css";
 
 export function UploadDrop({
@@ -29,9 +29,6 @@ export function UploadDrop({
       onClick={() => !busy && inRef.current?.click()}
     >
       <div className="drop__plate">
-        <div className="drop__ring">
-          <Icon name="plus" size={22} />
-        </div>
         <div className="drop__text">
           <strong className="drop__title">
             {busy ? "Importing…" : "Drop a clip"}
@@ -40,6 +37,19 @@ export function UploadDrop({
             mp4 · mov · ≤ 2 min · drag or click
           </span>
         </div>
+        <Button
+          className="drop__button"
+          disabled={busy}
+          onClick={(e) => {
+            e.stopPropagation();
+            inRef.current?.click();
+          }}
+          size="lg"
+          type="button"
+          variant="default"
+        >
+          {busy ? "Importing…" : "Upload video"}
+        </Button>
       </div>
       <input
         ref={inRef}

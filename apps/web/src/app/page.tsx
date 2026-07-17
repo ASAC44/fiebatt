@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import CardNav from "@/components/ui/card-nav";
 import { Button } from "@/components/ui/button";
@@ -250,28 +249,6 @@ export default function Home() {
                 export complete ./exports/demo-reel.mp4
               </AnimatedSpan>
             </Terminal>
-          </div>
-        </div>
-      </section>
-
-      <section className="px-6 py-24 md:py-32">
-        <div className="mx-auto max-w-7xl">
-          <div className="mb-12 max-w-3xl">
-            <p className="text-sm font-medium text-primary">The Platform</p>
-            <h2 className="mt-4 text-4xl font-semibold tracking-normal text-neutral-950 md:text-6xl">
-              One surface for editing, chatting, comparing, and exporting.
-            </h2>
-          </div>
-
-          <div className="overflow-hidden rounded-3xl border border-black/10 bg-white/60 p-2">
-            <Image
-              alt="fiebatt editor platform showing video preview, chat workflow, compare controls, and export tools"
-              className="h-auto w-full rounded-[1.25rem] object-cover"
-              height={1738}
-              priority={false}
-              src="/platform-hero.png"
-              width={3024}
-            />
           </div>
         </div>
       </section>

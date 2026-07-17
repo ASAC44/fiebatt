@@ -177,8 +177,9 @@ export function ProjectsClient() {
                 href={`/editor?projectId=${project.project_id}`}
                 id={project.project_id}
                 key={project.project_id}
+                durationLabel={formatDuration(project.duration)}
+                aspectRatioLabel={formatAspectRatio(project.width, project.height)}
                 lastEdited={formatRelative(project.created_at)}
-                meta={`${formatDuration(project.duration)} · ${project.width}x${project.height}`}
                 onDelete={() => handleDelete(project.project_id)}
                 onRename={(name) => handleRename(project.project_id, name)}
                 title={project.name}
@@ -198,6 +199,18 @@ function formatDuration(sec: number): string {
   const minutes = Math.floor(sec / 60);
   const seconds = Math.floor(sec % 60);
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatAspectRatio(width: number, height: number): string {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return "—";
+  }
+
+  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+  const divisor = gcd(Math.round(width), Math.round(height));
+  const w = Math.round(width) / divisor;
+  const h = Math.round(height) / divisor;
+  return `${w}:${h}`;
 }
 
 function formatRelative(iso: string): string {

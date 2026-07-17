@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
 
 import {
   isEditorChecklistDismissed,
@@ -102,8 +103,10 @@ export function EditorChecklist({
             accept the best result, then either propagate it or export.
           </p>
         </div>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon"
           className="editor-checklist__dismiss"
           aria-label="dismiss checklist"
           onClick={() => {
@@ -112,7 +115,7 @@ export function EditorChecklist({
           }}
         >
           ×
-        </button>
+        </Button>
       </div>
 
       <div className="editor-checklist__progress">
@@ -151,9 +154,9 @@ export function EditorChecklist({
           {nextStep ? `next up: ${nextStep.label}` : "you’re clear to export or keep pushing the continuity story."}
         </div>
         {!hasSources && (
-          <button type="button" className="editor-checklist__cta" onClick={onImport}>
+          <Button type="button" className="editor-checklist__cta" onClick={onImport}>
             import footage
-          </button>
+          </Button>
         )}
       </div>
     </section>

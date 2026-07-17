@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { Input } from "@/components/ui/input";
 import { updateProject } from "@/lib/api";
 
 export function ProjectNameEditor({
@@ -37,9 +38,9 @@ export function ProjectNameEditor({
   }
 
   return (
-    <input
+    <Input
       aria-label="Project name"
-      className="h-8 w-56 rounded-md border border-transparent bg-transparent px-2 text-center text-sm font-medium outline-none transition focus:border-border focus:bg-card"
+      className="h-8 w-full min-w-0 max-w-[22rem] rounded-md border border-transparent bg-transparent px-3 text-center text-sm font-medium outline-none transition focus:border-border focus:bg-card"
       disabled={!projectId}
       aria-invalid={error}
       maxLength={120}

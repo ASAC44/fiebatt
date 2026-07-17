@@ -1,6 +1,10 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { narrate, type JobResp, type Variant } from "@/lib/api";
 import type { GenerationLogEntry } from "@/hooks/useGenerationSession";
 import {
@@ -190,7 +194,7 @@ export function GenerationReveal({
 
         <div className={`reveal__prompt-shell reveal__prompt-shell--${layout}`}>
           {layout === "panel" ? (
-            <textarea
+            <Textarea
               className="reveal__prompt-input reveal__prompt-input--area"
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
@@ -199,7 +203,7 @@ export function GenerationReveal({
               disabled={promptLocked}
             />
           ) : (
-            <input
+            <Input
               className="reveal__prompt-input reveal__prompt-input--line"
               type="text"
               value={prompt}
@@ -214,13 +218,13 @@ export function GenerationReveal({
             />
           )}
 
-          <button
+          <Button
             className="reveal__generate"
             onClick={() => void handleRun()}
             disabled={!canGenerate}
           >
             {busy ? `${formatStatus(status)}…` : runLabel ?? "generate variants"}
-          </button>
+          </Button>
         </div>
 
         <div className="reveal__context">
@@ -230,21 +234,21 @@ export function GenerationReveal({
           <ContextPill k="scope" v={regionSummary} />
           <ContextPill k="subject" v={subjectSummary} />
           {bbox && onClearRegion && (
-            <button className="reveal__ghost reveal__ghost--small" onClick={onClearRegion}>
+            <Button className="reveal__ghost reveal__ghost--small" onClick={onClearRegion} size="sm" variant="ghost">
               clear region
-            </button>
+            </Button>
           )}
         </div>
         {notice ? <p className="reveal__notice mono">{notice}</p> : null}
       </div>
 
       {err && (
-        <div className="reveal__error mono">
+        <Alert className="reveal__error mono" variant="destructive">
           <span>{err}</span>
-          <button onClick={() => setErr(null)} aria-label="dismiss ai error">
+          <Button onClick={() => setErr(null)} aria-label="dismiss ai error" size="sm" variant="ghost">
             close
-          </button>
-        </div>
+          </Button>
+        </Alert>
       )}
 
       {(busy || (logs && logs.length > 0 && !hasVariants)) && (
@@ -283,7 +287,7 @@ export function GenerationReveal({
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               {/* narration controls */}
               {(narrationUrl || narrationLoading) && (
-                <button
+                <Button
                   className="reveal__narration-toggle mono"
                   onClick={() => {
                     const audio = audioRef.current;
@@ -314,9 +318,11 @@ export function GenerationReveal({
                     cursor: "pointer",
                     transition: "all 0.2s",
                   }}
+                  size="sm"
+                  variant="outline"
                 >
                   {narrationLoading ? "loading voice..." : narrationMuted ? "play voice" : "narrating"}
-                </button>
+                </Button>
               )}
               <div className="reveal__scores mono">
                 <ScoreBadge label="visual" value={activeVariant.visual_coherence} />
@@ -374,7 +380,7 @@ export function GenerationReveal({
           </p>
 
           <div className="reveal__actions">
-            <button
+            <Button
               className="reveal__primary"
               onClick={() => void handleAccept(activeVariantIdx ?? 0)}
               disabled={acceptingIdx != null || !activeVariant.url || acceptanceBlocked}
@@ -384,10 +390,10 @@ export function GenerationReveal({
                 : acceptingIdx != null
                 ? "applying variant..."
                 : `apply variant ${variantLetter(activeVariantIdx ?? 0)}`}
-            </button>
-            <button className="reveal__ghost" onClick={handleReset}>
+            </Button>
+            <Button className="reveal__ghost" onClick={handleReset} variant="ghost">
               different prompt
-            </button>
+            </Button>
           </div>
 
           <div className="reveal__variant-grid">
@@ -396,13 +402,14 @@ export function GenerationReveal({
               const disabled = acceptingIdx != null && acceptingIdx !== index;
               const bestScore = getBestVariantIndex(variants);
               return (
-                <button
+                <Button
                   key={`${variant.url ?? variant.id}-${index}`}
                   className={`reveal__variant-card ${selected ? "reveal__variant-card--active" : ""}`}
                   onClick={() => setActiveVariantIdx(index)}
                   disabled={acceptingIdx != null}
                   aria-pressed={selected}
                   style={{ opacity: disabled ? 0.5 : 1 }}
+                  variant="ghost"
                 >
                   <div className="reveal__variant-media">
                     <video
@@ -453,7 +460,7 @@ export function GenerationReveal({
                       {variant.description || "generated option"}
                     </p>
                   </div>
-                </button>
+                </Button>
               );
             })}
           </div>

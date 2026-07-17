@@ -1,7 +1,7 @@
 .studio {
   /* resizable grid — splitters write to these vars */
   --left-w: 320px;
-  --right-w: 320px;
+  --right-w: 260px;
   --tl-h: 240px;
   --split-x: 1px;
   --split-y: 0px;
@@ -221,9 +221,9 @@
   grid-template-columns:
     var(--left-w)
     var(--split-x)
-    minmax(0, 1fr)
+    var(--right-w)
     var(--split-x)
-    var(--right-w);
+    minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
   background: var(--bg);
@@ -293,7 +293,10 @@
 .splitter--vertical {
   cursor: col-resize;
   width: 100%;
-  height: 100%;
+  height: calc(100% - 12px);
+  margin-top: 6px;
+  margin-bottom: 6px;
+  border-radius: 999px;
 }
 .splitter--vertical::after {
   top: 50%;
@@ -331,7 +334,7 @@
 }
 
 /* ── focused editor layout ── */
-/* 60/40 split: video player left, agent chat right */
+/* 40/60 split: agent chat left, video player right */
 
 /* hide low-level media panels from the main workflow */
 .studio--focused .studio__left,
@@ -345,12 +348,12 @@
   display: none !important;
 }
 
-/* 60/40 grid: center (video) | splitter | right (chat) */
+/* compact chat sidebar | splitter | larger video surface */
 .studio--focused .studio__body {
-  grid-template-columns: minmax(0, 3fr) var(--split-x) minmax(280px, 2fr);
+  grid-template-columns: minmax(220px, 1.15fr) var(--split-x) minmax(0, 4.85fr);
 }
 
-/* agent chat fills the right side */
+/* agent chat fills the left visible pane */
 .studio--focused .studio__right {
   display: flex !important;
   flex-direction: column;
@@ -388,4 +391,71 @@
 /* make the preview video fill the space */
 .studio--focused .pv {
   height: 100%;
+}
+
+@media (max-width: 1200px) {
+  .studio {
+    --left-w: 260px;
+    --right-w: 220px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .studio {
+    grid-template-rows: 40px minmax(0, 1fr) minmax(180px, 28vh);
+  }
+
+  .studio__body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(240px, 38vh);
+  }
+
+  .studio__left,
+  .splitter--vertical:first-of-type {
+    display: none !important;
+  }
+
+  .studio__right {
+    order: 2;
+    min-height: 240px;
+  }
+
+  .studio__center {
+    order: 1;
+    padding-bottom: 0;
+  }
+
+  .studio__body > .splitter--vertical {
+    display: none !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .studio {
+    height: 100dvh;
+    max-height: 100dvh;
+    grid-template-rows: 40px minmax(0, 1fr);
+  }
+
+  .studio__body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(220px, 34vh);
+  }
+
+  .studio__bottom,
+  .studio__h-splitter-wrap {
+    display: none !important;
+  }
+
+  .drop {
+    margin: 10px;
+  }
+
+  .drop__plate {
+    padding: 20px 18px;
+  }
+
+  .drop__sub {
+    letter-spacing: 0.08em;
+  }
 }

@@ -39,6 +39,8 @@ import { ContinuityStatusBadge } from "@/features/continuity/ContinuityStatusBad
 import { useContinuityDashboard } from "@/features/continuity/useContinuityDashboard";
 import { useAgentEdlBridge } from "@/hooks/useAgentEdlBridge";
 import { EditorTopbar } from "@/components/editor-topbar";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import "./studio.css";
 
 export type StudioInitialProject = {
@@ -690,9 +692,13 @@ function StudioInner({
         }
       />
       {uploadError ? (
-        <div className="fixed left-1/2 top-14 z-[10020] -translate-x-1/2 rounded-lg border border-red-500/30 bg-red-950 px-4 py-3 text-sm text-red-100 shadow-xl" role="alert">
-          Could not upload this video. {uploadError}
-        </div>
+        <Alert
+          className="fixed left-1/2 top-14 z-[10020] w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 border-red-500/30 bg-red-950 text-red-100 shadow-xl"
+          variant="destructive"
+        >
+          <AlertTitle>Could not upload this video</AlertTitle>
+          <AlertDescription className="text-red-100/85">{uploadError}</AlertDescription>
+        </Alert>
       ) : null}
 
       {showShortcuts && (
@@ -827,34 +833,22 @@ function StudioInner({
                   {exportError}
                 </div>
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-                  <button
+                  <Button
                     onClick={() => { dismissExport(); void handleExport(); }}
-                    style={{
-                      padding: '8px 20px',
-                      borderRadius: 999,
-                      background: 'rgba(255,255,255,0.12)',
-                      color: '#fff',
-                      fontSize: 12,
-                      border: '1px solid rgba(255,255,255,0.2)',
-                      cursor: 'pointer',
-                    }}
+                    className="rounded-full"
+                    size="sm"
+                    variant="secondary"
                   >
                     retry
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={dismissExport}
-                    style={{
-                      padding: '8px 16px',
-                      borderRadius: 999,
-                      background: 'transparent',
-                      color: 'rgba(255,255,255,0.5)',
-                      fontSize: 12,
-                      border: '1px solid rgba(255,255,255,0.08)',
-                      cursor: 'pointer',
-                    }}
+                    className="rounded-full text-white/70 hover:text-white"
+                    size="sm"
+                    variant="outline"
                   >
                     dismiss
-                  </button>
+                  </Button>
                 </div>
               </>
             )}
@@ -873,6 +867,19 @@ function StudioInner({
           rootRef={rootRef}
           min={320}
           max={480}
+          anchor="left"
+        />
+
+        <aside className="studio__right">
+          <AgentChat projectId={continuityProjectId} />
+        </aside>
+
+        <Splitter
+          orientation="vertical"
+          cssVar="--right-w"
+          rootRef={rootRef}
+          min={200}
+          max={360}
           anchor="left"
         />
 
@@ -899,32 +906,21 @@ function StudioInner({
               <div className="max-w-sm">
                 <p className="text-sm font-medium text-white">Could not reopen this timeline</p>
                 <p className="mt-2 text-xs text-white/55">{hydrateError}</p>
-                <button
-                  className="mt-4 rounded-md border border-white/20 px-3 py-2 text-xs text-white hover:bg-white/10"
+                <Button
+                  className="mt-4"
                   onClick={() => setHydrateAttempt((value) => value + 1)}
+                  size="sm"
                   type="button"
+                  variant="outline"
                 >
                   Try again
-                </button>
+                </Button>
               </div>
             </div>
           ) : (
             <UploadDrop onFile={handleFile} busy={uploading} />
           )}
         </section>
-
-        <Splitter
-          orientation="vertical"
-          cssVar="--right-w"
-          rootRef={rootRef}
-          min={220}
-          max={520}
-          anchor="right"
-        />
-
-        <aside className="studio__right">
-          <AgentChat projectId={continuityProjectId} />
-        </aside>
       </section>
 
       <div className="studio__h-splitter-wrap" style={{ position: 'absolute', left: 0, right: 0, top: 'calc(100vh - var(--tl-h) - 4px)', zIndex: 5 }}>

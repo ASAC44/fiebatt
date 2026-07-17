@@ -11,9 +11,11 @@ import { cn } from "@/lib/utils";
 export type ProjectCardProps = {
   id: string;
   title: string;
-  meta: string;
   lastEdited: string;
   href: string;
+  durationLabel?: string;
+  aspectRatioLabel?: string;
+  meta?: string;
   videoUrl?: string;
   imageUrl?: string;
   onDelete?: () => void;
@@ -24,9 +26,11 @@ export type ProjectCardProps = {
 export function ProjectCard({
   id,
   title,
-  meta,
   lastEdited,
   href,
+  durationLabel,
+  aspectRatioLabel,
+  meta,
   videoUrl,
   imageUrl,
   onDelete,
@@ -151,9 +155,19 @@ export function ProjectCard({
           {renameError ? (
             <p className="text-xs text-destructive" role="alert">{renameError}</p>
           ) : null}
-          <p className="text-sm text-muted-foreground transition-opacity group-hover:opacity-0">
-            {meta}
-          </p>
+          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground transition-opacity group-hover:opacity-0">
+            {durationLabel ? (
+              <span className="inline-flex items-center rounded-md border border-border/70 bg-muted/35 px-2 py-0.5 text-xs">
+                {durationLabel}
+              </span>
+            ) : null}
+            {aspectRatioLabel ? (
+              <span className="inline-flex items-center rounded-md border border-border/70 bg-muted/35 px-2 py-0.5 text-xs">
+                {aspectRatioLabel}
+              </span>
+            ) : null}
+            {!durationLabel && !aspectRatioLabel ? <span>{meta}</span> : null}
+          </div>
           <p className="-mt-5 text-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
             Last edited {lastEdited}
           </p>

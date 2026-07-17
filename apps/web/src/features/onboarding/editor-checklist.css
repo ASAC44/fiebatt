@@ -44,41 +44,23 @@
 }
 
 .editor-checklist__dismiss {
-  /* ~32px hit target — bare × glyph with zero padding was too small
-     to reliably click with a trackpad. */
   width: 32px;
   height: 32px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  min-width: 32px;
+  padding: 0;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.025);
   color: rgba(255, 255, 255, 0.48);
   font-size: 18px;
   line-height: 1;
-  cursor: pointer;
-  transition:
-    color 140ms ease,
-    background 140ms ease,
-    border-color 140ms ease,
-    transform 140ms ease;
   flex-shrink: 0;
 }
 
 .editor-checklist__dismiss:hover {
   color: rgba(255, 255, 255, 0.92);
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .editor-checklist__dismiss:active {
   transform: scale(0.94);
-}
-
-.editor-checklist__dismiss:focus-visible {
-  outline: 1px solid rgba(255, 255, 255, 0.3);
-  outline-offset: 2px;
 }
 
 .editor-checklist__progress {
@@ -178,12 +160,9 @@
 }
 
 .editor-checklist__cta {
-  border: 1px solid rgba(255,255,255,0.14);
-  background: rgba(255,255,255,0.06);
-  color: #fff;
-  padding: 10px 14px;
+  height: 36px;
   border-radius: 999px;
-  cursor: pointer;
+  border-radius: 999px;
   font-family: var(--font-mono, monospace);
   font-size: 11px;
   letter-spacing: 0.12em;

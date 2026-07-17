@@ -22,6 +22,7 @@ from app.ai.services.logger import tracked
 
 QWEN_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 DEFAULT_MODEL = "qwen3.7-plus"
+QWEN_REQUEST_TIMEOUT_SECONDS = 60.0
 
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
@@ -60,7 +61,19 @@ def _provider_config(*, needs_vision: bool = False) -> tuple[str, str, str]:
 
 def _make_client(*, needs_vision: bool = False) -> AsyncOpenAI:
     api_key, base_url, _model = _provider_config(needs_vision=needs_vision)
-    return AsyncOpenAI(api_key=api_key, base_url=base_url)
+    return AsyncOpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        timeout=QWEN_REQUEST_TIMEOUT_SECONDS,
+        max_retries=1,
+    )
+
+
+def _request_extras(base_url: str) -> dict:
+    # Qwen 3.7 enables deep thinking by default. These calls perform bounded
+    # planning and tool work, where thinking adds minutes of latency without
+    # improving the required structured response.
+    return {"enable_thinking": False} if base_url == QWEN_BASE_URL else {}
 
 
 def _content_has_image(content: str | list[dict]) -> bool:
@@ -77,7 +90,7 @@ async def _chat_json(
     """Send a chat request with JSON response format and return the raw text."""
     needs_vision = _content_has_image(user_content)
     client = _make_client(needs_vision=needs_vision)
-    _api_key, _base_url, configured_model = _provider_config(needs_vision=needs_vision)
+    _api_key, base_url, configured_model = _provider_config(needs_vision=needs_vision)
     resp = await client.chat.completions.create(
         model=configured_model if model == DEFAULT_MODEL else model,
         messages=[
@@ -86,6 +99,7 @@ async def _chat_json(
         ],
         response_format={"type": "json_object"},
         temperature=0.2,
+        extra_body=_request_extras(base_url),
     )
     return resp.choices[0].message.content or ""
 
@@ -98,7 +112,7 @@ async def _chat_text(
     """Send a chat request returning free-form text."""
     needs_vision = _content_has_image(user_content)
     client = _make_client(needs_vision=needs_vision)
-    _api_key, _base_url, configured_model = _provider_config(needs_vision=needs_vision)
+    _api_key, base_url, configured_model = _provider_config(needs_vision=needs_vision)
     msg = (
         {"role": "user", "content": user_content}
         if isinstance(user_content, str)
@@ -108,6 +122,7 @@ async def _chat_text(
         model=configured_model if model == DEFAULT_MODEL else model,
         messages=[{"role": "system", "content": system_prompt}, msg],
         temperature=0.3,
+        extra_body=_request_extras(base_url),
     )
     return resp.choices[0].message.content or ""
 

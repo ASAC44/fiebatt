@@ -1033,7 +1033,12 @@ async def _agent_stream(
     _agent_text_parts: list[str] = []
     _tool_calls_log: list[dict[str, Any]] = []
 
-    client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+    client = AsyncOpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        timeout=60.0,
+        max_retries=1,
+    )
 
     system_prompt = SYSTEM_PROMPT + _build_context_block(body)
     messages = _build_messages(body.history, body.message)
@@ -1055,11 +1060,15 @@ async def _agent_stream(
         )
 
         try:
+            request_extras = (
+                {"enable_thinking": False} if provider_name == "Qwen" else {}
+            )
             response = await client.chat.completions.create(
                 model=model_name,
                 messages=[{"role": "system", "content": system_prompt}] + messages,
                 tools=OPENAI_TOOLS,
                 temperature=0.3,
+                extra_body=request_extras,
             )
             choice = response.choices[0]
             msg = choice.message

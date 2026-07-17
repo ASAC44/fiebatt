@@ -2,8 +2,11 @@ from app.services.continuity_validator import ContinuityIssue, ContinuityReport
 from app.services.generation_quality import (
     GenerationQualityAction,
     acceptance_allowed,
+    attempt_quality_rank,
     corrective_prompt,
     decide_generation_quality,
+    final_semantic_quality,
+    semantic_quality_evidence,
     select_fallback_provider,
 )
 
@@ -86,3 +89,47 @@ def test_hard_fail_acceptance_requires_both_request_and_operator_flag():
     assert not acceptance_allowed(payload, override_requested=True, override_enabled=False)
     assert acceptance_allowed(payload, override_requested=True, override_enabled=True)
     assert acceptance_allowed({}, override_requested=False, override_enabled=False)
+
+
+def test_production_bad_outputs_cannot_be_marked_clean():
+    assert semantic_quality_evidence(
+        {"visual_coherence": 8, "prompt_adherence": 1}
+    ) == ("prompt adherence 1/10 is below 6/10",)
+    assert semantic_quality_evidence(
+        {"visual_coherence": 4, "prompt_adherence": 2}
+    ) == (
+        "visual coherence 4/10 is below 5/10",
+        "prompt adherence 2/10 is below 6/10",
+    )
+    assert semantic_quality_evidence(None) == ("semantic quality scoring unavailable",)
+    assert final_semantic_quality(
+        {"visual_coherence": 8, "prompt_adherence": 1}
+    ).action == GenerationQualityAction.HARD_FAIL
+    assert final_semantic_quality(
+        {"visual_coherence": 4, "prompt_adherence": 2}
+    ).action == GenerationQualityAction.HARD_FAIL
+    assert final_semantic_quality(
+        {"visual_coherence": 8, "prompt_adherence": 8}
+    ).action == GenerationQualityAction.PASS
+
+
+def test_retry_replaces_previous_result_only_when_quality_improves():
+    continuity = ContinuityReport(True, {})
+    car_failure = {"visual_coherence": 8, "prompt_adherence": 1}
+    worse_retry = {"visual_coherence": 4, "prompt_adherence": 2}
+    good_retry = {"visual_coherence": 7, "prompt_adherence": 8}
+
+    assert attempt_quality_rank(worse_retry, continuity) > attempt_quality_rank(
+        car_failure,
+        continuity,
+    )
+    assert attempt_quality_rank(good_retry, continuity) > attempt_quality_rank(
+        worse_retry,
+        continuity,
+    )
+    assert not semantic_quality_evidence(good_retry)
+
+    correction = corrective_prompt(semantic_quality_evidence(car_failure))
+    assert "prompt adherence 1/10" in correction
+    assert "named color" in correction
+    assert "bleed outside the target" in correction

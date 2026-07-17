@@ -38,13 +38,7 @@ def quality_evidence(
     evidence: list[str] = []
     if generation_error:
         evidence.append(f"provider generation error: {generation_error[:240]}")
-    if score is not None:
-        coherence = int(score.get("visual_coherence") or 0)
-        adherence = int(score.get("prompt_adherence") or 0)
-        if coherence < 5:
-            evidence.append(f"visual coherence {coherence}/10 is below 5/10")
-        if adherence < 6:
-            evidence.append(f"prompt adherence {adherence}/10 is below 6/10")
+    evidence.extend(semantic_quality_evidence(score))
     if continuity is None:
         evidence.append("continuity validation unavailable")
     elif not continuity.passed:
@@ -54,6 +48,46 @@ def quality_evidence(
             for issue in continuity.issues
         )
     return tuple(evidence)
+
+
+def semantic_quality_evidence(score: dict | None) -> tuple[str, ...]:
+    """Fail closed when target correctness cannot be proven."""
+    if score is None:
+        return ("semantic quality scoring unavailable",)
+    evidence: list[str] = []
+    coherence = int(score.get("visual_coherence") or 0)
+    adherence = int(score.get("prompt_adherence") or 0)
+    if coherence < 5:
+        evidence.append(f"visual coherence {coherence}/10 is below 5/10")
+    if adherence < 6:
+        evidence.append(f"prompt adherence {adherence}/10 is below 6/10")
+    return tuple(evidence)
+
+
+def attempt_quality_rank(
+    score: dict | None,
+    continuity: ContinuityReport | None,
+) -> tuple[int, int, int, int, int]:
+    """Order attempts by correctness first, then continuity and raw scores."""
+    coherence = int((score or {}).get("visual_coherence") or 0)
+    adherence = int((score or {}).get("prompt_adherence") or 0)
+    semantic_pass = not semantic_quality_evidence(score)
+    continuity_pass = continuity is not None and continuity.passed
+    return (
+        int(semantic_pass),
+        int(continuity_pass),
+        min(coherence, adherence),
+        adherence,
+        coherence,
+    )
+
+
+def final_semantic_quality(score: dict | None) -> GenerationQualityDecision:
+    evidence = semantic_quality_evidence(score)
+    return GenerationQualityDecision(
+        GenerationQualityAction.HARD_FAIL if evidence else GenerationQualityAction.PASS,
+        evidence,
+    )
 
 
 def select_fallback_provider(current_provider: str, duration: float) -> str | None:
@@ -129,12 +163,13 @@ def decide_generation_quality(
 def corrective_prompt(evidence: tuple[str, ...]) -> str:
     details = "\n".join(f"- {item}" for item in evidence)
     return (
-        "\n\nCONTINUITY CORRECTION REQUIRED. The previous result failed these exact checks:\n"
+        "\n\nQUALITY CORRECTION REQUIRED. The previous result failed these exact checks:\n"
         f"{details}\n"
-        "Preserve every protected pre/post handle frame, background pixel, camera motion, "
-        "lighting, color, and target identity. Enter and leave the requested action with "
-        "continuous subject velocity and trajectory. Do not freeze, fade, cut, or regenerate "
-        "the protected handles."
+        "Satisfy the non-negotiable user requirement exactly, including every named color, "
+        "shape, anatomical feature, count, and selected boundary. Correct only the requested "
+        "target. Preserve protected handles, background, camera motion, lighting, and all "
+        "unselected pixels. Do not freeze, fade, cut, bleed outside the target, or regenerate "
+        "the scene."
     )
 
 

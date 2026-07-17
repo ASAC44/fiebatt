@@ -55,8 +55,11 @@ from app.services.generation_window import (
 )
 from app.services.generation_quality import (
     GenerationQualityAction,
+    attempt_quality_rank,
     corrective_prompt,
     decide_generation_quality,
+    final_semantic_quality,
+    semantic_quality_evidence,
 )
 from app.services.generation_telemetry import build_local_flow_telemetry
 from app.services.local_compositor import composite_generated_target
@@ -990,6 +993,9 @@ async def run(job_id: str) -> None:
         }:
             previous_url = done[0].url
             previous_description = done[0].description
+            previous_score = score
+            previous_continuity = continuity_report
+            previous_provider = video_provider
             next_provider = video_provider
             if decision.action == GenerationQualityAction.PROVIDER_FALLBACK:
                 assert decision.next_provider is not None
@@ -1041,10 +1047,38 @@ async def run(job_id: str) -> None:
                         done = [restored]
             if succeeded:
                 done = [await maybe_composite(done[0], video_provider)]
-                score, continuity_report = await asyncio.gather(
+                candidate_score, candidate_continuity = await asyncio.gather(
                     score_variant(done[0]),
                     validate_continuity(done[0]),
                 )
+                if attempt_quality_rank(
+                    candidate_score,
+                    candidate_continuity,
+                ) > attempt_quality_rank(previous_score, previous_continuity):
+                    score = candidate_score
+                    continuity_report = candidate_continuity
+                else:
+                    async with AsyncSessionLocal() as db:
+                        await _update_variant(
+                            db,
+                            variant_id,
+                            status="done",
+                            url=previous_url,
+                            description=previous_description,
+                            error=None,
+                        )
+                        restored = await db.get(Variant, variant_id)
+                        if restored is not None:
+                            done = [restored]
+                    score = previous_score
+                    continuity_report = previous_continuity
+                    video_provider = previous_provider
+                    await _emit(
+                        job_id,
+                        "gen_retry_rejected",
+                        "retry scored no better; retaining the stronger result",
+                        attempt=attempts,
+                    )
             else:
                 await _emit(
                     job_id,
@@ -1074,6 +1108,8 @@ async def run(job_id: str) -> None:
         if needs_retry:
             previous_url = done[0].url
             previous_description = done[0].description
+            previous_score = score
+            previous_continuity = continuity_report
             attempts += 1
             generated_seconds += generation_duration
             provider_attempts.append(video_provider)
@@ -1084,20 +1120,42 @@ async def run(job_id: str) -> None:
                 attempt=attempts,
                 previous_score=score,
             )
-            correction = (
-                "\n\nCORRECTIVE RETRY: The previous result failed quality validation. "
-                "Make every requested action visually distinct, preserve the exact action order and count, "
-                "avoid ghosting or blended limbs, and finish in the requested continuing motion."
-            )
+            correction = corrective_prompt(semantic_quality_evidence(score))
             succeeded = await dispatch(video_provider, correction)
             async with AsyncSessionLocal() as db:
                 retried = await db.get(Variant, variant_id)
                 if retried is not None and succeeded and retried.status == "done":
                     done = [retried]
-                    score, continuity_report = await asyncio.gather(
+                    candidate_score, candidate_continuity = await asyncio.gather(
                         score_variant(retried),
                         validate_continuity(retried),
                     )
+                    if attempt_quality_rank(
+                        candidate_score,
+                        candidate_continuity,
+                    ) > attempt_quality_rank(previous_score, previous_continuity):
+                        score = candidate_score
+                        continuity_report = candidate_continuity
+                    else:
+                        await _update_variant(
+                            db,
+                            variant_id,
+                            status="done",
+                            url=previous_url,
+                            description=previous_description,
+                            error=None,
+                        )
+                        restored = await db.get(Variant, variant_id)
+                        if restored is not None:
+                            done = [restored]
+                        score = previous_score
+                        continuity_report = previous_continuity
+                        await _emit(
+                            job_id,
+                            "gen_retry_rejected",
+                            "retry scored no better; retaining the stronger result",
+                            attempt=attempts,
+                        )
                 elif retried is not None:
                     await _update_variant(
                         db,
@@ -1112,6 +1170,13 @@ async def run(job_id: str) -> None:
                         "gen_retry_failed",
                         "corrective attempt failed; retaining the first generated result",
                     )
+            final_quality = final_semantic_quality(score)
+            quality_state = final_quality.action
+            quality_evidence = list(final_quality.evidence)
+        else:
+            final_quality = final_semantic_quality(score)
+            quality_state = final_quality.action
+            quality_evidence = list(final_quality.evidence)
 
     local_flow_telemetry: dict[str, Any] | None = None
     async with AsyncSessionLocal() as db:

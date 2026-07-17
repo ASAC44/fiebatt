@@ -94,6 +94,10 @@ export type AgentMessage =
       type: "variant_preview";
       jobId: string;
       variants: VariantPreview[];
+      timelineStart?: number | null;
+      timelineEnd?: number | null;
+      mediaStart?: number | null;
+      mediaEnd?: number | null;
       ts: number;
     }
   | {
@@ -142,6 +146,10 @@ export type AgentAction =
       type: "add_variant_preview";
       jobId: string;
       variants: VariantPreview[];
+      timelineStart?: number | null;
+      timelineEnd?: number | null;
+      mediaStart?: number | null;
+      mediaEnd?: number | null;
     }
   | {
       // Kick off a "rewriting prompt…" card for a generate job.
@@ -303,6 +311,10 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
             type: "variant_preview",
             jobId: action.jobId,
             variants: action.variants,
+            timelineStart: action.timelineStart,
+            timelineEnd: action.timelineEnd,
+            mediaStart: action.mediaStart,
+            mediaEnd: action.mediaEnd,
             ts: now,
           },
         ],

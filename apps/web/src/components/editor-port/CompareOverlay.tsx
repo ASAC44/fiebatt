@@ -10,9 +10,11 @@ import {
   type Clip,
   type MediaAsset,
 } from "@/stores/edl";
+import { useAgent, type AgentMessage } from "@/stores/agent";
 
 export function CompareOverlay({ onClose }: { onClose: () => void }) {
   const { state } = useEDL();
+  const { state: agentState } = useAgent();
   const original = state.sources.find((asset) => asset.kind === "source") ?? state.sources[0] ?? null;
   const editedDuration = totalDuration(state.clips);
   const comparisonDuration = Math.max(original?.duration ?? 0, editedDuration);
@@ -28,7 +30,42 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
   const rafRef = useRef<number | null>(null);
   const lastTickRef = useRef<number | null>(null);
 
-  const active = useMemo(() => clipAtTime(state.clips, playhead), [state.clips, playhead]);
+  const generatedPreview = useMemo(
+    () => findLatestPreview(agentState.messages),
+    [agentState.messages],
+  );
+  const previewClip = useMemo(() => {
+    if (!generatedPreview) return null;
+    const { message, variant, timelineStart, timelineEnd } = generatedPreview;
+    const timelineDuration = timelineEnd - timelineStart;
+    const mediaStart = message.mediaStart ?? 0;
+    const mediaEnd = message.mediaEnd ?? mediaStart + timelineDuration;
+    return {
+      id: `preview-${message.jobId}-${variant.id}`,
+      kind: "generated" as const,
+      url: variant.url!,
+      sourceStart: mediaStart,
+      sourceEnd: mediaEnd,
+      mediaDuration: Math.max(mediaEnd, message.mediaEnd ?? mediaEnd),
+      volume: 0,
+      label: "Latest generated preview",
+    } satisfies Clip;
+  }, [generatedPreview]);
+  const editedHitAt = useCallback((targetPlayhead: number) => {
+    if (
+      generatedPreview &&
+      previewClip &&
+      targetPlayhead >= generatedPreview.timelineStart &&
+      targetPlayhead < generatedPreview.timelineEnd
+    ) {
+      return {
+        clip: previewClip,
+        offsetInClip: targetPlayhead - generatedPreview.timelineStart,
+      };
+    }
+    return clipAtTime(state.clips, targetPlayhead);
+  }, [generatedPreview, previewClip, state.clips]);
+  const active = useMemo(() => editedHitAt(playhead), [editedHitAt, playhead]);
   const activeClip = active?.clip ?? null;
   const showOriginal = sideBySide || singleView === "original";
   const showEdited = sideBySide || singleView === "edited";
@@ -36,7 +73,7 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
   const syncVideos = useCallback((targetPlayhead: number, force = false) => {
     const originalVideo = originalRef.current;
     const editedVideo = editedRef.current;
-    const hit = clipAtTime(state.clips, targetPlayhead);
+    const hit = editedHitAt(targetPlayhead);
     const clip = hit?.clip ?? null;
 
     if (originalVideo && original) {
@@ -61,7 +98,7 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
         editedVideo.pause();
       }
     }
-  }, [original, state.clips]);
+  }, [editedHitAt, original]);
 
   useEffect(() => {
     syncVideos(playhead);
@@ -269,4 +306,35 @@ function formatTime(seconds: number) {
   const minutes = Math.floor(safe / 60);
   const rest = Math.floor(safe % 60);
   return `${minutes}:${String(rest).padStart(2, "0")}`;
+}
+
+type PreviewMessage = Extract<AgentMessage, { type: "variant_preview" }>;
+type SuggestionMessage = Extract<AgentMessage, { type: "suggestion" }>;
+
+function findLatestPreview(messages: AgentMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.type !== "variant_preview") continue;
+    const variant = message.variants.find((item) => item.url);
+    if (!variant?.url) continue;
+
+    const suggestion = messages.findLast(
+      (item): item is SuggestionMessage =>
+        item.type === "suggestion" && item.edit.job_id === message.jobId,
+    );
+    const timelineStart = message.timelineStart ?? suggestion?.edit.start_ts;
+    const timelineEnd = message.timelineEnd ?? suggestion?.edit.end_ts;
+    if (
+      timelineStart == null ||
+      timelineEnd == null ||
+      timelineEnd <= timelineStart
+    ) continue;
+    return {
+      message: message as PreviewMessage,
+      variant,
+      timelineStart,
+      timelineEnd,
+    };
+  }
+  return null;
 }

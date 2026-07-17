@@ -120,7 +120,19 @@ export function useAgentStream(projectId?: string | null) {
         if (job.status === "done" || job.status === "error") {
           if (projectId) clearPendingTurn(projectId);
           if (ready.length > 0) {
-            dispatch({ type: "add_variant_preview", jobId, variants: ready });
+            dispatch({
+              type: "add_variant_preview",
+              jobId,
+              variants: ready,
+              timelineStart: job.execution_window?.core_start ?? job.start_ts,
+              timelineEnd: job.execution_window?.core_end ?? job.end_ts,
+              mediaStart: job.execution_window?.edit_start_offset ?? 0,
+              mediaEnd:
+                job.execution_window?.edit_end_offset ??
+                (job.start_ts != null && job.end_ts != null
+                  ? job.end_ts - job.start_ts
+                  : null),
+            });
             dispatch({ type: "set_activity", activity: "preview ready — choose a variant" });
           } else {
             dispatch({
@@ -670,6 +682,10 @@ function handleSSEEvent(
         type: "add_variant_preview",
         jobId: data.job_id as string,
         variants,
+        timelineStart: (data.start_ts as number | undefined) ?? null,
+        timelineEnd: (data.end_ts as number | undefined) ?? null,
+        mediaStart: (data.media_start_ts as number | undefined) ?? null,
+        mediaEnd: (data.media_end_ts as number | undefined) ?? null,
       });
       break;
     }

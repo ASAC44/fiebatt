@@ -340,10 +340,29 @@ def _read_frames(path: Path, timestamps: list[float]) -> tuple[np.ndarray, ...]:
         raise ValueError(f"could not open video for continuity validation: {path}")
     frames: list[np.ndarray] = []
     try:
+        fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
+        frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        frame_step = 1.0 / fps if fps > 0 else 0.04
+        last_frame_time = (
+            max(0.0, (frame_count - 1) / fps)
+            if fps > 0 and frame_count > 0
+            else None
+        )
         for timestamp in timestamps:
-            capture.set(cv2.CAP_PROP_POS_MSEC, timestamp * 1000.0)
-            ok, frame = capture.read()
-            if not ok or frame is None:
+            safe_timestamp = max(0.0, timestamp)
+            if last_frame_time is not None:
+                safe_timestamp = min(safe_timestamp, last_frame_time)
+            frame = None
+            # Container duration often extends half a frame beyond the final
+            # decodable frame. Back off instead of discarding a good render.
+            for backoff in (0.0, frame_step, frame_step * 2):
+                candidate = max(0.0, safe_timestamp - backoff)
+                capture.set(cv2.CAP_PROP_POS_MSEC, candidate * 1000.0)
+                ok, candidate_frame = capture.read()
+                if ok and candidate_frame is not None:
+                    frame = candidate_frame
+                    break
+            if frame is None:
                 raise ValueError(f"could not read continuity frame at {timestamp:.3f}s")
             frames.append(frame)
     finally:

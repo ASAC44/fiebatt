@@ -13,6 +13,7 @@ from app.services.continuity_validator import ContinuityReport
 
 MAX_GENERATION_ATTEMPTS = 3
 MAX_GENERATED_SECONDS = 30.0
+CONTINUITY_UNAVAILABLE = "continuity validation unavailable"
 
 
 class GenerationQualityAction(StrEnum):
@@ -39,9 +40,7 @@ def quality_evidence(
     if generation_error:
         evidence.append(f"provider generation error: {generation_error[:240]}")
     evidence.extend(semantic_quality_evidence(score))
-    if continuity is None:
-        evidence.append("continuity validation unavailable")
-    elif not continuity.passed:
+    if continuity is not None and not continuity.passed:
         evidence.extend(
             f"{issue.code} at {issue.boundary or 'clip'}: "
             f"measured {issue.value:.3f}, limit {issue.threshold:.3f}"
@@ -183,10 +182,19 @@ def acceptance_block_reason(payload: dict | None) -> str | None:
     data = payload or {}
     if data.get("generation_quality_state") != GenerationQualityAction.HARD_FAIL:
         return None
-    evidence = data.get("generation_quality_evidence")
-    if isinstance(evidence, list) and evidence:
-        return "continuity validation hard-failed: " + "; ".join(str(item) for item in evidence[:3])
-    return "continuity validation hard-failed"
+    raw_evidence = data.get("generation_quality_evidence")
+    evidence = (
+        [str(item) for item in raw_evidence if str(item) != CONTINUITY_UNAVAILABLE]
+        if isinstance(raw_evidence, list)
+        else []
+    )
+    # Older jobs incorrectly treated a validator outage as a bad render. Keep
+    # those successful renders applicable without weakening real quality checks.
+    if isinstance(raw_evidence, list) and not evidence:
+        return None
+    if evidence:
+        return "generation quality hard-failed: " + "; ".join(evidence[:3])
+    return "generation quality hard-failed"
 
 
 def acceptance_allowed(

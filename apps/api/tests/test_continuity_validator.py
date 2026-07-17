@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 import cv2
 import numpy as np
 
 from app.services.continuity_validator import (
     ContinuitySamples,
+    _read_frames,
     score_continuity_samples,
 )
 
@@ -91,3 +93,35 @@ def test_duration_fps_and_frozen_tail_are_detected():
     codes = {issue.code for issue in report.issues}
     assert {"duration_delta_s", "fps_delta_ratio", "frozen_tail"} <= codes
     assert "duration_delta_s" in report.correction_evidence()
+
+
+def test_near_eof_frame_read_clamps_to_last_decodable_frame(monkeypatch):
+    class Capture:
+        def __init__(self, _path: str):
+            self.position_ms = 0.0
+
+        def isOpened(self):
+            return True
+
+        def get(self, prop):
+            if prop == cv2.CAP_PROP_FPS:
+                return 10.0
+            if prop == cv2.CAP_PROP_FRAME_COUNT:
+                return 10.0
+            return 0.0
+
+        def set(self, _prop, value):
+            self.position_ms = value
+            return True
+
+        def read(self):
+            if self.position_ms > 900.0:
+                return False, None
+            return True, _frame(16)
+
+        def release(self):
+            pass
+
+    monkeypatch.setattr(cv2, "VideoCapture", Capture)
+    frames = _read_frames(Path("near-eof.mp4"), [1.05])
+    assert len(frames) == 1

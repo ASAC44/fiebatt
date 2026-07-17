@@ -1,6 +1,7 @@
 from app.services.continuity_validator import ContinuityIssue, ContinuityReport
 from app.services.generation_quality import (
     GenerationQualityAction,
+    acceptance_block_reason,
     acceptance_allowed,
     attempt_quality_rank,
     corrective_prompt,
@@ -31,6 +32,40 @@ def test_clean_result_passes_without_extra_generation():
         source_video_available=True,
     )
     assert decision.action == GenerationQualityAction.PASS
+
+
+def test_unavailable_continuity_is_warning_not_generation_failure():
+    decision = decide_generation_quality(
+        score={"visual_coherence": 8, "prompt_adherence": 8},
+        continuity=None,
+        current_provider="wan",
+        duration=6.0,
+        attempts=1,
+        generated_seconds=6.0,
+        fallback_used=False,
+        source_video_available=True,
+    )
+    assert decision.action == GenerationQualityAction.PASS
+
+
+def test_old_validator_only_hard_fail_remains_applicable():
+    payload = {
+        "generation_quality_state": "hard_fail",
+        "generation_quality_evidence": ["continuity validation unavailable"],
+    }
+    assert acceptance_block_reason(payload) is None
+    assert acceptance_allowed(payload, override_requested=False, override_enabled=False)
+
+
+def test_real_continuity_failure_still_blocks_acceptance():
+    payload = {
+        "generation_quality_state": "hard_fail",
+        "generation_quality_evidence": [
+            "exit_subject_motion_jump at exit: measured 0.900, limit 0.780"
+        ],
+    }
+    assert "exit_subject_motion_jump" in (acceptance_block_reason(payload) or "")
+    assert not acceptance_allowed(payload, override_requested=False, override_enabled=False)
 
 
 def test_first_source_edit_failure_gets_evidence_driven_retry():

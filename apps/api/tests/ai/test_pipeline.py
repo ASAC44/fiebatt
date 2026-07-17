@@ -1,7 +1,7 @@
 """End-to-end pipeline test through stubs.
 
 Simulates the full fiebatt flow:
-  prompt -> edit plan -> generate 3 variants -> score -> accept -> entity search -> propagate
+  prompt -> edit plan -> generate -> score -> accept -> entity search -> propagate
 
 Runs entirely with stubs, no API keys needed.
 """
@@ -21,11 +21,11 @@ async def test_full_edit_loop():
     prompt = "make this car red"
     bbox = {"x": 0.25, "y": 0.4, "w": 0.3, "h": 0.35}
 
-    # Step 2: gemini creates edit plan with 3 variants
+    # Step 2: Gemini creates the single grounded plan used by production.
     plans = await gemini.plan_variants(prompt, bbox, "/tmp/frame.png")
-    assert len(plans) == 3
+    assert len(plans) == 1
 
-    # Step 3: generate 3 variants in parallel (via stubs)
+    # Step 3: generate the planned result via stubs.
     variants = []
     for plan in plans:
         result = await runway.generate("/tmp/clip.mp4", plan)
@@ -33,7 +33,7 @@ async def test_full_edit_loop():
         assert "description" in result
         variants.append(result)
 
-    assert len(variants) == 3
+    assert len(variants) == 1
 
     # Step 4: score each variant
     scores = []
@@ -46,7 +46,7 @@ async def test_full_edit_loop():
         assert 1 <= score["prompt_adherence"] <= 10
         scores.append(score)
 
-    assert len(scores) == 3
+    assert len(scores) == 1
 
     # Step 5: user picks variant 0 (best score)
     chosen = variants[0]

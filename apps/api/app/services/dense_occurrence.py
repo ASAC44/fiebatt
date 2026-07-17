@@ -20,6 +20,7 @@ from app.models.entity import (
     OccurrenceTrack,
 )
 from app.services import ffmpeg
+from app.services import cpu_tracking
 from app.services.local_range import detect_shot_span, tracked_span
 
 
@@ -112,7 +113,7 @@ async def refine_occurrence_candidate(
     reference_crop_path: str,
     extract_frame: Callable[[str | Path, float, str | Path], Awaitable[Path]] = ffmpeg.extract_frame,
     locate_bbox: Callable[..., Awaitable[tuple[dict[str, float] | None, float]]] = locate_reference_bbox,
-    track_frames: Callable[..., Awaitable[sam.TrackResult]] = sam.track_frames,
+    track_frames: Callable[..., Awaitable[sam.TrackResult]] = cpu_tracking.track_frames,
 ) -> DenseTrackEvidence:
     start = max(0.0, candidate.keyframe_ts - DENSE_TRACK_RADIUS_SECONDS)
     end = min(project_duration, candidate.keyframe_ts + DENSE_TRACK_RADIUS_SECONDS)
@@ -159,11 +160,11 @@ async def refine_occurrence_candidate(
             include_masks=False,
         )
 
-    if track.tracker != "sam2_video" or track.cancelled:
+    if track.tracker not in {"sam2_video", "opencv_mil"} or track.cancelled:
         return DenseTrackEvidence(
             candidate.id,
             False,
-            "real SAM2 tracking is unavailable or incomplete",
+            "subject tracking is unavailable or incomplete",
             candidate.keyframe_ts,
             candidate.keyframe_ts,
             candidate.keyframe_ts,

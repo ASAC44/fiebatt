@@ -15,7 +15,7 @@ os.environ["USE_AI_STUBS"] = "true"
 
 @pytest.mark.asyncio
 async def test_stub_plan_variants():
-    """gemini.plan_variants returns 3 EditPlan dicts with expected fields."""
+    """gemini.plan_variants returns one grounded edit instruction."""
     from app.ai.services._stubs import gemini
 
     plans = await gemini.plan_variants(
@@ -24,15 +24,27 @@ async def test_stub_plan_variants():
         "/tmp/frame.png",
     )
 
-    assert len(plans) == 3
+    assert len(plans) == 1
     for plan in plans:
         assert "description" in plan
         assert "tone" in plan
         assert "color_grading" in plan
         assert "region_emphasis" in plan
-        assert "prompt_for_runway" in plan
-        assert isinstance(plan["prompt_for_runway"], str)
-        assert len(plan["prompt_for_runway"]) > 0
+        assert "prompt_for_video_edit" in plan
+        assert isinstance(plan["prompt_for_video_edit"], str)
+        assert len(plan["prompt_for_video_edit"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_stub_interpretation_separates_state_from_action():
+    from app.ai.services._stubs import gemini
+
+    bbox = {"x": 0.25, "y": 0.4, "w": 0.3, "h": 0.35}
+    state = await gemini.interpret_edit("make this ball pink", bbox, "")
+    action = await gemini.interpret_edit("make this ball bounce", bbox, "")
+
+    assert state["decision"]["duration_policy"] == "continuous_occurrence"
+    assert action["decision"]["duration_policy"] == "bounded_action"
 
 
 @pytest.mark.asyncio

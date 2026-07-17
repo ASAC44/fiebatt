@@ -44,6 +44,7 @@ from app.ai.services.provider_capabilities import (
 from app.db.session import AsyncSessionLocal
 from app.models.job import Job, Variant
 from app.models.project import Project
+from app.schemas.edit_plan import EditIntent
 from app.services import ffmpeg, job_events, storage
 from app.services.continuity_validator import (
     ContinuityReport,
@@ -63,6 +64,7 @@ from app.services.generation_quality import (
 )
 from app.services.generation_telemetry import build_local_flow_telemetry
 from app.services.local_compositor import composite_generated_target
+from app.services.edit_prompt import planned_edit_prompt
 
 log = logging.getLogger("fiebatt.jobs.generate")
 
@@ -99,23 +101,7 @@ def _provider_model(provider: str, edit_mode: str | None = None) -> str:
     }.get(provider, provider)
 
 
-def _planned_edit_prompt(user_prompt: str, plan: dict[str, Any]) -> str:
-    """Keep the user's requirement while adding the grounded planner detail."""
-    planned = str(
-        plan.get("prompt_for_video_edit")
-        or plan.get("prompt_for_runway")
-        or plan.get("prompt_for_veo")
-        or ""
-    ).strip()
-    requirement = user_prompt.strip()
-    if not planned or planned.casefold() == requirement.casefold():
-        return requirement
-    return (
-        "NON-NEGOTIABLE USER REQUIREMENT:\n"
-        f"{requirement}\n\n"
-        "GROUNDED VIDEO-EDIT INSTRUCTION:\n"
-        f"{planned}"
-    )
+_planned_edit_prompt = planned_edit_prompt
 
 
 async def _update_job(db: AsyncSession, job_id: str, **fields) -> None:
@@ -550,6 +536,7 @@ async def run(job_id: str) -> None:
     mask_image_url: str | None = None
     subject_reference_path: str | None = None
     sam_available = False
+    sam_video_available = False
     if subject_frame_ok and bbox and not bbox_is_full_frame:
         try:
             sam_available = await sam_service.is_available()
@@ -583,34 +570,56 @@ async def run(job_id: str) -> None:
         except Exception as exc:
             log.warning("SAM generation conditioning failed; using bbox crop", exc_info=True)
             await _emit(job_id, "sam_error", f"SAM localization failed; using bbox crop: {exc}")
+        sam_video_available = await sam_service.video_tracking_available()
+
+    planned_intent: EditIntent | None = None
+    raw_planned_intent = payload.get("planned_intent")
+    if isinstance(raw_planned_intent, dict):
+        try:
+            planned_intent = EditIntent.model_validate(raw_planned_intent)
+        except Exception:
+            log.warning("job contains invalid planned intent", exc_info=True)
 
     await _emit(
         job_id,
         "plan_start",
-        "asking Gemini to structure the edit plan",
+        (
+            "reusing the edit instruction chosen before window analysis"
+            if planned_intent is not None and planned_intent.grounded_edit is not None
+            else "asking Qwen to structure the edit plan"
+        ),
         user_prompt=prompt,
         bbox=bbox,
         duration=segment_duration,
     )
 
-    # start Gemini plan while clip finishes in background
+    # New planned jobs already contain Qwen's grounded instruction. Legacy
+    # jobs still plan here so old clients remain usable.
     planning_frame_path = (
         str(subject_frame_path)
         if subject_frame_ok
         else (conditioning_start_anchor or "")
     )
-    plan_task = asyncio.create_task(
-        ai.gemini.plan_variants(prompt, bbox, planning_frame_path)
+    plan_task = (
+        None
+        if planned_intent is not None and planned_intent.grounded_edit is not None
+        else asyncio.create_task(
+            ai.gemini.plan_variants(prompt, bbox, planning_frame_path)
+        )
     )
     clip_path, clip_url = await clip_task  # should be done by now
-    try:
-        plans = await plan_task
-    except Exception as e:
-        log.exception("plan_variants failed")
-        async with AsyncSessionLocal() as db:
-            await _update_job(db, job_id, status="error", error=f"plan failed: {e}")
-        await _emit_terminal(job_id, "error", f"plan failed: {e}")
-        return
+    if plan_task is None:
+        assert planned_intent is not None and planned_intent.grounded_edit is not None
+        plans = [planned_intent.grounded_edit.model_dump(mode="json")]
+    else:
+        try:
+            plans = await plan_task
+        except Exception as e:
+            log.exception("plan_variants failed")
+            async with AsyncSessionLocal() as db:
+                await _update_job(db, job_id, status="error", error=f"plan failed: {e}")
+            await _emit_terminal(job_id, "error", f"plan failed: {e}")
+            return
 
     if not plans:
         async with AsyncSessionLocal() as db:
@@ -842,7 +851,7 @@ async def run(job_id: str) -> None:
         if (
             not generation_window.adaptive
             or bbox_is_full_frame
-            or not sam_available
+            or not sam_video_available
             or not variant.url
         ):
             return variant

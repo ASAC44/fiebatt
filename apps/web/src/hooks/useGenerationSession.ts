@@ -14,6 +14,7 @@ import {
   type JobStreamEvent,
   type Variant,
   type BBox,
+  ApiError,
 } from "@/lib/api";
 import type { Clip } from "@/stores/edl";
 
@@ -54,6 +55,10 @@ export function useGenerationSession({
   const [plan, setPlan] = useState<EditPlanResp | null>(null);
   const [planning, setPlanning] = useState(false);
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
+  const [proLimit, setProLimit] = useState<{
+    limitSeconds: number;
+    detectedSeconds: number | null;
+  } | null>(null);
   const [adaptivePlanningEnabled, setAdaptivePlanningEnabled] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
@@ -65,6 +70,7 @@ export function useGenerationSession({
   const jobIdRef = useRef<string | null>(null);
   const generationTargetRef = useRef<GenerationTarget | null>(null);
   const streamCtlRef = useRef<AbortController | null>(null);
+  const planBlockedRef = useRef(false);
 
   const canGenerate =
     !!clip &&
@@ -78,6 +84,8 @@ export function useGenerationSession({
   function updatePrompt(value: string) {
     setPrompt(value);
     setFallbackNotice(null);
+    setProLimit(null);
+    planBlockedRef.current = false;
     if (plan && plan.intent.raw_prompt !== value.trim()) setPlan(null);
   }
 
@@ -96,9 +104,11 @@ export function useGenerationSession({
     setResult(null);
     jobIdRef.current = null;
     generationTargetRef.current = null;
+    planBlockedRef.current = false;
     setPlan(null);
     setPlanning(false);
     setFallbackNotice(null);
+    setProLimit(null);
     if (!keepPrompt) setPrompt("");
   }
 
@@ -135,6 +145,7 @@ export function useGenerationSession({
       if (selectionId) {
         const planned = await preparePlan(undefined, true);
         if (planned) return true;
+        if (planBlockedRef.current) return false;
       } else {
         setFallbackNotice(
           "Precise selection unavailable. Rendering with legacy fixed window.",
@@ -222,7 +233,9 @@ export function useGenerationSession({
     allowLegacyFallback = false,
   ): Promise<boolean> {
     if (!clip?.projectId || !selectionId || !prompt.trim()) return false;
+    const baseClip = sourceClip ?? clip;
     setPlanning(true);
+    planBlockedRef.current = false;
     setErr(null);
     setStatus("planning");
     try {
@@ -232,6 +245,8 @@ export function useGenerationSession({
         prompt: prompt.trim(),
         explicit_start_ts: explicitRange?.start,
         explicit_end_ts: explicitRange?.end,
+        source_start_ts: baseClip.sourceStart,
+        source_end_ts: baseClip.sourceEnd,
       });
       if (!next.adaptive_generation_enabled) {
         setPlan(null);
@@ -247,8 +262,20 @@ export function useGenerationSession({
       }
       setPlan(next);
       setFallbackNotice(null);
+      setProLimit(null);
       return true;
     } catch (error) {
+      if (error instanceof ApiError && error.code === "edit_window_too_long") {
+        planBlockedRef.current = true;
+        setFallbackNotice(null);
+        setProLimit({
+          limitSeconds: Number(error.detail?.limit_seconds ?? 30),
+          detectedSeconds: error.detail?.detected_seconds == null
+            ? null
+            : Number(error.detail.detected_seconds),
+        });
+        return false;
+      }
       if (allowLegacyFallback) {
         setFallbackNotice(
           "Adaptive planning unavailable. Rendering with legacy fixed window.",
@@ -303,6 +330,7 @@ export function useGenerationSession({
     plan,
     planning,
     fallbackNotice,
+    proLimit,
     adaptivePlanningEnabled,
     busy,
     status,

@@ -157,6 +157,29 @@ async def is_available() -> bool:
         return False
 
 
+async def video_tracking_available() -> bool:
+    """Check for the full worker used by SAM2 video tracking.
+
+    The lightweight Hugging Face Space only exposes still-image segmentation.
+    Treating it as a video worker adds a slow, guaranteed-failing request to
+    every edit.
+    """
+    try:
+        worker_url = get_settings().vision_worker_url.strip()
+        if not worker_url or _is_huggingface_space(worker_url):
+            return False
+        health_url = (
+            worker_url.replace("segment", "health")
+            if "modal.run" in worker_url
+            else f"{worker_url.rstrip('/')}/health"
+        )
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(health_url)
+            return response.status_code == 200
+    except Exception:
+        return False
+
+
 async def track_frames(
     frame_paths: list[str],
     *,

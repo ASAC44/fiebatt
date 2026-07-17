@@ -136,7 +136,7 @@ async def test_stub_tracker_cannot_confirm_occurrence(tmp_path):
     )
 
     assert result.passed is False
-    assert "real SAM2" in result.reason
+    assert "subject tracking" in result.reason
 
 
 def test_dense_tracks_merge_overlap_but_keep_reentry_separate():

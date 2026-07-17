@@ -90,3 +90,14 @@ async def test_huggingface_override_is_only_used_for_segmentation(tmp_path, monk
     assert base64.b64decode(captured["payload"]["image_b64"]) == b"frame"
     assert result.score == 0.9
     assert (tmp_path / "frame.mask.png").read_bytes() == b"mask"
+
+
+@pytest.mark.asyncio
+async def test_huggingface_space_is_not_treated_as_video_tracker(monkeypatch):
+    monkeypatch.setattr(
+        sam,
+        "get_settings",
+        lambda: SimpleNamespace(vision_worker_url="https://segment.hf.space"),
+    )
+
+    assert await sam.video_tracking_available() is False

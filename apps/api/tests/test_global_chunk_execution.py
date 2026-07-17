@@ -177,9 +177,6 @@ async def test_generation_uses_source_video_target_box_and_accepted_reference(
     async def extract_frame(source, timestamp, output):
         return Path(output)
 
-    async def sam_available():
-        return False
-
     async def generate(clip_path, plan, **kwargs):
         calls.append((clip_path, plan, kwargs))
         return {"url": clip_path, "description": "stub"}
@@ -192,7 +189,6 @@ async def test_generation_uses_source_video_target_box_and_accepted_reference(
         lambda *args: (tmp_path / "target.jpg", "/target"),
     )
     monkeypatch.setattr(execution.ffmpeg, "extract_frame", extract_frame)
-    monkeypatch.setattr(execution.sam, "is_available", sam_available)
     monkeypatch.setattr(execution.ai.runway, "generate", generate)
 
     project = SimpleNamespace(fps=30.0, video_path=tmp_path / "project.mp4")

@@ -61,7 +61,7 @@ _USE_AI_STUBS = _resolve_use_ai_stubs()
 
 
 _MOTION_EDIT_RE = re.compile(
-    r"\b(jump|jumping|run|running|walk|walking|dance|dancing|wave|waving|"
+    r"\b(jump|jumping|bounce|bouncing|run|running|walk|walking|dance|dancing|wave|waving|"
     r"turn|turning|spin|spinning|sit|sitting|stand|standing|kick|throw|"
     r"catch|clap|clapping|nod|bow|fall|falls|leap|leaping)\b"
 )
@@ -130,13 +130,14 @@ else:
     # ------------------------ gemini adapter ------------------------
 
     # simple in-memory plan cache: keyed on (prompt, bbox_string), max 32 entries
-    _plan_cache: dict[str, list[dict]] = {}
+    _plan_cache: dict[str, dict] = {}
     _plan_cache_order: list[str] = []
     _PLAN_CACHE_MAX = 32
 
-    async def _plan_variants(prompt: str, bbox: dict, frame_path: str) -> list[dict]:
-        # only cache text-only plans (frame_path makes every call unique anyway)
-        cache_key = f"{prompt}|{json.dumps(bbox, sort_keys=True)}"
+    async def _interpret_edit(prompt: str, bbox: dict, frame_path: str) -> dict:
+        # Include visual source identity. Same words and bbox coordinates can
+        # describe completely different targets in different frames.
+        cache_key = f"{prompt}|{json.dumps(bbox, sort_keys=True)}|{frame_path}"
         cached = _plan_cache.get(cache_key)
         if cached is not None:
             return cached
@@ -144,6 +145,15 @@ else:
         plan = await _gemini_real.create_edit_plan(
             prompt, bbox, frame_path=frame_path
         )
+        _plan_cache[cache_key] = plan
+        _plan_cache_order.append(cache_key)
+        if len(_plan_cache_order) > _PLAN_CACHE_MAX:
+            oldest = _plan_cache_order.pop(0)
+            _plan_cache.pop(oldest, None)
+        return plan
+
+    async def _plan_variants(prompt: str, bbox: dict, frame_path: str) -> list[dict]:
+        plan = await _interpret_edit(prompt, bbox, frame_path)
         variants = plan.get("variants") if isinstance(plan, dict) else None
         if not variants:
             return []
@@ -162,13 +172,6 @@ else:
                 # always use first_frame — text_only produces garbage output
                 # because veo has no visual context for the scene
                 v["conditioning_strategy"] = "first_frame"
-
-        # cache the result for repeated prompts (propagation reuses same prompt)
-        _plan_cache[cache_key] = variants
-        _plan_cache_order.append(cache_key)
-        if len(_plan_cache_order) > _PLAN_CACHE_MAX:
-            oldest = _plan_cache_order.pop(0)
-            _plan_cache.pop(oldest, None)
 
         return variants
 
@@ -221,6 +224,7 @@ else:
         return out
 
     gemini = _types.SimpleNamespace(
+        interpret_edit=_interpret_edit,
         plan_variants=_plan_variants,
         score_variant=_score_variant,
         identify_entity=_identify_entity,

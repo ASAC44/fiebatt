@@ -7,7 +7,6 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from app.ai import services as ai
-from app.ai.services import sam
 from app.ai.services.provider_capabilities import select_source_edit_mode
 from app.config.settings import get_settings
 from app.models.propagation import GlobalGenerationChunk
@@ -204,19 +203,13 @@ async def execute_global_chunk(
     seed_offset = min(max(0.0, midpoint - chunk.context_start), duration)
     await ffmpeg.extract_frame(source_path, seed_offset, target_frame_path)
 
-    mask_url: str | None = None
     mask_frame_id = max(1, round(seed_offset * float(project.fps or 1.0)) + 1)
-    if chunk.provider == "wan" and duration <= 5.001 and await sam.is_available():
-        mask_path = await sam.bbox_to_mask(str(target_frame_path), bbox)
-        mask_url = await storage.publish(Path(mask_path), content_type="image/png")
-        if not settings.use_ai_stubs and not _is_public_http_url(mask_url):
-            mask_url = None
 
     edit_mode = select_source_edit_mode(
         chunk.provider,
         duration=duration,
         source_video=True,
-        mask_available=mask_url is not None,
+        mask_available=False,
     )
     window = GenerationWindow(
         core_start=chunk.edit_start,
@@ -239,7 +232,7 @@ async def execute_global_chunk(
         },
         subject_reference_path=str(reference_subject_path),
         source_video_url=source_url,
-        mask_image_url=mask_url if edit_mode == "tracked_mask" else None,
+        mask_image_url=None,
         mask_frame_id=mask_frame_id,
         duration=math.ceil(duration - 1e-6),
         resolution="720P",
@@ -267,6 +260,6 @@ async def execute_global_chunk(
             "context_duration": round(duration, 3),
             "target_bbox": bbox,
             "handoff_used": previous is not None,
-            "mask_used": mask_url is not None and edit_mode == "tracked_mask",
+            "mask_used": False,
         },
     )

@@ -46,8 +46,9 @@ class Settings(BaseSettings):
 
     # when true, worker calls resolve to ai/services/_stubs.py
     use_ai_stubs: bool = True
-    # Plans can be previewed before PR2 changes generation semantics.
-    adaptive_edit_planning: bool = False
+    # Local requests use a prompt- and tracking-aware window by default.
+    # Operators can still disable this as an emergency fallback.
+    adaptive_edit_planning: bool = True
     # PR3 global discovery/chunk orchestration. Local and legacy paths stay
     # unchanged until this independent rollout switch is enabled.
     global_edit_planning: bool = False

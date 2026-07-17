@@ -7,9 +7,20 @@ INPUT
 - entity_description: optional identified subject
 - reference image: actual frame at the selected time
 
-Return exactly one grounded variant:
+Return one semantic decision and exactly one grounded variant:
 
 {
+  "decision": {
+    "scope": "local" | "all_occurrences",
+    "change_type": "appearance" | "removal" | "replacement" | "motion" | "scene",
+    "duration_policy": "bounded_action" | "continuous_occurrence" | "all_occurrences",
+    "target_description": "selected object or feature",
+    "action_phases": ["ordered phase names for motion; empty for a state change"],
+    "estimated_action_seconds": 3.5,
+    "requires_recovery_motion": true,
+    "preservation_requirements": ["specific things that must remain unchanged"],
+    "reasoning": "short explanation of temporal meaning"
+  },
   "variants": [
     {
       "intent": "remove" | "replace" | "transform" | "add" | "restyle",
@@ -25,6 +36,20 @@ Return exactly one grounded variant:
 
 RULES
 - Inspect the reference image. Ground every noun and visual attribute in it.
+- Decide temporal meaning before any source clip is cut.
+- A state change such as "make this ball pink", "remove this logo", or "give
+  this cat human-like eyes" normally means the change persists for this selected
+  target's complete continuous appearance. Use scope "local" and duration_policy
+  "continuous_occurrence". Do not limit such changes to an arbitrary few seconds.
+- An action such as bounce, jump, wave, or turn is local and time-bounded. Use
+  duration_policy "bounded_action" and estimate enough time for preparation,
+  action, landing/recovery, and smooth return to source motion.
+- Use scope "all_occurrences" and duration_policy "all_occurrences" only when
+  the user clearly asks for every appearance, everywhere, throughout, or the
+  whole video. Never interpret an ordinary state change as permission to search
+  separated appearances across the full video.
+- estimated_action_seconds describes action core only. For state changes it is
+  only a safe fallback; tracking determines the continuous occurrence boundary.
 - Preserve the source video's timing, motion, framing, camera, lighting,
   background, and every unselected subject unless the user explicitly changes them.
 - State the requested result positively and precisely. Never weaken or reinterpret it.

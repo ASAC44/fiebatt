@@ -22,27 +22,50 @@ from app.ai.services.types import (
 
 # ------------------------------ gemini ------------------------------
 
+async def _gemini_interpret_edit(
+    prompt: str,
+    bbox: BBoxDict,
+    frame_path: str,
+) -> dict:
+    from app.services.edit_scope import plan_prompt_intent
+
+    intent = plan_prompt_intent(prompt).intent
+    region = f"region at ({bbox['x']:.2f},{bbox['y']:.2f}) {bbox['w']:.2f}x{bbox['h']:.2f}"
+    return {
+        "decision": {
+            "scope": intent.scope,
+            "change_type": intent.change_type,
+            "duration_policy": intent.duration_policy,
+            "target_description": intent.target_description or region,
+            "action_phases": intent.action_phases,
+            "estimated_action_seconds": intent.estimated_action_seconds,
+            "requires_recovery_motion": intent.requires_recovery_motion,
+            "preservation_requirements": intent.preservation_requirements,
+            "reasoning": "deterministic test interpretation",
+        },
+        "variants": [
+            {
+                "intent": intent.change_type,
+                "conditioning_strategy": "first_frame",
+                "description": f"Apply requested edit to {region}",
+                "tone": "original visual tone unless explicitly changed",
+                "color_grading": "original grade unless explicitly changed",
+                "region_emphasis": region,
+                "prompt_for_video_edit": (
+                    f"Edit only the selected target in {region}. {prompt}. "
+                    "Preserve all unselected content. Do not regenerate the scene."
+                ),
+            }
+        ],
+    }
+
 async def _gemini_plan_variants(
     prompt: str,
     bbox: BBoxDict,
     frame_path: str,
 ) -> list[EditPlan]:
-    tones = [
-        ("cinematic warm", "warm shadows, amber highlights, subtle vignette"),
-        ("moody cool", "desaturated blues, crushed blacks, cyan highlights"),
-        ("high contrast", "punchy contrast, saturated mids, clean whites"),
-    ]
-    region = f"region at ({bbox['x']:.2f},{bbox['y']:.2f}) {bbox['w']:.2f}x{bbox['h']:.2f}"
-    return [
-        EditPlan(
-            description=f"{tone} take: {prompt}",
-            tone=tone,
-            color_grading=grade,
-            region_emphasis=region,
-            prompt_for_runway=f"{prompt}. Focus changes on {region}. Apply {tone} look with {grade}.",
-        )
-        for tone, grade in tones
-    ]
+    interpreted = await _gemini_interpret_edit(prompt, bbox, frame_path)
+    return interpreted["variants"]
 
 
 async def _gemini_score_variant(
@@ -91,6 +114,7 @@ async def _gemini_find_entity_in_keyframes(
 
 
 gemini = types.SimpleNamespace(
+    interpret_edit=_gemini_interpret_edit,
     plan_variants=_gemini_plan_variants,
     score_variant=_gemini_score_variant,
     identify_entity=_gemini_identify_entity,

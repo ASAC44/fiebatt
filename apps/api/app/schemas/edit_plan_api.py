@@ -20,6 +20,8 @@ class EditPlanRequest(BaseModel):
     requested_scope: EditScope | None = None
     explicit_start_ts: float | None = Field(default=None, ge=0.0)
     explicit_end_ts: float | None = Field(default=None, gt=0.0)
+    source_start_ts: float | None = Field(default=None, ge=0.0)
+    source_end_ts: float | None = Field(default=None, gt=0.0)
     video_gen_provider: VideoProvider = "auto"
     structured_intent: EditIntent | None = None
 
@@ -30,6 +32,11 @@ class EditPlanRequest(BaseModel):
             raise ValueError("explicit_start_ts and explicit_end_ts must be supplied together")
         if supplied and self.explicit_end_ts <= self.explicit_start_ts:
             raise ValueError("explicit_end_ts must be after explicit_start_ts")
+        source_supplied = self.source_start_ts is not None or self.source_end_ts is not None
+        if source_supplied and (self.source_start_ts is None or self.source_end_ts is None):
+            raise ValueError("source_start_ts and source_end_ts must be supplied together")
+        if source_supplied and self.source_end_ts <= self.source_start_ts:
+            raise ValueError("source_end_ts must be after source_start_ts")
         return self
 
 

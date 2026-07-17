@@ -657,6 +657,7 @@ async def _generate_edit(
             "video_gen_provider": video_gen_provider or "auto",
             "plan_id": plan.id if plan else None,
             "planned_context": plan.range_json if plan else None,
+            "planned_intent": plan.intent_json if plan else None,
             "adaptive_context_enabled": use_plan_range,
         },
     )

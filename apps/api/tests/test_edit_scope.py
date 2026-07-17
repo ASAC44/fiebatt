@@ -41,3 +41,17 @@ def test_local_accept_does_not_imply_global_discovery():
     assert should_discover_occurrences(scope="local", explicitly_requested=False) is False
     assert should_discover_occurrences(scope="local", explicitly_requested=True) is True
     assert should_discover_occurrences(scope="all_occurrences", explicitly_requested=False) is True
+
+
+def test_state_change_defaults_to_current_continuous_occurrence():
+    result = plan_prompt_intent("make this ball pink")
+
+    assert result.intent.scope == "local"
+    assert result.intent.duration_policy == "continuous_occurrence"
+
+
+def test_action_defaults_to_bounded_local_window():
+    result = plan_prompt_intent("make this ball bounce")
+
+    assert result.intent.scope == "local"
+    assert result.intent.duration_policy == "bounded_action"

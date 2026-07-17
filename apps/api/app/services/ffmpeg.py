@@ -604,6 +604,49 @@ async def extract_frame(src: str | Path, ts: float, out: str | Path) -> Path:
     return out
 
 
+async def extract_sampled_frames(
+    src: str | Path,
+    *,
+    start_ts: float,
+    end_ts: float,
+    fps: float,
+    output_dir: str | Path,
+    max_width: int = 640,
+) -> tuple[list[str], list[float]]:
+    """Decode a bounded analysis window once instead of one process per frame."""
+    if start_ts < 0.0 or end_ts <= start_ts:
+        raise ValueError("sample window must have positive duration")
+    if fps <= 0.0:
+        raise ValueError("sample fps must be positive")
+    destination = Path(output_dir)
+    destination.mkdir(parents=True, exist_ok=True)
+    pattern = destination / "frame_%06d.jpg"
+    sample_duration = end_ts - start_ts + 0.5 / fps
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-ss",
+        f"{start_ts:.6f}",
+        "-i",
+        str(src),
+        "-t",
+        f"{sample_duration:.6f}",
+        "-vf",
+        f"fps={fps:.6f},scale=w=min({max_width}\\,iw):h=-2",
+        "-q:v",
+        "3",
+        "-start_number",
+        "0",
+        str(pattern),
+    ]
+    await _run(cmd)
+    paths = sorted(destination.glob("frame_*.jpg"))
+    if not paths:
+        raise FfmpegError(cmd, "ffmpeg produced no analysis frames", 0)
+    timestamps = [min(end_ts, start_ts + index / fps) for index in range(len(paths))]
+    return [str(path) for path in paths], timestamps
+
+
 async def crop_bbox_from_frame(
     frame_path: str | Path,
     bbox: dict[str, float],

@@ -17,7 +17,7 @@ _PERSISTENT_RE = re.compile(
     re.IGNORECASE,
 )
 _MOTION_RE = re.compile(
-    r"\b(jump|run|walk|dance|wave|turn|spin|sit|stand|kick|throw|catch|"
+    r"\b(jump|bounce|run|walk|dance|wave|turn|spin|sit|stand|kick|throw|catch|"
     r"clap|nod|bow|fall|leap)(s|ed|ing)?\b",
     re.IGNORECASE,
 )
@@ -106,11 +106,25 @@ def plan_prompt_intent(
         persistent = bool(_PERSISTENT_RE.search(prompt))
         preservation = ["preserve unedited subjects", "preserve camera and background"]
         if persistent:
-            preservation.append("apply change for complete visible occurrence")
+            if "apply change for complete visible occurrence" not in preservation:
+                preservation.append("apply change for complete visible occurrence")
+        if scope == "all_occurrences":
+            duration_policy = "all_occurrences"
+        elif scope == "explicit_range":
+            duration_policy = "explicit_range"
+        elif change_type == "motion":
+            duration_policy = "bounded_action"
+        else:
+            # State changes should not visibly revert while the selected target
+            # remains in the same continuous appearance.
+            duration_policy = "continuous_occurrence"
+            if "apply change for complete visible occurrence" not in preservation:
+                preservation.append("apply change for complete visible occurrence")
         intent = EditIntent(
             raw_prompt=prompt,
             scope=scope,
             change_type=change_type,
+            duration_policy=duration_policy,
             action_phases=phases,
             estimated_action_seconds=action_seconds,
             requires_recovery_motion=recovery,

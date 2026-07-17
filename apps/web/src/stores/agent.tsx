@@ -54,6 +54,12 @@ export interface VariantPreview {
   prompt_adherence: number | null;
 }
 
+export interface GenerationProgressEntry {
+  stage: string;
+  text: string;
+  ts: number;
+}
+
 // ── prompt-rewrite layer payload ─────────────────────────────────────
 //
 // The model takes the user's raw one-liner and turns it into a structured
@@ -111,6 +117,13 @@ export type AgentMessage =
       vendor: string | null;
       ts: number;
     }
+  | {
+      type: "generation_progress";
+      jobId: string;
+      entries: GenerationProgressEntry[];
+      complete: boolean;
+      ts: number;
+    }
   | { type: "suggestion"; edit: SuggestedEdit; accepted?: boolean; ts: number }
   | { type: "error"; message: string; ts: number };
 
@@ -140,6 +153,13 @@ export type AgentAction =
       status: "done" | "error";
     }
   | { type: "add_suggestion"; edit: SuggestedEdit }
+  | {
+      type: "update_generation_progress";
+      jobId: string;
+      stage: string;
+      text: string;
+      complete?: boolean;
+    }
   | { type: "accept_suggestion"; ts: number }
   | { type: "dismiss_suggestion"; ts: number }
   | {
@@ -283,6 +303,40 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
           { type: "suggestion", edit: action.edit, ts: now },
         ],
       };
+
+    case "update_generation_progress": {
+      const existing = state.messages.find(
+        (message) =>
+          message.type === "generation_progress" && message.jobId === action.jobId,
+      );
+      const previousEntries =
+        existing?.type === "generation_progress" ? existing.entries : [];
+      const last = previousEntries[previousEntries.length - 1];
+      const entries =
+        last?.stage === action.stage && last.text === action.text
+          ? previousEntries
+          : [
+              ...previousEntries,
+              { stage: action.stage, text: action.text, ts: now },
+            ].slice(-10);
+      const progress = {
+        type: "generation_progress" as const,
+        jobId: action.jobId,
+        entries,
+        complete: action.complete ?? false,
+        ts: existing?.ts ?? now,
+      };
+      return {
+        ...state,
+        messages: existing
+          ? state.messages.map((message) =>
+              message.type === "generation_progress" && message.jobId === action.jobId
+                ? progress
+                : message,
+            )
+          : [...state.messages, progress],
+      };
+    }
 
     case "accept_suggestion": {
       const msgs = state.messages.map((m) =>

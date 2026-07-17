@@ -135,13 +135,32 @@ export function useAgentStream(projectId?: string | null) {
     generationWatchRef.current = watch;
     watchedJobIdRef.current = jobId;
     dispatch({ type: "resume_job_watch", activity: "video job queued…" });
+    dispatch({
+      type: "update_generation_progress",
+      jobId,
+      stage: "queued",
+      text: "video job queued",
+    });
     let detailedProgressAt = 0;
     let detailedStage = "";
+    let lastHeartbeatAt = 0;
     const eventStream = streamJobEvents(jobId, {
       onEvent: (event) => {
         detailedProgressAt = Date.now();
         detailedStage = event.stage;
-        dispatch({ type: "set_activity", activity: generationActivity(event) });
+        const text = generationActivity(event);
+        dispatch({ type: "set_activity", activity: text });
+        const now = Date.now();
+        if (event.stage !== "gen_poll" || now - lastHeartbeatAt >= 30_000) {
+          lastHeartbeatAt = now;
+          dispatch({
+            type: "update_generation_progress",
+            jobId,
+            stage: event.stage,
+            text: text.replace(/…$/, ""),
+            complete: event.stage === "done",
+          });
+        }
       },
     });
     const watchStartedAt = Date.now();
@@ -168,6 +187,13 @@ export function useAgentStream(projectId?: string | null) {
                   : null),
             });
             dispatch({ type: "set_activity", activity: "preview ready — choose a variant" });
+            dispatch({
+              type: "update_generation_progress",
+              jobId,
+              stage: "done",
+              text: "preview ready",
+              complete: true,
+            });
           } else {
             dispatch({
               type: "add_error",
@@ -182,15 +208,25 @@ export function useAgentStream(projectId?: string | null) {
           const reviewing =
             detailedStage.startsWith("score") ||
             detailedStage.startsWith("continuity");
+          const heartbeat =
+            job.status === "processing"
+              ? reviewing
+                ? `checking quality and transitions · ${elapsed}s elapsed…`
+                : `video model rendering · ${elapsed}s elapsed…`
+              : "waiting for video model…";
           dispatch({
             type: "set_activity",
-            activity:
-              job.status === "processing"
-                ? reviewing
-                  ? `checking quality and transitions · ${elapsed}s elapsed…`
-                  : `video model rendering · ${elapsed}s elapsed…`
-                : "waiting for video model…",
+            activity: heartbeat,
           });
+          if (Date.now() - lastHeartbeatAt >= 30_000) {
+            lastHeartbeatAt = Date.now();
+            dispatch({
+              type: "update_generation_progress",
+              jobId,
+              stage: reviewing ? "quality_wait" : "render_wait",
+              text: heartbeat.replace(/…$/, ""),
+            });
+          }
         }
         await new Promise((resolve) => window.setTimeout(resolve, 1500));
       }

@@ -116,6 +116,7 @@ export interface AgentState {
 export type AgentAction =
   | { type: "add_user_message"; text: string }
   | { type: "start_stream" }
+  | { type: "resume_job_watch"; activity: string }
   | { type: "set_activity"; activity: string | null }
   | { type: "append_token"; text: string }
   | { type: "end_stream" }
@@ -184,6 +185,13 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
           ...state.messages,
           { type: "agent", text: "", ts: now, streaming: true },
         ],
+      };
+
+    case "resume_job_watch":
+      return {
+        ...state,
+        streaming: true,
+        activity: action.activity,
       };
 
     case "set_activity":

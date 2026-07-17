@@ -21,7 +21,11 @@ os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./test_agent.db"
 from app.main import app  # noqa: E402
 from app.db.init import create_all  # noqa: E402
 from app.workers.runner import JobRunner  # noqa: E402
-from app.api.routes.agent import sse_event, _build_messages  # noqa: E402
+from app.api.routes.agent import (  # noqa: E402
+    _build_messages,
+    _detached_agent_relay,
+    sse_event,
+)
 from app.services.agent_tools import execute_tool  # noqa: E402
 from app.db.session import get_db  # noqa: E402
 from app.config.settings import get_settings  # noqa: E402
@@ -218,6 +222,27 @@ class TestBuildMessages:
         messages = _build_messages(history, "hello")
         assert len(messages) == 2
         assert messages[0]["content"] == ""
+
+
+@pytest.mark.asyncio
+async def test_agent_turn_survives_closed_browser_relay():
+    """Closing SSE delivery must not cancel backend agent orchestration."""
+    release = asyncio.Event()
+    completed = asyncio.Event()
+
+    async def source():
+        yield sse_event("token", {"text": "planning"})
+        await release.wait()
+        completed.set()
+        yield sse_event("done", {})
+
+    relay = _detached_agent_relay(source())
+    first = await anext(relay)
+    assert "planning" in first
+    await relay.aclose()
+
+    release.set()
+    await asyncio.wait_for(completed.wait(), timeout=1)
 
 
 # ---- agent chat endpoint tests ----
@@ -524,6 +549,15 @@ async def test_tool_generate_edit_valid(client: AsyncClient, db_session):
 
     assert "job_id" in result
     assert result["status"] == "pending"
+
+    jobs = await client.get(
+        f"/api/projects/{project_id}/generation-jobs",
+        headers=headers(),
+    )
+    assert jobs.status_code == 200
+    restored = next(job for job in jobs.json() if job["job_id"] == result["job_id"])
+    assert restored["accepted"] is False
+    assert restored["created_at"]
 
 
 @pytest.mark.asyncio

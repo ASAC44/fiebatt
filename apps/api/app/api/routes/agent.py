@@ -14,7 +14,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
 from pydantic import BaseModel
@@ -887,7 +887,6 @@ def _build_messages(
 
 async def _agent_stream(
     *,
-    request: Request,
     body: AgentChatRequest,
     session_id: str,
     runner: Any,
@@ -994,10 +993,6 @@ async def _agent_stream(
             log.exception("[agent.chat] req=%s %s API call failed on turn %d", req_id, provider_name, turn)
             yield sse_event("error", {"message": f"{provider_name} API error: {exc}"})
             yield sse_event("done", {})
-            return
-
-        if await request.is_disconnected():
-            log.info("Client disconnected during agent loop")
             return
 
         if text:
@@ -1186,13 +1181,47 @@ async def _agent_stream(
     yield sse_event("done", {})
 
 
+# Keep strong references so Python cannot collect detached agent turns while
+# Qwen is planning or queueing their generation job.
+_agent_turn_tasks: set[asyncio.Task[None]] = set()
+
+
+async def _detached_agent_relay(
+    source: AsyncGenerator[str, None],
+) -> AsyncGenerator[str, None]:
+    """Relay SSE while letting agent orchestration survive client navigation."""
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def consume() -> None:
+        try:
+            async for event in source:
+                await queue.put(event)
+        except Exception as exc:
+            log.exception("detached agent turn failed")
+            await queue.put(sse_event("error", {"message": str(exc)}))
+            await queue.put(sse_event("done", {}))
+        finally:
+            await queue.put(None)
+
+    task = asyncio.create_task(consume(), name=f"agent-turn:{uuid.uuid4().hex[:8]}")
+    _agent_turn_tasks.add(task)
+    task.add_done_callback(_agent_turn_tasks.discard)
+
+    # Closing this relay only drops browser delivery. The consumer keeps
+    # running, persists its conversation, and starts any requested video job.
+    while True:
+        event = await queue.get()
+        if event is None:
+            return
+        yield event
+
+
 # ---- route ----
 
 
 @router.post("/chat")
 async def agent_chat(
     body: AgentChatRequest,
-    request: Request,
     session: SessionModel = Depends(get_session),
     runner=Depends(get_runner),
 ) -> StreamingResponse:
@@ -1205,11 +1234,12 @@ async def agent_chat(
     needs them instead.
     """
     return StreamingResponse(
-        _agent_stream(
-            request=request,
-            body=body,
-            session_id=session.id,
-            runner=runner,
+        _detached_agent_relay(
+            _agent_stream(
+                body=body,
+                session_id=session.id,
+                runner=runner,
+            ),
         ),
         media_type="text/event-stream",
         headers={

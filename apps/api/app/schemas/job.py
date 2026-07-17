@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -21,6 +22,8 @@ class JobOut(BaseModel):
     kind: str
     status: JobStatus
     error: str | None = None
+    created_at: datetime | None = None
+    accepted: bool = False
     variants: list[VariantOut] = []
     # authoritative edit window used when accepting a generated replacement.
     start_ts: float | None = None

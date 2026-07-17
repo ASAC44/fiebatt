@@ -23,10 +23,28 @@ async function installApi(
   page: Page,
   projects: typeof project[] = [],
   timeline?: unknown,
+  jobs?: {
+    agentSse: string;
+    current: () => unknown;
+  },
 ) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+
+    if (path === "/api/agent/chat" && jobs) {
+      return route.fulfill({
+        body: jobs.agentSse,
+        contentType: "text/event-stream",
+        status: 200,
+      });
+    }
+    if (path === "/api/jobs/job-navigation" && jobs) {
+      return json(route, jobs.current());
+    }
+    if (path === `/api/projects/${project.project_id}/generation-jobs` && jobs) {
+      return json(route, [jobs.current()]);
+    }
 
     if (path === "/api/me") {
       return json(route, {
@@ -176,4 +194,63 @@ test("compare opens original and complete edited timeline side by side", async (
     "src",
     "/generated.mp4",
   );
+});
+
+test("generation preview returns after leaving and reopening editor", async ({ page }) => {
+  let finished = false;
+  const currentJob = () => ({
+    job_id: "job-navigation",
+    kind: "generate",
+    status: finished ? "done" : "processing",
+    error: null,
+    created_at: new Date().toISOString(),
+    accepted: false,
+    start_ts: 0,
+    end_ts: 3,
+    variants: finished
+      ? [{
+          id: "variant-navigation",
+          index: 0,
+          status: "done",
+          url: "/generated-navigation.mp4",
+          description: "finished while away",
+          visual_coherence: 8,
+          prompt_adherence: 8,
+          error: null,
+        }]
+      : [],
+  });
+  const agentSse = [
+    "event: suggestion",
+    `data: ${JSON.stringify({ edit: {
+      job_id: "job-navigation",
+      start_ts: 0,
+      end_ts: 3,
+      suggestion: "make the car green",
+    } })}`,
+    "",
+    "event: done",
+    "data: {}",
+    "",
+    "",
+  ].join("\n");
+
+  await installApi(page, [project], undefined, {
+    agentSse,
+    current: currentJob,
+  });
+  await page.goto(`/editor?projectId=${project.project_id}`);
+  await page.getByPlaceholder("describe an edit...").fill("make the car green");
+  await page.getByRole("button", { name: "send message" }).click();
+  await expect(page.getByText(/rendering|queued/).first()).toBeVisible();
+  await expect.poll(() => page.evaluate(() =>
+    localStorage.getItem("fiebatt.pending-agent-turn.project-123"),
+  )).not.toBeNull();
+
+  await page.goto("/projects");
+  finished = true;
+  await page.goto(`/editor?projectId=${project.project_id}`);
+
+  await expect(page.getByText("finished while away")).toBeVisible();
+  await expect(page.getByRole("button", { name: "apply" })).toBeVisible();
 });

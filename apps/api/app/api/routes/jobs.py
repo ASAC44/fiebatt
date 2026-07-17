@@ -1,7 +1,7 @@
 import asyncio
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,31 +18,15 @@ from app.services import job_events
 router = APIRouter(tags=["jobs"])
 
 
-@router.get("/jobs/{job_id}", response_model=JobOut)
-async def get_job(
-    job_id: str,
-    session: SessionModel = Depends(get_session),
-    db: AsyncSession = Depends(get_db),
-):
-    job = (
-        await db.execute(
-            select(Job).where(Job.id == job_id).options(selectinload(Job.variants))
-        )
-    ).scalar_one_or_none()
-    if job is None:
-        raise HTTPException(status_code=404, detail="job not found")
-
-    # enforce session ownership through the project
-    proj = await db.get(Project, job.project_id)
-    if proj is None or proj.session_id != session.id:
-        raise HTTPException(status_code=404, detail="job not found")
-
+def _job_out(job: Job) -> JobOut:
     payload = job.payload or {}
     return JobOut(
         job_id=job.id,
         kind=job.kind,
         status=job.status,  # type: ignore[arg-type]
         error=job.error,
+        created_at=job.created_at,
+        accepted=bool(payload.get("latest_accepted_segment_id")),
         start_ts=job.start_ts,
         end_ts=job.end_ts,
         provider=payload.get("selected_provider"),
@@ -72,6 +56,51 @@ async def get_job(
             for v in sorted(job.variants, key=lambda v: v.index)
         ],
     )
+
+
+@router.get("/projects/{project_id}/generation-jobs", response_model=list[JobOut])
+async def list_generation_jobs(
+    project_id: str,
+    limit: int = Query(default=10, ge=1, le=20),
+    session: SessionModel = Depends(get_session),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recent generation jobs used to restore work after page navigation."""
+    proj = await db.get(Project, project_id)
+    if proj is None or proj.session_id != session.id:
+        raise HTTPException(status_code=404, detail="project not found")
+    rows = (
+        await db.execute(
+            select(Job)
+            .where(Job.project_id == project_id, Job.kind == "generate")
+            .options(selectinload(Job.variants))
+            .order_by(Job.created_at.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
+    return [_job_out(job) for job in rows]
+
+
+@router.get("/jobs/{job_id}", response_model=JobOut)
+async def get_job(
+    job_id: str,
+    session: SessionModel = Depends(get_session),
+    db: AsyncSession = Depends(get_db),
+):
+    job = (
+        await db.execute(
+            select(Job).where(Job.id == job_id).options(selectinload(Job.variants))
+        )
+    ).scalar_one_or_none()
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    # enforce session ownership through the project
+    proj = await db.get(Project, job.project_id)
+    if proj is None or proj.session_id != session.id:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    return _job_out(job)
 
 
 @router.get("/jobs/{job_id}/stream")

@@ -236,9 +236,99 @@ async def test_state_change_expands_outward_until_target_is_lost(tmp_path):
     )
 
     assert tracker_calls == 3
-    assert result.analysis_start == pytest.approx(23.0)
-    assert result.analysis_end == pytest.approx(77.0)
+    assert result.analysis_start == pytest.approx(38.0)
+    assert result.analysis_end == pytest.approx(62.0)
     assert result.occurrence_start == pytest.approx(40.0)
     assert result.occurrence_end == pytest.approx(60.0)
     assert result.generation_context.start_ts == pytest.approx(39.25)
     assert result.generation_context.end_ts == pytest.approx(60.75)
+
+
+@pytest.mark.asyncio
+async def test_state_change_fails_closed_when_tracking_is_unavailable(tmp_path):
+    clear_local_range_cache()
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"unused")
+    project = SimpleNamespace(video_path=str(source), video_url="", duration=20.0)
+    selection = SimpleNamespace(
+        id="selection-state-failure",
+        source_revision="revision-state-failure",
+        frame_ts=10.0,
+        bbox_json={"x": 0.2, "y": 0.1, "w": 0.3, "h": 0.7},
+        mask_url=None,
+    )
+    intent = EditIntent(
+        raw_prompt="make this ball pink",
+        change_type="appearance",
+        duration_policy="continuous_occurrence",
+    )
+
+    async def fake_extract(_source, _timestamp, output):
+        cv2.imwrite(str(output), np.full((36, 64, 3), 80, dtype=np.uint8))
+        return output
+
+    async def unavailable_tracker(*args, **kwargs):
+        raise ConnectionError("tracker unavailable")
+
+    with pytest.raises(ValueError, match="could not reliably track"):
+        await resolve_local_range(
+            project,
+            selection,
+            intent,
+            extract_frame=fake_extract,
+            track_frames=unavailable_tracker,
+        )
+
+
+@pytest.mark.asyncio
+async def test_state_change_rejects_occurrences_over_thirty_seconds(tmp_path):
+    clear_local_range_cache()
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"unused")
+    project = SimpleNamespace(video_path=str(source), video_url="", duration=100.0)
+    selection = SimpleNamespace(
+        id="selection-long-state",
+        source_revision="revision-long-state",
+        frame_ts=50.0,
+        bbox_json={"x": 0.2, "y": 0.1, "w": 0.3, "h": 0.7},
+        mask_url=None,
+    )
+    intent = EditIntent(
+        raw_prompt="make this ball pink",
+        change_type="appearance",
+        duration_policy="continuous_occurrence",
+    )
+    timestamps_by_path = {}
+
+    async def fake_extract(_source, timestamp, output):
+        timestamps_by_path[str(output)] = timestamp
+        cv2.imwrite(str(output), np.full((36, 64, 3), 80, dtype=np.uint8))
+        return output
+
+    async def fake_track(paths, **kwargs):
+        return TrackResult(
+            tracker="test",
+            frames=[
+                {
+                    "frame_index": index,
+                    "state": (
+                        "tracked"
+                        if 30.0 <= timestamps_by_path[path] <= 70.0
+                        else "lost"
+                    ),
+                    "confidence": 1.0,
+                }
+                for index, path in enumerate(paths)
+            ],
+            processed_start_index=0,
+            processed_end_index=len(paths) - 1,
+        )
+
+    with pytest.raises(ValueError, match="more than 30 seconds"):
+        await resolve_local_range(
+            project,
+            selection,
+            intent,
+            extract_frame=fake_extract,
+            track_frames=fake_track,
+        )

@@ -12,6 +12,7 @@ from app.ai.services.sam import TrackResult
 
 MIN_APPEARANCE_SCORE = 0.05
 MIN_BOX_PIXELS = 8
+MAX_CENTER_JUMP_BOXES = 1.5
 
 
 def _normalized_box(
@@ -101,11 +102,33 @@ def _track_direction(
     tracker.init(frames[seed_index], tuple(round(value) for value in seed_box))
     height, width = frames[seed_index].shape[:2]
     output: dict[int, dict] = {}
+    previous_box = seed_box
     index = seed_index + step
     while 0 <= index < len(frames):
         tracked, raw_box = tracker.update(frames[index])
         box = tuple(float(value) for value in raw_box)
         if not tracked or not _valid_box(box, width, height):
+            output[index] = {
+                "frame_index": index,
+                "state": "lost",
+                "confidence": 0.0,
+                "bbox": None,
+            }
+            break
+        previous_center = (
+            previous_box[0] + previous_box[2] / 2,
+            previous_box[1] + previous_box[3] / 2,
+        )
+        current_center = (box[0] + box[2] / 2, box[1] + box[3] / 2)
+        center_jump = (
+            (current_center[0] - previous_center[0]) ** 2
+            + (current_center[1] - previous_center[1]) ** 2
+        ) ** 0.5
+        allowed_jump = MAX_CENTER_JUMP_BOXES * max(
+            MIN_BOX_PIXELS,
+            min(previous_box[2], previous_box[3]),
+        )
+        if center_jump > allowed_jump:
             output[index] = {
                 "frame_index": index,
                 "state": "lost",
@@ -133,6 +156,7 @@ def _track_direction(
             "confidence": confidence,
             "bbox": _normalized_box(box, width, height),
         }
+        previous_box = box
         index += step
     return output
 

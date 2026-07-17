@@ -28,6 +28,8 @@ CONTINUOUS_ANALYSIS_FPS = 2.0
 HANDLE_SECONDS = 0.75
 LOCAL_MARGIN_SECONDS = 1.0
 INITIAL_CONTINUOUS_RADIUS_SECONDS = 3.0
+MAX_CONTINUOUS_EDIT_SECONDS = 30.0
+CONTINUOUS_EDGE_PROBE_SECONDS = 1.0
 SHOT_CHANGE_THRESHOLD = 0.32
 
 _RANGE_CACHE: dict[str, LocalRangeResolution] = {}
@@ -249,6 +251,10 @@ async def resolve_local_range(
     shot_end = end
     track_start: float | None = None
     track_end: float | None = None
+    observed_track_start: float | None = None
+    observed_track_end: float | None = None
+    observed_shot_start = start
+    observed_shot_end = end
     with tempfile.TemporaryDirectory(prefix="fiebatt-local-range-") as temp_dir:
         iteration = 0
         while True:
@@ -292,6 +298,10 @@ async def resolve_local_range(
                     include_masks=False,
                 )
             except Exception as exc:
+                if _persistent_change(intent):
+                    raise ValueError(
+                        "could not reliably track the selected subject; please choose a tighter box"
+                    ) from exc
                 track = sam.TrackResult(
                     tracker="bbox_fallback",
                     frames=[
@@ -312,6 +322,20 @@ async def resolve_local_range(
             track_start, track_end = tracked_span(
                 track.frames, timestamps, seed_index
             )
+            if track_start is not None:
+                observed_track_start = (
+                    track_start
+                    if observed_track_start is None
+                    else min(observed_track_start, track_start)
+                )
+            if track_end is not None:
+                observed_track_end = (
+                    track_end
+                    if observed_track_end is None
+                    else max(observed_track_end, track_end)
+                )
+            observed_shot_start = min(observed_shot_start, shot_start)
+            observed_shot_end = max(observed_shot_end, shot_end)
             if not _persistent_change(intent):
                 break
 
@@ -333,8 +357,29 @@ async def resolve_local_range(
             if not expand_left and not expand_right:
                 break
             span = end - start
-            next_start = max(source_start, start - span) if expand_left else start
-            next_end = min(bounded_end, end + span) if expand_right else end
+            max_window = min(
+                bounded_end - source_start,
+                MAX_CONTINUOUS_EDIT_SECONDS + CONTINUOUS_EDGE_PROBE_SECONDS,
+            )
+            if span >= max_window - 1e-3:
+                if expand_left and expand_right:
+                    break
+                if expand_right:
+                    shift = min(span, selection.frame_ts - start)
+                    next_end = min(bounded_end, end + shift)
+                    next_start = max(source_start, next_end - max_window)
+                else:
+                    shift = min(span, end - selection.frame_ts)
+                    next_start = max(source_start, start - shift)
+                    next_end = min(bounded_end, next_start + max_window)
+            else:
+                growth = min(span, max_window - span)
+                sides = int(expand_left) + int(expand_right)
+                per_side = growth / sides
+                next_start = (
+                    max(source_start, start - per_side) if expand_left else start
+                )
+                next_end = min(bounded_end, end + per_side) if expand_right else end
             if abs(next_start - start) < 1e-6 and abs(next_end - end) < 1e-6:
                 break
             start, end = next_start, next_end
@@ -347,16 +392,23 @@ async def resolve_local_range(
         duration=project.duration,
         analysis_start=start,
         analysis_end=end,
-        shot_start=shot_start,
-        shot_end=shot_end,
-        tracked_start=track_start,
-        tracked_end=track_end,
+        shot_start=observed_shot_start,
+        shot_end=observed_shot_end,
+        tracked_start=observed_track_start,
+        tracked_end=observed_track_end,
         frames_inspected=total_frames_inspected,
         explicit_core=explicit_core,
         tracking_reached_budget=False,
         source_start=source_start,
         source_end=bounded_end,
     )
+    if (
+        _persistent_change(intent)
+        and resolution.edit_core.duration > MAX_CONTINUOUS_EDIT_SECONDS + 0.05
+    ):
+        raise ValueError(
+            "this edit covers more than 30 seconds; choose a shorter range"
+        )
     if track.warning:
         resolution.warnings.append(track.warning)
     _RANGE_CACHE[key] = resolution.model_copy(deep=True)

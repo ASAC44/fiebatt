@@ -35,6 +35,15 @@ SHOT_CHANGE_THRESHOLD = 0.32
 _RANGE_CACHE: dict[str, LocalRangeResolution] = {}
 
 
+class EditWindowLimitError(ValueError):
+    def __init__(self, duration: float, limit: float = MAX_CONTINUOUS_EDIT_SECONDS):
+        self.duration = duration
+        self.limit = limit
+        super().__init__(
+            f"this edit covers more than {limit:g} seconds; choose a shorter range"
+        )
+
+
 def _persistent_change(intent: EditIntent) -> bool:
     return intent.duration_policy == "continuous_occurrence"
 
@@ -255,6 +264,7 @@ async def resolve_local_range(
     observed_track_end: float | None = None
     observed_shot_start = start
     observed_shot_end = end
+    observed_frames: dict[float, dict] = {}
     with tempfile.TemporaryDirectory(prefix="fiebatt-local-range-") as temp_dir:
         iteration = 0
         while True:
@@ -336,6 +346,16 @@ async def resolve_local_range(
                 )
             observed_shot_start = min(observed_shot_start, shot_start)
             observed_shot_end = max(observed_shot_end, shot_end)
+            for frame in track.frames:
+                index = int(frame.get("frame_index", -1))
+                if 0 <= index < len(timestamps):
+                    timestamp = timestamps[index]
+                    observed_frames[timestamp] = {
+                        "timestamp": timestamp,
+                        "state": frame.get("state"),
+                        "confidence": frame.get("confidence"),
+                        "bbox": frame.get("bbox") or selection.bbox_json,
+                    }
             if not _persistent_change(intent):
                 break
 
@@ -406,9 +426,14 @@ async def resolve_local_range(
         _persistent_change(intent)
         and resolution.edit_core.duration > MAX_CONTINUOUS_EDIT_SECONDS + 0.05
     ):
-        raise ValueError(
-            "this edit covers more than 30 seconds; choose a shorter range"
-        )
+        raise EditWindowLimitError(resolution.edit_core.duration)
+    resolution = resolution.model_copy(
+        update={
+            "tracked_frames": [
+                observed_frames[timestamp] for timestamp in sorted(observed_frames)
+            ]
+        }
+    )
     if track.warning:
         resolution.warnings.append(track.warning)
     _RANGE_CACHE[key] = resolution.model_copy(deep=True)

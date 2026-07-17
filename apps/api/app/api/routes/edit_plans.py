@@ -22,6 +22,7 @@ from app.models.session import Session as SessionModel
 from app.schemas.edit_plan import (
     EditCore,
     EditIntent,
+    GenerationContext,
     LocalRangeResolution,
     SemanticEditPlan,
 )
@@ -32,7 +33,12 @@ from app.schemas.edit_plan_api import (
     PlanEstimateResponse,
 )
 from app.services.edit_scope import plan_prompt_intent
-from app.services.local_range import resolve_local_range
+from app.services.local_range import EditWindowLimitError, resolve_local_range
+from app.services.global_chunk_planner import (
+    PlannedGlobalChunk,
+    plan_occurrence_chunks,
+    split_evidence_from_track_frames,
+)
 from app.services import ffmpeg, storage
 
 
@@ -48,7 +54,14 @@ def _response(plan: EditPlanRecord) -> EditPlanResponse:
             id=chunk.id,
             index=chunk.index,
             edit_core=EditCore(start_ts=chunk.edit_start, end_ts=chunk.edit_end),
-            generation_context=resolution.generation_context,
+            generation_context=GenerationContext(
+                start_ts=chunk.context_start,
+                end_ts=chunk.context_end,
+                edit_core=EditCore(
+                    start_ts=chunk.edit_start,
+                    end_ts=chunk.edit_end,
+                ),
+            ),
             provider=chunk.provider,
             status=chunk.status,
         )
@@ -169,18 +182,57 @@ async def create_edit_plan(
             source_start=source_start,
             source_end=source_end,
         )
+    except EditWindowLimitError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "edit_window_too_long",
+                "message": str(exc),
+                "limit_seconds": exc.limit,
+                "detected_seconds": round(exc.duration, 3),
+            },
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    context_duration = resolution.generation_context.duration
-    provider = select_video_provider(
-        body.video_gen_provider,
-        source_video=True,
-        duration=context_duration,
-    )
-    provider_error = validate_provider_duration(provider, context_duration)
-    if provider_error:
-        raise HTTPException(status_code=422, detail=provider_error)
+    if resolution.edit_core.duration > 30.05:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "edit_window_too_long",
+                "message": "this edit covers more than 30 seconds; choose a shorter range",
+                "limit_seconds": 30.0,
+                "detected_seconds": round(resolution.edit_core.duration, 3),
+            },
+        )
+    context = resolution.generation_context
+    source_edit_request = body.video_gen_provider in {"auto", "wan", "happyhorse"}
+    planned_chunks = []
+    if source_edit_request:
+        try:
+            planned_chunks = plan_occurrence_chunks(
+                occurrence_start=resolution.edit_core.start_ts,
+                occurrence_end=resolution.edit_core.end_ts,
+                project_duration=project.duration,
+                requested_provider=body.video_gen_provider,
+                split_evidence=split_evidence_from_track_frames(
+                    resolution.tracked_frames
+                ),
+                source_start=context.start_ts,
+                source_end=context.end_ts,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        provider = planned_chunks[0].provider
+    else:
+        provider = select_video_provider(
+            body.video_gen_provider,
+            source_video=True,
+            duration=context.duration,
+        )
+        provider_error = validate_provider_duration(provider, context.duration)
+        if provider_error:
+            raise HTTPException(status_code=422, detail=provider_error)
     capabilities = VIDEO_PROVIDER_CAPABILITIES[provider]
     provider_reason = (
         f"selected {provider} for source-video context"
@@ -196,15 +248,25 @@ async def create_edit_plan(
         )
     if not capabilities.source_video_edit:
         warnings.append(f"{provider} cannot consume source-video motion context")
+    if len(planned_chunks) > 1:
+        warnings.append(
+            f"edit will render as {len(planned_chunks)} overlapping clips and join at validated seams"
+        )
 
+    expected_calls = len(planned_chunks) if planned_chunks else 1
+    expected_seconds = (
+        sum(chunk.context_duration for chunk in planned_chunks)
+        if planned_chunks
+        else context.duration
+    )
     estimate = {
         "analysis_mode": gate.estimate.analysis_mode,
         "analysis_duration_ms": round(
             (time.perf_counter() - analysis_started) * 1000.0, 3
         ),
         "frames_inspected": resolution.frames_inspected,
-        "expected_generation_calls": 1,
-        "expected_generated_seconds": context_duration,
+        "expected_generation_calls": expected_calls,
+        "expected_generated_seconds": expected_seconds,
         "requires_global_discovery": gate.estimate.requires_global_discovery,
     }
     plan = EditPlanRecord(
@@ -222,23 +284,51 @@ async def create_edit_plan(
     )
     db.add(plan)
     await db.flush()
-    context = resolution.generation_context
-    chunk = GenerationChunk(
-        plan_id=plan.id,
-        index=0,
-        edit_start=resolution.edit_core.start_ts,
-        edit_end=resolution.edit_core.end_ts,
-        context_start=context.start_ts,
-        context_end=context.end_ts,
-        provider=provider,
-        payload_json={
-            "selection_id": selection.id,
-            "subject_reference_url": selection.subject_reference_url,
-            "mask_url": selection.mask_url,
-            "source_revision": selection.source_revision,
-        },
-    )
-    db.add(chunk)
+    chunks_to_store = planned_chunks or [
+        PlannedGlobalChunk(
+            index=0,
+            edit_start=resolution.edit_core.start_ts,
+            edit_end=resolution.edit_core.end_ts,
+            context_start=context.start_ts,
+            context_end=context.end_ts,
+            provider=provider,
+            split_reason="occurrence_end",
+        )
+    ]
+    for chunk in chunks_to_store:
+        first_chunk = chunk.index == 0
+        last_chunk = chunk.index == len(chunks_to_store) - 1
+        db.add(
+            GenerationChunk(
+                plan_id=plan.id,
+                index=chunk.index,
+                edit_start=chunk.edit_start,
+                edit_end=chunk.edit_end,
+                context_start=chunk.context_start,
+                context_end=chunk.context_end,
+                provider=chunk.provider,
+                payload_json={
+                    "selection_id": selection.id,
+                    "subject_reference_url": selection.subject_reference_url,
+                    "mask_url": selection.mask_url,
+                    "source_revision": selection.source_revision,
+                    "split_reason": chunk.split_reason,
+                    "track_frames": [
+                        frame
+                        for frame in resolution.tracked_frames
+                        if chunk.context_start
+                        <= float(frame.get("timestamp") or 0.0)
+                        <= chunk.context_end
+                    ],
+                    "boundary_contract": {
+                        "protect_source_before": first_chunk,
+                        "protect_source_after": last_chunk,
+                        "handoff_from_previous": not first_chunk,
+                        "handoff_to_next": not last_chunk,
+                    },
+                },
+            )
+        )
     await db.commit()
     loaded = (
         await db.execute(

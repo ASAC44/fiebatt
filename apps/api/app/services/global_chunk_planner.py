@@ -118,13 +118,20 @@ def plan_occurrence_chunks(
     project_duration: float,
     requested_provider: str = "auto",
     split_evidence: list[SplitEvidence] | None = None,
+    source_start: float = 0.0,
+    source_end: float | None = None,
 ) -> list[PlannedGlobalChunk]:
+    source_upper = (
+        project_duration if source_end is None else min(project_duration, source_end)
+    )
     if occurrence_end <= occurrence_start:
         raise ValueError("occurrence must have positive duration")
-    if occurrence_start < 0 or occurrence_end > project_duration + 0.05:
+    if source_start < 0 or source_upper <= source_start:
+        raise ValueError("source range must have positive duration")
+    if occurrence_start < source_start - 0.05 or occurrence_end > source_upper + 0.05:
         raise ValueError("occurrence is outside the source video")
-    full_context_start = max(0.0, occurrence_start - HANDLE_SECONDS)
-    full_context_end = min(project_duration, occurrence_end + HANDLE_SECONDS)
+    full_context_start = max(source_start, occurrence_start - HANDLE_SECONDS)
+    full_context_end = min(source_upper, occurrence_end + HANDLE_SECONDS)
     provider = _provider_for_occurrence(
         requested_provider, full_context_end - full_context_start
     )
@@ -136,11 +143,11 @@ def plan_occurrence_chunks(
     core_ranges: list[tuple[float, float, str]] = []
     cursor = occurrence_start
     while (
-        min(project_duration, occurrence_end + HANDLE_SECONDS)
-        - max(0.0, cursor - HANDLE_SECONDS)
+        min(source_upper, occurrence_end + HANDLE_SECONDS)
+        - max(source_start, cursor - HANDLE_SECONDS)
         > max_context + 1e-6
     ):
-        context_start = max(0.0, cursor - HANDLE_SECONDS)
+        context_start = max(source_start, cursor - HANDLE_SECONDS)
         target = context_start + max_context - HANDLE_SECONDS
         lower = cursor + MIN_CORE_SECONDS
         upper = min(
@@ -162,17 +169,17 @@ def plan_occurrence_chunks(
     chunks: list[PlannedGlobalChunk] = []
     minimum_total = MIN_TOTAL_SECONDS.get(provider, 0.0)
     for index, (start, end, reason) in enumerate(core_ranges):
-        context_start = max(0.0, start - HANDLE_SECONDS)
-        context_end = min(project_duration, end + HANDLE_SECONDS)
+        context_start = max(source_start, start - HANDLE_SECONDS)
+        context_end = min(source_upper, end + HANDLE_SECONDS)
         missing = minimum_total - (context_end - context_start)
         if missing > 0:
-            grow_left = min(context_start, missing / 2)
+            grow_left = min(context_start - source_start, missing / 2)
             context_start -= grow_left
             missing -= grow_left
-            grow_right = min(project_duration - context_end, missing)
+            grow_right = min(source_upper - context_end, missing)
             context_end += grow_right
             missing -= grow_right
-            context_start = max(0.0, context_start - missing)
+            context_start = max(source_start, context_start - missing)
         chunks.append(
             PlannedGlobalChunk(
                 index=index,

@@ -11,6 +11,7 @@ from app.api.routes import edit_plans as route  # noqa: E402
 from app.db.init import create_all  # noqa: E402
 from app.db.session import AsyncSessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
+from app.api.routes import generate as generate_route  # noqa: E402
 from app.models.project import Project  # noqa: E402
 from app.models.selection import SelectionArtifact  # noqa: E402
 from app.schemas.edit_plan import EditCore, GenerationContext, LocalRangeResolution  # noqa: E402
@@ -140,6 +141,87 @@ async def test_state_change_plan_covers_current_occurrence(client, owned_selecti
 
 
 @pytest.mark.asyncio
+async def test_long_local_edit_is_split_into_provider_sized_chunks(
+    client, owned_selection, monkeypatch
+):
+    project_id, selection_id = owned_selection
+
+    async def resolve(*args, **kwargs):
+        core = EditCore(start_ts=3.0, end_ts=23.0)
+        return LocalRangeResolution(
+            edit_core=core,
+            generation_context=GenerationContext(
+                start_ts=2.25,
+                end_ts=23.75,
+                edit_core=core,
+            ),
+            occurrence_start=3.0,
+            occurrence_end=23.0,
+            analysis_start=2.0,
+            analysis_end=24.0,
+            frames_inspected=45,
+            tracked_frames=[
+                {
+                    "timestamp": timestamp,
+                    "state": "tracked",
+                    "confidence": 0.9,
+                    "bbox": {"x": 0.2, "y": 0.1, "w": 0.3, "h": 0.7},
+                }
+                for timestamp in range(2, 25)
+            ],
+            confidence=0.9,
+        )
+
+    monkeypatch.setattr(route, "resolve_local_range", resolve)
+    response = await client.post(
+        "/api/edit-plans",
+        headers={"X-Session-Id": "plan-owner"},
+        json={
+            "project_id": project_id,
+            "selection_id": selection_id,
+            "prompt": "make this ball pink",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["provider"] == "happyhorse"
+    assert body["estimate"]["expected_generation_calls"] == 2
+    assert len(body["chunks"]) == 2
+    assert all(
+        chunk["generation_context"]["end_ts"]
+        - chunk["generation_context"]["start_ts"]
+        <= 15.0
+        for chunk in body["chunks"]
+    )
+    assert body["chunks"][0]["edit_core"]["end_ts"] == body["chunks"][1]["edit_core"]["start_ts"]
+
+    class FakeRunner:
+        def __init__(self):
+            self.submissions = []
+
+        def submit(self, job_id, factory):
+            self.submissions.append((job_id, factory))
+
+    runner = FakeRunner()
+    app.state.runner = runner
+    generated = await client.post(
+        "/api/generate",
+        headers={"X-Session-Id": "plan-owner"},
+        json={
+            "project_id": project_id,
+            "plan_id": body["plan_id"],
+        },
+    )
+
+    assert generated.status_code == 200, generated.text
+    assert len(runner.submissions) == 1
+    factory = runner.submissions[0][1]
+    closure_values = [cell.cell_contents for cell in factory.__closure__ or ()]
+    assert generate_route.local_chunk_job.run in closure_values
+
+
+@pytest.mark.asyncio
 async def test_plan_ownership_is_hidden(client, owned_selection):
     project_id, selection_id = owned_selection
     response = await client.post(
@@ -186,6 +268,50 @@ async def test_provider_constraints_fail_before_generation(client, owned_selecti
     )
     assert response.status_code == 422
     assert "exactly 4, 6, 8 seconds" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_over_thirty_second_plan_returns_render_limit_card_data(
+    client, owned_selection, monkeypatch
+):
+    project_id, selection_id = owned_selection
+    async with AsyncSessionLocal() as db:
+        project = await db.get(Project, project_id)
+        project.duration = 50.0
+        await db.commit()
+
+    async def resolve(*args, **kwargs):
+        core = EditCore(start_ts=5.0, end_ts=36.0)
+        return LocalRangeResolution(
+            edit_core=core,
+            generation_context=GenerationContext(
+                start_ts=4.25,
+                end_ts=36.75,
+                edit_core=core,
+            ),
+            occurrence_start=5.0,
+            occurrence_end=36.0,
+            analysis_start=4.0,
+            analysis_end=37.0,
+            confidence=0.9,
+        )
+
+    monkeypatch.setattr(route, "resolve_local_range", resolve)
+    response = await client.post(
+        "/api/edit-plans",
+        headers={"X-Session-Id": "plan-owner"},
+        json={
+            "project_id": project_id,
+            "selection_id": selection_id,
+            "prompt": "make this ball pink",
+        },
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["code"] == "edit_window_too_long"
+    assert detail["limit_seconds"] == 30.0
+    assert detail["detected_seconds"] == 31.0
 
 
 @pytest.mark.asyncio

@@ -130,6 +130,7 @@ class LocalRangeResolution(BaseModel):
     analysis_start: float
     analysis_end: float
     frames_inspected: int = 0
+    tracked_frames: list[dict] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0)
     warnings: list[str] = Field(default_factory=list)
 

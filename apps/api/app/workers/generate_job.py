@@ -64,6 +64,7 @@ from app.services.generation_quality import (
 )
 from app.services.generation_telemetry import build_local_flow_telemetry
 from app.services.local_compositor import composite_generated_target
+from app.services.edit_prompt import planned_edit_prompt
 
 log = logging.getLogger("fiebatt.jobs.generate")
 
@@ -100,23 +101,7 @@ def _provider_model(provider: str, edit_mode: str | None = None) -> str:
     }.get(provider, provider)
 
 
-def _planned_edit_prompt(user_prompt: str, plan: dict[str, Any]) -> str:
-    """Keep the user's requirement while adding the grounded planner detail."""
-    planned = str(
-        plan.get("prompt_for_video_edit")
-        or plan.get("prompt_for_runway")
-        or plan.get("prompt_for_veo")
-        or ""
-    ).strip()
-    requirement = user_prompt.strip()
-    if not planned or planned.casefold() == requirement.casefold():
-        return requirement
-    return (
-        "NON-NEGOTIABLE USER REQUIREMENT:\n"
-        f"{requirement}\n\n"
-        "GROUNDED VIDEO-EDIT INSTRUCTION:\n"
-        f"{planned}"
-    )
+_planned_edit_prompt = planned_edit_prompt
 
 
 async def _update_job(db: AsyncSession, job_id: str, **fields) -> None:

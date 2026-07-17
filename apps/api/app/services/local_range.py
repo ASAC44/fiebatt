@@ -32,7 +32,7 @@ _RANGE_CACHE: dict[str, LocalRangeResolution] = {}
 
 
 def _persistent_change(intent: EditIntent) -> bool:
-    return any("complete visible occurrence" in item for item in intent.preservation_requirements)
+    return intent.duration_policy == "continuous_occurrence"
 
 
 def analysis_window(

@@ -166,6 +166,7 @@ export type EditPlanResp = {
   intent: {
     raw_prompt: string;
     change_type: "appearance" | "removal" | "replacement" | "motion" | "scene";
+    duration_policy: "bounded_action" | "continuous_occurrence" | "explicit_range" | "all_occurrences";
     action_phases: string[];
     estimated_action_seconds: number;
     requires_recovery_motion: boolean;

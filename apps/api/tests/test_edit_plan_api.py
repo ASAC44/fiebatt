@@ -109,6 +109,8 @@ async def test_create_and_get_non_generating_plan(client, owned_selection):
     assert "fixture warning" in body["warnings"]
     assert not any("legacy fixed window" in warning for warning in body["warnings"])
     assert len(body["chunks"]) == 1
+    assert body["intent"]["duration_policy"] == "bounded_action"
+    assert body["intent"]["grounded_edit"]["prompt_for_video_edit"]
 
     fetched = await client.get(
         f"/api/edit-plans/{body['plan_id']}",
@@ -116,6 +118,25 @@ async def test_create_and_get_non_generating_plan(client, owned_selection):
     )
     assert fetched.status_code == 200
     assert fetched.json()["plan_id"] == body["plan_id"]
+
+
+@pytest.mark.asyncio
+async def test_state_change_plan_covers_current_occurrence(client, owned_selection):
+    project_id, selection_id = owned_selection
+    response = await client.post(
+        "/api/edit-plans",
+        headers={"X-Session-Id": "plan-owner"},
+        json={
+            "project_id": project_id,
+            "selection_id": selection_id,
+            "prompt": "make this ball pink",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    intent = response.json()["intent"]
+    assert intent["scope"] == "local"
+    assert intent["duration_policy"] == "continuous_occurrence"
 
 
 @pytest.mark.asyncio

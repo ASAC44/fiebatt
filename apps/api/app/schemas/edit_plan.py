@@ -14,17 +14,69 @@ EditScope = Literal[
     "all_occurrences",
 ]
 ChangeType = Literal["appearance", "removal", "replacement", "motion", "scene"]
+DurationPolicy = Literal[
+    "bounded_action",
+    "continuous_occurrence",
+    "explicit_range",
+    "all_occurrences",
+]
+
+
+class GroundedEditInstruction(BaseModel):
+    intent: str
+    conditioning_strategy: Literal["first_frame", "text_only"] = "first_frame"
+    description: str
+    tone: str = "original visual tone unless explicitly changed"
+    color_grading: str = "original grade unless explicitly changed"
+    region_emphasis: str
+    prompt_for_video_edit: str = Field(min_length=1, max_length=4000)
+
+
+class SemanticEditDecision(BaseModel):
+    scope: EditScope
+    change_type: ChangeType
+    duration_policy: DurationPolicy
+    target_description: str | None = None
+    action_phases: list[str] = Field(default_factory=list)
+    estimated_action_seconds: float = Field(default=3.0, ge=0.5, le=15.0)
+    requires_recovery_motion: bool = False
+    preservation_requirements: list[str] = Field(default_factory=list)
+    reasoning: str = Field(min_length=1, max_length=1000)
+
+
+class SemanticEditPlan(BaseModel):
+    decision: SemanticEditDecision
+    variants: list[GroundedEditInstruction] = Field(min_length=1, max_length=1)
+
+    def as_intent(self, raw_prompt: str) -> "EditIntent":
+        decision = self.decision
+        return EditIntent(
+            raw_prompt=raw_prompt,
+            scope=decision.scope,
+            change_type=decision.change_type,
+            duration_policy=decision.duration_policy,
+            target_description=decision.target_description,
+            action_phases=decision.action_phases,
+            estimated_action_seconds=decision.estimated_action_seconds,
+            requires_recovery_motion=decision.requires_recovery_motion,
+            preservation_requirements=decision.preservation_requirements,
+            reasoning=decision.reasoning,
+            grounded_edit=self.variants[0],
+        )
 
 
 class EditIntent(BaseModel):
     raw_prompt: str = Field(min_length=1, max_length=2000)
     scope: EditScope = "local"
     change_type: ChangeType
+    duration_policy: DurationPolicy = "bounded_action"
     target_description: str | None = None
     action_phases: list[str] = Field(default_factory=list)
     estimated_action_seconds: float = Field(default=3.0, gt=0.0)
     requires_recovery_motion: bool = False
     preservation_requirements: list[str] = Field(default_factory=list)
+    reasoning: str | None = None
+    grounded_edit: GroundedEditInstruction | None = None
 
 
 class EditCore(BaseModel):

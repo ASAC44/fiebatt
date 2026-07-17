@@ -1,4 +1,5 @@
 import time
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -10,6 +11,7 @@ from app.ai.services.provider_capabilities import (
     select_video_provider,
     validate_provider_duration,
 )
+from app.ai import services as ai
 from app.config.settings import get_settings
 from app.db.session import get_db
 from app.deps import get_session
@@ -17,7 +19,12 @@ from app.models.edit_plan import EditPlanRecord, GenerationChunk
 from app.models.project import Project
 from app.models.selection import SelectionArtifact
 from app.models.session import Session as SessionModel
-from app.schemas.edit_plan import EditCore, EditIntent, LocalRangeResolution
+from app.schemas.edit_plan import (
+    EditCore,
+    EditIntent,
+    LocalRangeResolution,
+    SemanticEditPlan,
+)
 from app.schemas.edit_plan_api import (
     EditPlanRequest,
     EditPlanResponse,
@@ -26,9 +33,11 @@ from app.schemas.edit_plan_api import (
 )
 from app.services.edit_scope import plan_prompt_intent
 from app.services.local_range import resolve_local_range
+from app.services import ffmpeg, storage
 
 
 router = APIRouter(prefix="/edit-plans", tags=["edit-plans"])
+log = logging.getLogger("fiebatt.edit_plans")
 
 
 def _response(plan: EditPlanRecord) -> EditPlanResponse:
@@ -102,11 +111,48 @@ async def create_edit_plan(
             start_ts=body.explicit_start_ts,
             end_ts=body.explicit_end_ts,
         )
+    semantic_warning: str | None = None
+    structured_intent = body.structured_intent
+    if structured_intent is None:
+        planning_frame = ""
+        try:
+            frame_path, _ = storage.new_path("keyframes", "jpg")
+            await ffmpeg.extract_frame(project.video_path, selection.frame_ts, frame_path)
+            planning_frame = str(frame_path)
+        except Exception:
+            log.warning("semantic planning frame unavailable", exc_info=True)
+        try:
+            interpretation = SemanticEditPlan.model_validate(
+                await ai.gemini.interpret_edit(
+                    body.prompt,
+                    selection.bbox_json,
+                    planning_frame,
+                )
+            )
+            structured_intent = interpretation.as_intent(body.prompt)
+        except Exception as exc:
+            log.warning("semantic edit interpretation failed; using safe rules", exc_info=True)
+            semantic_warning = (
+                "semantic prompt interpretation unavailable; used conservative temporal rules "
+                f"({type(exc).__name__})"
+            )
+
+    if structured_intent is not None:
+        updates: dict[str, str] = {}
+        if explicit_core is not None:
+            updates = {"scope": "explicit_range", "duration_policy": "explicit_range"}
+        elif body.requested_scope is not None:
+            updates["scope"] = body.requested_scope
+            if body.requested_scope in {"all_occurrences", "selected_occurrences"}:
+                updates["duration_policy"] = "all_occurrences"
+        if updates:
+            structured_intent = structured_intent.model_copy(update=updates)
+
     gate = plan_prompt_intent(
         body.prompt,
         explicit_range=explicit_core is not None,
         requested_scope=body.requested_scope,
-        structured_intent=body.structured_intent,
+        structured_intent=structured_intent,
     )
     if gate.intent.scope in {"all_occurrences", "selected_occurrences"}:
         raise HTTPException(
@@ -142,6 +188,8 @@ async def create_edit_plan(
         else f"selected {provider} image conditioning; source-video context is unsupported"
     )
     warnings = list(resolution.warnings)
+    if semantic_warning:
+        warnings.append(semantic_warning)
     if not get_settings().adaptive_edit_planning:
         warnings.append(
             "adaptive generation rollout is disabled; render will use the legacy fixed window"

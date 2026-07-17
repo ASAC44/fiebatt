@@ -322,3 +322,29 @@ test("prompt card separates user request from refined prompt", async ({ page }) 
   );
   await expect(page.locator(".prompt-plan__lane-k")).toHaveText(["you", "refined"]);
 });
+
+test("agent reply never shows raw tool markup", async ({ page }) => {
+  const leaked = `Working on it.
+<｜DSML｜function_calls>
+<｜DSML｜invoke name="analyze_video">
+<｜DSML｜parameter name="project_id" string="true">project-123</｜DSML｜parameter>`;
+  const agentSse = [
+    "event: token",
+    `data: ${JSON.stringify({ text: leaked })}`,
+    "",
+    "event: done",
+    "data: {}",
+    "",
+    "",
+  ].join("\n");
+  await installApi(page, [project], undefined, {
+    agentSse,
+    current: () => ({}),
+  });
+  await page.goto(`/editor?projectId=${project.project_id}`);
+  await page.getByPlaceholder("describe an edit...").fill("inspect this video");
+  await page.getByRole("button", { name: "send message" }).click();
+
+  await expect(page.getByText("Working on it.")).toBeVisible();
+  await expect(page.getByText(/DSML|function_calls|functioncall/i)).toHaveCount(0);
+});

@@ -23,7 +23,9 @@ from app.db.init import create_all  # noqa: E402
 from app.workers.runner import JobRunner  # noqa: E402
 from app.api.routes.agent import (  # noqa: E402
     _build_messages,
+    _clean_agent_text,
     _detached_agent_relay,
+    _parse_dsml_tool_calls,
     sse_event,
 )
 from app.services.agent_tools import execute_tool  # noqa: E402
@@ -177,6 +179,29 @@ class TestSseEvent:
         result = sse_event("token", data)
         parsed = json.loads(result.split("data: ")[1].strip())
         assert "\u2728" in parsed["text"]
+
+
+def test_dsml_tool_markup_is_parsed_and_hidden():
+    raw = """I will inspect it now.
+<｜DSML｜function_calls>
+<｜DSML｜invoke name="analyze_video">
+<｜DSML｜parameter name="project_id" string="true">project-1</｜DSML｜parameter>
+<｜DSML｜parameter name="fps" string="false">2</｜DSML｜parameter>
+</｜DSML｜invoke>
+</｜DSML｜function_calls>"""
+
+    assert _clean_agent_text(raw) == "I will inspect it now."
+    calls = _parse_dsml_tool_calls(raw)
+    assert len(calls) == 1
+    assert calls[0].function.name == "analyze_video"
+    assert json.loads(calls[0].function.arguments) == {
+        "project_id": "project-1",
+        "fps": 2,
+    }
+
+
+def test_malformed_dsml_prefix_is_never_user_visible():
+    assert _clean_agent_text("Starting <DSML functioncall") == "Starting"
 
 
 # ---- _build_contents tests ----
@@ -697,6 +722,45 @@ async def test_agent_chat_with_function_call(client: AsyncClient, live_agent_set
     tc_end = next(e for e in events if e["event"] == "tool_call_end")
     assert tc_end["data"]["status"] == "done"
     assert tc_end["data"]["result"]["project_id"] == "test-proj"
+
+
+@pytest.mark.asyncio
+async def test_agent_chat_recovers_raw_dsml_tool_call(client: AsyncClient, live_agent_settings):
+    raw_call = """I will inspect it.
+<｜DSML｜function_calls>
+<｜DSML｜invoke name="analyze_video">
+<｜DSML｜parameter name="project_id" string="true">test-proj</｜DSML｜parameter>
+</｜DSML｜invoke>
+</｜DSML｜function_calls>"""
+    mock_client = _mock_agent_client(
+        _make_mock_agent_response(raw_call),
+        _make_mock_agent_response("Inspection complete."),
+    )
+
+    with patch("app.api.routes.agent.AsyncOpenAI", return_value=mock_client), \
+         patch("app.api.routes.agent.execute_tool", new_callable=AsyncMock) as mock_exec:
+        mock_exec.return_value = {
+            "status": "done",
+            "project_id": "test-proj",
+            "duration": 5.0,
+        }
+        res = await client.post(
+            "/api/agent/chat",
+            json={
+                "project_id": "test-proj",
+                "message": "Inspect this video",
+                "conversation_id": "conv-dsml",
+            },
+            headers=headers(),
+        )
+
+    events = _parse_sse_events(res.text)
+    visible_text = "".join(
+        event["data"]["text"] for event in events if event["event"] == "token"
+    )
+    assert visible_text == "I will inspect it.Inspection complete."
+    assert "DSML" not in res.text
+    assert mock_exec.await_args.kwargs["args"] == {"project_id": "test-proj"}
 
 
 @pytest.mark.asyncio

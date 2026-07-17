@@ -10,8 +10,10 @@ model until it finishes.
 import asyncio
 import json
 import logging
+import re
 import uuid
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
@@ -33,6 +35,80 @@ from app.services import job_events
 
 log = logging.getLogger("fiebatt.agent")
 router = APIRouter(prefix="/agent", tags=["agent"])
+
+
+_TOOL_MARKUP_START = re.compile(
+    r"<\s*(?:(?:[|｜]\s*)?DSML(?:\s*[|｜])?\s*)?"
+    r"(?:function[\s_]?calls?|tool[\s_]?calls?|invoke\b|parameter\b)",
+    re.IGNORECASE,
+)
+_DSML_INVOKE = re.compile(
+    r'<\s*(?:(?:[|｜]\s*)?DSML(?:\s*[|｜])?\s*)?invoke\s+name="([^"]+)"[^>]*>'
+    r"(.*?)"
+    r"</\s*(?:(?:[|｜]\s*)?DSML(?:\s*[|｜])?\s*)?invoke\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_DSML_PARAMETER = re.compile(
+    r'<\s*(?:(?:[|｜]\s*)?DSML(?:\s*[|｜])?\s*)?parameter\s+'
+    r'name="([^"]+)"(?:\s+string="(true|false)")?[^>]*>'
+    r"(.*?)"
+    r"</\s*(?:(?:[|｜]\s*)?DSML(?:\s*[|｜])?\s*)?parameter\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+@dataclass(slots=True)
+class _ParsedFunction:
+    name: str
+    arguments: str
+
+
+@dataclass(slots=True)
+class _ParsedToolCall:
+    id: str
+    function: _ParsedFunction
+
+
+def _clean_agent_text(text: str) -> str:
+    """Return user-facing prose before any leaked tool protocol block."""
+    marker = _TOOL_MARKUP_START.search(text)
+    visible = text[:marker.start()] if marker else text
+    return visible.strip()
+
+
+def _parse_dsml_tool_calls(text: str) -> list[_ParsedToolCall]:
+    """Recover DeepSeek-style DSML calls leaked into message content."""
+    parsed: list[_ParsedToolCall] = []
+    for index, invoke in enumerate(_DSML_INVOKE.finditer(text)):
+        name, body = invoke.groups()
+        arguments: dict[str, Any] = {}
+        for parameter in _DSML_PARAMETER.finditer(body):
+            key, is_string, raw_value = parameter.groups()
+            value = raw_value.strip()
+            if (is_string or "false").lower() != "true":
+                try:
+                    arguments[key] = json.loads(value)
+                except json.JSONDecodeError:
+                    arguments[key] = value
+            else:
+                arguments[key] = value
+        if not arguments:
+            try:
+                direct = json.loads(body.strip())
+                if isinstance(direct, dict):
+                    arguments = direct
+            except json.JSONDecodeError:
+                pass
+        parsed.append(
+            _ParsedToolCall(
+                id=f"dsml-{uuid.uuid4().hex[:12]}-{index}",
+                function=_ParsedFunction(
+                    name=name,
+                    arguments=json.dumps(arguments),
+                ),
+            )
+        )
+    return parsed
 
 # ---- request schema ----
 
@@ -987,8 +1063,11 @@ async def _agent_stream(
             )
             choice = response.choices[0]
             msg = choice.message
-            text = msg.content or ""
-            tool_calls = msg.tool_calls or []
+            raw_text = msg.content or ""
+            tool_calls: list[Any] = list(msg.tool_calls or [])
+            if not tool_calls:
+                tool_calls = _parse_dsml_tool_calls(raw_text)
+            text = _clean_agent_text(raw_text)
         except Exception as exc:
             log.exception("[agent.chat] req=%s %s API call failed on turn %d", req_id, provider_name, turn)
             yield sse_event("error", {"message": f"{provider_name} API error: {exc}"})

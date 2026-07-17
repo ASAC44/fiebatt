@@ -19,6 +19,7 @@ import {
   type ChatMessageResp,
 } from "@/lib/api";
 import { redirectToLogin } from "@/lib/auth";
+import { cleanAgentText } from "@/lib/agent-text";
 import {
   useAgent,
   type AgentAction,
@@ -498,7 +499,7 @@ function dbMessageToAgentMessage(msg: ChatMessageResp): AgentMessage | null {
     case "agent":
       return {
         type: "agent",
-        text: (content.text as string) ?? "",
+        text: cleanAgentText((content.text as string) ?? ""),
         ts,
         streaming: false,
       };

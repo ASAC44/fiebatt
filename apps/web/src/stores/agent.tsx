@@ -14,6 +14,7 @@ import {
   type Dispatch,
   type ReactNode,
 } from "react";
+import { cleanAgentText, hasAgentToolMarkup } from "@/lib/agent-text";
 
 // ─── types ────────────────────────────────────────────────────────────
 
@@ -71,7 +72,13 @@ export interface PromptPlan {
 
 export type AgentMessage =
   | { type: "user"; text: string; ts: number }
-  | { type: "agent"; text: string; ts: number; streaming?: boolean }
+  | {
+      type: "agent";
+      text: string;
+      ts: number;
+      streaming?: boolean;
+      toolMarkupSuppressed?: boolean;
+    }
   | {
       type: "tool_call";
       id: string;
@@ -201,7 +208,13 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
       const msgs = [...state.messages];
       const last = msgs[msgs.length - 1];
       if (last && last.type === "agent" && last.streaming) {
-        msgs[msgs.length - 1] = { ...last, text: last.text + action.text };
+        if (last.toolMarkupSuppressed) return state;
+        const combined = last.text + action.text;
+        msgs[msgs.length - 1] = {
+          ...last,
+          text: cleanAgentText(combined),
+          toolMarkupSuppressed: hasAgentToolMarkup(combined),
+        };
       }
       return { ...state, messages: msgs };
     }

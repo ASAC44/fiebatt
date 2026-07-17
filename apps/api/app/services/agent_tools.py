@@ -573,113 +573,54 @@ async def _generate_edit(
     session_id: str,
     runner: Any | None = None,
 ) -> dict[str, Any]:
-    """Create a generate job — mirrors POST /api/generate logic."""
-    from app.workers import generate_job as generate_worker
+    """Create a generation through the same chunk-aware path as the HTTP API."""
+    from fastapi import HTTPException
 
-    from app.models.edit_plan import EditPlanRecord
-    from app.models.selection import SelectionArtifact
-    from app.schemas.edit_plan import LocalRangeResolution
+    from app.api.routes.generate import generate
+    from app.models.session import Session as SessionModel
+    from app.schemas.generate import GenerateRequest
 
-    project_id: str = args["project_id"]
-    plan_id: str | None = args.get("plan_id")
+    if runner is None:
+        raise ValueError("job runner unavailable")
+    await _get_project_or_error(db, str(args["project_id"]), session_id)
 
-    proj = await _get_project_or_error(db, project_id, session_id)
-    plan: EditPlanRecord | None = None
-    resolution: LocalRangeResolution | None = None
-    use_plan_range = False
-    if plan_id:
-        plan = await db.get(EditPlanRecord, plan_id)
-        if plan is None or plan.project_id != proj.id:
-            raise ValueError(f"edit plan not found: {plan_id}")
-        if plan.source_revision != proj.video_url:
-            raise ValueError("edit plan is stale for current source")
-        selection = await db.get(SelectionArtifact, plan.selection_id)
-        if selection is None or selection.project_id != proj.id:
-            raise ValueError("edit plan selection is unavailable")
-        use_plan_range = _get_backend_settings().adaptive_edit_planning
-        if use_plan_range:
-            resolution = LocalRangeResolution.model_validate(plan.range_json)
-            start_ts = resolution.edit_core.start_ts
-            end_ts = resolution.edit_core.end_ts
-            video_gen_provider = plan.provider
-        else:
-            fixed_duration = min(3.0, proj.duration)
-            start_ts = max(
-                0.0,
-                min(selection.frame_ts - fixed_duration / 2, proj.duration - fixed_duration),
-            )
-            end_ts = start_ts + fixed_duration
-            video_gen_provider = args.get("video_gen_provider") or "auto"
-        bbox = selection.bbox_json
-        prompt = plan.raw_prompt
-        reference_frame_ts = selection.frame_ts
-    else:
-        start_ts = float(args["start_ts"])
-        end_ts = float(args["end_ts"])
-        bbox = args["bbox"]
-        prompt = args["prompt"]
-        reference_frame_ts = float(args.get("reference_frame_ts", start_ts))
-        video_gen_provider = args.get("video_gen_provider") or "auto"
-
-    length = end_ts - start_ts
-    if length < MIN_SEG_LEN or length > MAX_SEG_LEN:
-        raise ValueError(
-            f"segment length must be {MIN_SEG_LEN:g}-{MAX_SEG_LEN:g}s "
-            f"(got {length:.2f}s)"
+    request_fields = {
+        key: value
+        for key, value in args.items()
+        if key
+        in {
+            "project_id",
+            "user_prompt",
+            "target_clip_id",
+            "plan_id",
+            "start_ts",
+            "end_ts",
+            "bbox",
+            "prompt",
+            "reference_frame_ts",
+            "video_gen_provider",
+        }
+    }
+    request_fields["user_prompt"] = str(args.get("user_prompt") or args.get("prompt") or "video edit")
+    if not request_fields.get("plan_id") and "start_ts" in request_fields:
+        request_fields.setdefault("reference_frame_ts", request_fields["start_ts"])
+    try:
+        response = await generate(
+            GenerateRequest.model_validate(request_fields),
+            SessionModel(id=session_id),
+            db,
+            runner,
         )
-    if end_ts > proj.duration + 1e-3:
-        raise ValueError("end_ts past project duration")
-    generation_length = (
-        resolution.generation_context.duration
-        if use_plan_range and resolution is not None
-        else length
-    )
-    if generation_length > MAX_SEG_LEN:
-        raise ValueError(
-            "generation context must be at most "
-            f"{MAX_SEG_LEN:g}s (got {generation_length:.2f}s)"
-        )
-    if video_gen_provider and video_gen_provider != "auto":
-        from app.ai.services.provider_capabilities import validate_provider_duration
-
-        provider_error = validate_provider_duration(
-            video_gen_provider,
-            generation_length,
-        )
-        if provider_error:
-            raise ValueError(provider_error)
-    if bbox.get("x", 0) + bbox.get("w", 0) > 1.0001 or bbox.get("y", 0) + bbox.get("h", 0) > 1.0001:
-        raise ValueError("bbox extends outside the frame")
-
-    job = Job(
-        project_id=proj.id,
-        kind="generate",
-        status="pending",
-        start_ts=start_ts,
-        end_ts=end_ts,
-        bbox_json=bbox,
-        prompt=prompt,
-        reference_frame_ts=reference_frame_ts,
-        payload={
-            "video_gen_provider": video_gen_provider or "auto",
-            "user_prompt": str(args.get("user_prompt") or prompt),
-            "plan_id": plan.id if plan else None,
-            "planned_context": plan.range_json if plan else None,
-            "planned_intent": plan.intent_json if plan else None,
-            "adaptive_context_enabled": use_plan_range,
-        },
-    )
-    db.add(job)
-    await db.commit()
-    await db.refresh(job)
-
-    if runner is not None:
-        runner.submit(job.id, lambda: generate_worker.run(job.id))
+    except HTTPException as exc:
+        detail = exc.detail
+        if isinstance(detail, dict):
+            detail = detail.get("message") or json.dumps(detail)
+        raise ValueError(str(detail)) from exc
 
     return {
-        "job_id": job.id,
+        "job_id": response.job_id,
         "status": "pending",
-        "message": f"Generation job created for segment {start_ts:.1f}s–{end_ts:.1f}s",
+        "message": "Generation job created from the planned edit window",
     }
 
 

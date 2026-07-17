@@ -570,6 +570,7 @@ async def test_tool_generate_edit_segment_too_short(client: AsyncClient, db_sess
             },
             db_session,
             SESSION_ID,
+            runner=app.state.runner,
         )
 
 
@@ -591,6 +592,7 @@ async def test_tool_generate_edit_segment_too_long(client: AsyncClient, db_sessi
             },
             db_session,
             SESSION_ID,
+            runner=app.state.runner,
         )
 
 
@@ -609,6 +611,7 @@ async def test_tool_generate_edit_invalid_project(db_session):
             },
             db_session,
             SESSION_ID,
+            runner=app.state.runner,
         )
 
 

@@ -7,6 +7,7 @@ from app.schemas.common import BBox
 
 class GenerateRequest(BaseModel):
     project_id: str
+    user_prompt: str | None = Field(default=None, min_length=1, max_length=2000)
     target_clip_id: str | None = None
     plan_id: str | None = None
     start_ts: float | None = Field(default=None, ge=0.0)

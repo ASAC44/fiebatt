@@ -1150,6 +1150,7 @@ async def _agent_stream(
     max_turns = 10
     turn = 0
     generation_started = False
+    active_plan_id: str | None = None
 
     while turn < max_turns:
         turn += 1
@@ -1220,6 +1221,11 @@ async def _agent_stream(
             tool_call_id = tc.id
             tool_name = tc.function.name
             tool_args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+            if tool_name in {"create_edit_plan", "generate_edit"}:
+                # Editor context and this turn's plan are authoritative. A model
+                # can otherwise reuse a plan_id from chat history and render the
+                # previous request with the new user's attribution.
+                tool_args["project_id"] = body.project_id
             if tool_name == "create_edit_plan":
                 selection_id = await _resolve_plan_selection_id(body)
                 if selection_id:
@@ -1229,6 +1235,8 @@ async def _agent_stream(
                 else:
                     tool_args.pop("selection_id", None)
             if tool_name == "generate_edit":
+                if active_plan_id:
+                    tool_args["plan_id"] = active_plan_id
                 # Keep attribution separate from the model-authored generation
                 # prompt. The worker emits both for the before/refined card.
                 tool_args["user_prompt"] = body.message
@@ -1301,6 +1309,9 @@ async def _agent_stream(
                     # the provider's entire render window. The browser owns
                     # job polling from the suggestion event above.
                     generation_started = True
+
+                if tool_name == "create_edit_plan" and "plan_id" in result:
+                    active_plan_id = str(result["plan_id"])
 
                 if tool_name in ("get_job_status", "wait_for_job"):
                     job_status = result.get("status")

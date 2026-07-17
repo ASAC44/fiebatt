@@ -15,6 +15,7 @@ from app.api.routes import generate as generate_route  # noqa: E402
 from app.models.project import Project  # noqa: E402
 from app.models.selection import SelectionArtifact  # noqa: E402
 from app.schemas.edit_plan import EditCore, GenerationContext, LocalRangeResolution  # noqa: E402
+from app.services.agent_tools import execute_tool  # noqa: E402
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -122,6 +123,49 @@ async def test_create_and_get_non_generating_plan(client, owned_selection):
 
 
 @pytest.mark.asyncio
+async def test_timeline_snapshot_can_be_saved(client, owned_selection):
+    project_id, _ = owned_selection
+    response = await client.put(
+        f"/api/timeline/{project_id}",
+        headers={"X-Session-Id": "plan-owner"},
+        json={
+            "clips": [
+                {
+                    "id": "source-clip",
+                    "kind": "source",
+                    "url": "/media/source.mp4",
+                    "source_start": 0.0,
+                    "source_end": 30.0,
+                    "media_duration": 30.0,
+                    "volume": 1.0,
+                    "project_id": project_id,
+                    "source_asset_id": "source-asset",
+                }
+            ],
+            "sources": [
+                {
+                    "id": "source-asset",
+                    "kind": "source",
+                    "url": "/media/source.mp4",
+                    "duration": 30.0,
+                    "fps": 30.0,
+                    "project_id": project_id,
+                    "label": "source",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    saved = await client.get(
+        f"/api/timeline/{project_id}",
+        headers={"X-Session-Id": "plan-owner"},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["edl"]["clips"][0]["id"] == "source-clip"
+
+
+@pytest.mark.asyncio
 async def test_state_change_plan_covers_current_occurrence(client, owned_selection):
     project_id, selection_id = owned_selection
     response = await client.post(
@@ -215,6 +259,26 @@ async def test_long_local_edit_is_split_into_provider_sized_chunks(
     )
 
     assert generated.status_code == 200, generated.text
+    assert len(runner.submissions) == 1
+    factory = runner.submissions[0][1]
+    closure_values = [cell.cell_contents for cell in factory.__closure__ or ()]
+    assert generate_route.local_chunk_job.run in closure_values
+
+    runner.submissions.clear()
+    async with AsyncSessionLocal() as db:
+        via_agent = await execute_tool(
+            "generate_edit",
+            {
+                "project_id": project_id,
+                "plan_id": body["plan_id"],
+                "user_prompt": "make this ball pink",
+            },
+            db,
+            "plan-owner",
+            runner=runner,
+        )
+
+    assert via_agent["status"] == "pending"
     assert len(runner.submissions) == 1
     factory = runner.submissions[0][1]
     closure_values = [cell.cell_contents for cell in factory.__closure__ or ()]

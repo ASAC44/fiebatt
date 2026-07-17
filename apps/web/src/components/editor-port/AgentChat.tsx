@@ -8,6 +8,7 @@ import {
   MessageContent,
 } from "@/components/ui/message";
 import { useAgentStream } from "@/hooks/useAgentStream";
+import { accept } from "@/lib/api";
 import { useEDL, totalDuration } from "@/stores/edl";
 import {
   useAgent,
@@ -37,6 +38,8 @@ export function AgentChat({ projectId }: AgentChatProps) {
   } = useAgentStream(projectId);
   const { state: edlState } = useEDL();
   const { dispatch: agentDispatch } = useAgent();
+  const [applyingVariant, setApplyingVariant] = useState<string | null>(null);
+  const [appliedVariant, setAppliedVariant] = useState<string | null>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const lastMessage = messages[messages.length - 1];
   const lastAgentText = lastMessage?.type === "agent" ? lastMessage.text : "";
@@ -77,23 +80,32 @@ export function AgentChat({ projectId }: AgentChatProps) {
     [agentDispatch],
   );
 
-  // Variant card "apply" — user picked a specific finished variant. Ask
-  // the agent to call accept_variant with that index so the generated
-  // clip lands on the timeline. Studio listens for the completion event
-  // (fiebatt:timeline-refresh) and re-hydrates the EDL from the server.
+  // Applying a finished render is a deterministic editor action. Calling
+  // the API directly avoids a second model turn guessing whether it should
+  // invoke accept_variant. Studio consumes the returned authoritative EDL.
   const handleApplyVariant = useCallback(
-    (jobId: string, variantIndex: number) => {
-      if (!projectId) return;
-      void sendMessage({
-        projectId,
-        message: `Accept variant ${variantIndex} for job ${jobId} and apply it to the timeline. After the tool succeeds, confirm it's applied in one sentence.`,
-        playheadTs: edlState.playhead,
-        duration: totalDuration(edlState.clips),
-        bbox: edlState.bbox ?? null,
-        selectionId: edlState.mask?.selectionId ?? null,
-      });
+    async (jobId: string, variantIndex: number) => {
+      if (!projectId || applyingVariant) return;
+      const key = `${jobId}:${variantIndex}`;
+      setApplyingVariant(key);
+      try {
+        const accepted = await accept(jobId, variantIndex);
+        window.dispatchEvent(
+          new CustomEvent("fiebatt:timeline-refresh", {
+            detail: { tool: "accept_variant", timeline: accepted.timeline },
+          }),
+        );
+        setAppliedVariant(key);
+      } catch (error) {
+        agentDispatch({
+          type: "add_error",
+          message: error instanceof Error ? error.message : "Could not apply this edit.",
+        });
+      } finally {
+        setApplyingVariant(null);
+      }
     },
-    [projectId, sendMessage, edlState.playhead, edlState.clips, edlState.bbox, edlState.mask?.selectionId],
+    [projectId, applyingVariant, agentDispatch],
   );
 
   return (
@@ -255,6 +267,10 @@ export function AgentChat({ projectId }: AgentChatProps) {
           background: rgba(126, 231, 135, 0.15);
           border-color: rgba(126, 231, 135, 0.35);
         }
+        .suggestion-card__btn:disabled {
+          cursor: default;
+          opacity: 0.6;
+        }
         .suggestion-card__resolved {
           font-family: var(--f-mono);
           font-size: 9px;
@@ -406,6 +422,8 @@ export function AgentChat({ projectId }: AgentChatProps) {
               message={msg}
               onDismissSuggestion={handleDismissSuggestion}
               onApplyVariant={handleApplyVariant}
+              applyingVariant={applyingVariant}
+              appliedVariant={appliedVariant}
             />
           ))}
         </div>
@@ -429,10 +447,14 @@ function MessageRenderer({
   message,
   onDismissSuggestion,
   onApplyVariant,
+  applyingVariant,
+  appliedVariant,
 }: {
   message: AgentMessage;
   onDismissSuggestion: (ts: number) => void;
-  onApplyVariant: (jobId: string, variantIndex: number) => void;
+  onApplyVariant: (jobId: string, variantIndex: number) => void | Promise<void>;
+  applyingVariant: string | null;
+  appliedVariant: string | null;
 }) {
   switch (message.type) {
     case "user":
@@ -481,6 +503,8 @@ function MessageRenderer({
             jobId={message.jobId}
             variants={message.variants}
             onApply={onApplyVariant}
+            applyingVariant={applyingVariant}
+            appliedVariant={appliedVariant}
           />
         </div>
       );
@@ -597,10 +621,14 @@ function VariantPreviewCard({
   jobId,
   variants,
   onApply,
+  applyingVariant,
+  appliedVariant,
 }: {
   jobId: string;
   variants: VariantPreview[];
-  onApply: (jobId: string, variantIndex: number) => void;
+  onApply: (jobId: string, variantIndex: number) => void | Promise<void>;
+  applyingVariant: string | null;
+  appliedVariant: string | null;
 }) {
   console.log(
     `[VariantPreviewCard] render job=${jobId} variants=${variants?.length ?? 0}`,
@@ -612,41 +640,47 @@ function VariantPreviewCard({
         {variants.length} variant{variants.length !== 1 ? "s" : ""} ready
       </span>
       <div className="variant-preview__grid">
-        {variants.map((v) => (
-          <div key={v.id}>
-            <div className="variant-preview__thumb">
-              {v.url ? (
-                <video
-                  src={v.url}
-                  muted
-                  loop
-                  playsInline
-                  onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.pause();
-                    e.currentTarget.currentTime = 0;
-                  }}
-                />
-              ) : (
-                <span className="variant-preview__placeholder">loading...</span>
+        {variants.map((v) => {
+          const key = `${jobId}:${v.index}`;
+          const isApplying = applyingVariant === key;
+          const isApplied = appliedVariant === key;
+          return (
+            <div key={v.id}>
+              <div className="variant-preview__thumb">
+                {v.url ? (
+                  <video
+                    src={v.url}
+                    muted
+                    loop
+                    playsInline
+                    onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.pause();
+                      e.currentTarget.currentTime = 0;
+                    }}
+                  />
+                ) : (
+                  <span className="variant-preview__placeholder">loading...</span>
+                )}
+              </div>
+              {v.description && (
+                <p className="variant-preview__desc">{v.description}</p>
+              )}
+              {v.url && (
+                <button
+                  type="button"
+                  className="suggestion-card__btn suggestion-card__btn--accept"
+                  style={{ marginTop: 4, width: "100%" }}
+                  onClick={() => void onApply(jobId, v.index)}
+                  disabled={applyingVariant !== null || isApplied}
+                  title="apply this variant to the timeline"
+                >
+                  {isApplying ? "applying…" : isApplied ? "applied" : "apply"}
+                </button>
               )}
             </div>
-            {v.description && (
-              <p className="variant-preview__desc">{v.description}</p>
-            )}
-            {v.url && (
-              <button
-                type="button"
-                className="suggestion-card__btn suggestion-card__btn--accept"
-                style={{ marginTop: 4, width: "100%" }}
-                onClick={() => onApply(jobId, v.index)}
-                title="apply this variant to the timeline"
-              >
-                apply
-              </button>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

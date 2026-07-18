@@ -8,8 +8,8 @@ import { PreviewControls } from "./PreviewControls";
 /**
  * Preview monitor. Single <video> element; swaps src + seeks whenever the
  * playhead crosses a clip boundary. Transport controls below. The stage
- * letterboxes the video within a 16:9 frame so the aspect feels stable
- * across clip swaps.
+ * letterboxes the video inside the available space while preserving the
+ * source aspect ratio (including portrait video).
  *
  * Flicker suppression: A <canvas> sits on top of the video and captures
  * the last decoded frame before each src swap. The canvas stays visible
@@ -379,6 +379,8 @@ export function Preview() {
 
       <PreviewControls
         duration={total}
+        videoWidth={videoSize.width}
+        videoHeight={videoSize.height}
         segments={timelineSpans(state.clips).map(({ clip, start, end }) => ({
           start_ts: start,
           end_ts: end,

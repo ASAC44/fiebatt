@@ -6,9 +6,13 @@ import { VideoScrubber } from "./VideoScrubber";
 
 export function PreviewControls({
   duration,
+  videoWidth,
+  videoHeight,
   segments,
 }: {
   duration: number;
+  videoWidth: number;
+  videoHeight: number;
   segments: Array<{
     start_ts: number;
     end_ts: number;
@@ -37,7 +41,7 @@ export function PreviewControls({
         <Transport />
 
         <div className="justify-self-end rounded border border-[var(--edge)] px-2 py-0.5 text-[10px] tracking-[0.2em] text-[var(--ink-fade)]">
-          16 : 9
+          {formatAspectRatio(videoWidth, videoHeight)}
         </div>
       </div>
     </div>
@@ -99,4 +103,13 @@ function fmt(t: number) {
   const s = Math.floor(t % 60);
   const f = Math.floor((t % 1) * 100);
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}:${String(f).padStart(2, "0")}`;
+}
+
+function formatAspectRatio(width: number, height: number) {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return "—";
+  }
+  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+  const divisor = gcd(Math.round(width), Math.round(height));
+  return `${Math.round(width) / divisor} : ${Math.round(height) / divisor}`;
 }

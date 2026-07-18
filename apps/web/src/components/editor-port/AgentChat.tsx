@@ -354,7 +354,8 @@ export function AgentChat({ projectId }: AgentChatProps) {
         .variant-preview__thumb video {
           width: 100%;
           height: 100%;
-          object-fit: cover;
+          object-fit: contain;
+          background: #000;
         }
         .variant-preview__placeholder {
           font-size: 13px;

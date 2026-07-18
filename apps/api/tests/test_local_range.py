@@ -14,6 +14,7 @@ from app.services.local_range import (
     project_target_through_parent,
     temporal_tracking_bbox,
     tracked_span,
+    tracked_span_evidence,
 )
 
 
@@ -51,6 +52,33 @@ def test_tracked_span_bridges_brief_loss_but_not_real_disappearance():
 
     assert tracked_span(brief_loss, timestamps, 2) == (0.0, 7.0)
     assert tracked_span(disappearance, timestamps, 2) == (0.0, 2.0)
+
+
+def test_tracking_boundaries_separate_uncertainty_from_confirmed_absence():
+    timestamps = [float(index) for index in range(8)]
+    uncertain = [
+        {
+            "frame_index": index,
+            "state": "tracked" if index == 3 else "uncertain",
+        }
+        for index in range(8)
+    ]
+    absent = [
+        {
+            "frame_index": index,
+            "state": "tracked" if 1 <= index <= 3 else "lost",
+        }
+        for index in range(8)
+    ]
+
+    uncertain_evidence = tracked_span_evidence(uncertain, timestamps, 3)
+    absent_evidence = tracked_span_evidence(absent, timestamps, 3)
+
+    assert uncertain_evidence.left_boundary == "uncertain"
+    assert uncertain_evidence.right_boundary == "uncertain"
+    assert absent_evidence.left_boundary == "uncertain"
+    assert absent_evidence.right_boundary == "confirmed_absent"
+    assert absent_evidence.end == pytest.approx(3.0)
 
 
 def test_precise_target_moves_with_broader_parent_without_growing():
@@ -372,6 +400,65 @@ async def test_thin_persistent_target_expands_to_full_local_presence(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_uncertain_persistent_tracking_expands_to_shot_boundaries(tmp_path):
+    clear_local_range_cache()
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"unused")
+    project = SimpleNamespace(video_path=str(source), video_url="", duration=12.0)
+    selection = SimpleNamespace(
+        id="selection-uncertain",
+        source_revision="revision-uncertain",
+        frame_ts=6.0,
+        bbox_json={"x": 0.2, "y": 0.1, "w": 0.3, "h": 0.7},
+        mask_url=None,
+    )
+    intent = EditIntent(
+        raw_prompt="make this coat green",
+        change_type="appearance",
+        duration_policy="continuous_occurrence",
+    )
+
+    async def fake_extract(_source, timestamp, output):
+        if timestamp < 2.0:
+            level = 10
+        elif timestamp < 10.0:
+            level = 120
+        else:
+            level = 240
+        cv2.imwrite(str(output), np.full((36, 64, 3), level, dtype=np.uint8))
+        return output
+
+    async def uncertain_tracker(paths, **kwargs):
+        seed_index = kwargs["seed_frame_index"]
+        return TrackResult(
+            tracker="test",
+            frames=[
+                {
+                    "frame_index": index,
+                    "state": "tracked" if index == seed_index else "uncertain",
+                    "confidence": 1.0 if index == seed_index else 0.4,
+                }
+                for index in range(len(paths))
+            ],
+            processed_start_index=0,
+            processed_end_index=len(paths) - 1,
+        )
+
+    result = await resolve_local_range(
+        project,
+        selection,
+        intent,
+        extract_frame=fake_extract,
+        track_frames=uncertain_tracker,
+    )
+
+    assert result.analysis_start == pytest.approx(0.0)
+    assert result.analysis_end == pytest.approx(12.0)
+    assert result.occurrence_start == pytest.approx(2.0)
+    assert result.occurrence_end == pytest.approx(10.0)
+
+
+@pytest.mark.asyncio
 async def test_state_change_fails_closed_when_tracking_is_unavailable(tmp_path):
     clear_local_range_cache()
     source = tmp_path / "source.mp4"
@@ -458,4 +545,53 @@ async def test_state_change_rejects_occurrences_over_thirty_seconds(tmp_path):
             intent,
             extract_frame=fake_extract,
             track_frames=fake_track,
+        )
+
+
+@pytest.mark.asyncio
+async def test_uncertain_state_change_stops_at_thirty_second_budget(tmp_path):
+    clear_local_range_cache()
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"unused")
+    project = SimpleNamespace(video_path=str(source), video_url="", duration=100.0)
+    selection = SimpleNamespace(
+        id="selection-long-uncertain",
+        source_revision="revision-long-uncertain",
+        frame_ts=50.0,
+        bbox_json={"x": 0.2, "y": 0.1, "w": 0.3, "h": 0.7},
+        mask_url=None,
+    )
+    intent = EditIntent(
+        raw_prompt="make this ball pink",
+        change_type="appearance",
+        duration_policy="continuous_occurrence",
+    )
+
+    async def fake_extract(_source, _timestamp, output):
+        cv2.imwrite(str(output), np.full((36, 64, 3), 80, dtype=np.uint8))
+        return output
+
+    async def uncertain_tracker(paths, **kwargs):
+        seed_index = kwargs["seed_frame_index"]
+        return TrackResult(
+            tracker="test",
+            frames=[
+                {
+                    "frame_index": index,
+                    "state": "tracked" if index == seed_index else "uncertain",
+                    "confidence": 1.0 if index == seed_index else 0.4,
+                }
+                for index in range(len(paths))
+            ],
+            processed_start_index=0,
+            processed_end_index=len(paths) - 1,
+        )
+
+    with pytest.raises(ValueError, match="more than 30 seconds"):
+        await resolve_local_range(
+            project,
+            selection,
+            intent,
+            extract_frame=fake_extract,
+            track_frames=uncertain_tracker,
         )

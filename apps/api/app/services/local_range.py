@@ -4,8 +4,9 @@ import hashlib
 import json
 import math
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Literal
 
 import cv2
 import numpy as np
@@ -43,6 +44,17 @@ class EditWindowLimitError(ValueError):
         super().__init__(
             f"this edit covers more than {limit:g} seconds; choose a shorter range"
         )
+
+
+TrackingBoundary = Literal["visible", "confirmed_absent", "uncertain"]
+
+
+@dataclass(frozen=True, slots=True)
+class TrackedSpanEvidence:
+    start: float | None
+    end: float | None
+    left_boundary: TrackingBoundary
+    right_boundary: TrackingBoundary
 
 
 def _continuous_change(intent: EditIntent) -> bool:
@@ -187,41 +199,53 @@ def detect_shot_span(
     return timestamps[prior], timestamps[following]
 
 
+def tracked_span_evidence(
+    frames: list[dict], timestamps: list[float], seed_index: int
+) -> TrackedSpanEvidence:
+    states = {int(frame["frame_index"]): frame.get("state") for frame in frames}
+    if states.get(seed_index) != "tracked":
+        return TrackedSpanEvidence(None, None, "uncertain", "uncertain")
+
+    def scan(step: int) -> tuple[int, TrackingBoundary]:
+        last_tracked = seed_index
+        confident_absence = 0
+        cursor = seed_index + step
+        while 0 <= cursor < len(timestamps):
+            state = states.get(cursor)
+            if state == "tracked":
+                last_tracked = cursor
+                confident_absence = 0
+            elif state == "lost":
+                confident_absence += 1
+                if confident_absence > MAX_TRACK_GAP_FRAMES:
+                    return last_tracked, "confirmed_absent"
+            else:
+                # Occlusion, ambiguous matching, or missing tracker output is
+                # not evidence that the subject left the shot.
+                confident_absence = 0
+            cursor += step
+
+        edge = 0 if step < 0 else len(timestamps) - 1
+        boundary: TrackingBoundary = (
+            "visible" if states.get(edge) == "tracked" else "uncertain"
+        )
+        return last_tracked, boundary
+
+    left, left_boundary = scan(-1)
+    right, right_boundary = scan(1)
+    return TrackedSpanEvidence(
+        timestamps[left],
+        timestamps[right],
+        left_boundary,
+        right_boundary,
+    )
+
+
 def tracked_span(
     frames: list[dict], timestamps: list[float], seed_index: int
 ) -> tuple[float | None, float | None]:
-    states = {int(frame["frame_index"]): frame.get("state") for frame in frames}
-    if states.get(seed_index) != "tracked":
-        return None, None
-    left = seed_index
-    right = seed_index
-    cursor = seed_index - 1
-    gap = 0
-    while cursor >= 0:
-        if states.get(cursor) == "tracked":
-            left = cursor
-            gap = 0
-        elif states.get(cursor) == "lost":
-            gap += 1
-            if gap > MAX_TRACK_GAP_FRAMES:
-                break
-        else:
-            break
-        cursor -= 1
-    cursor = seed_index + 1
-    gap = 0
-    while cursor < len(timestamps):
-        if states.get(cursor) == "tracked":
-            right = cursor
-            gap = 0
-        elif states.get(cursor) == "lost":
-            gap += 1
-            if gap > MAX_TRACK_GAP_FRAMES:
-                break
-        else:
-            break
-        cursor += 1
-    return timestamps[left], timestamps[right]
+    evidence = tracked_span_evidence(frames, timestamps, seed_index)
+    return evidence.start, evidence.end
 
 
 def temporal_tracking_bbox(bbox: dict[str, float]) -> dict[str, float]:
@@ -341,6 +365,11 @@ async def resolve_local_range(
     observed_track_end: float | None = None
     observed_shot_start = start
     observed_shot_end = end
+    confirmed_track_start: float | None = None
+    confirmed_track_end: float | None = None
+    final_left_boundary: TrackingBoundary = "uncertain"
+    final_right_boundary: TrackingBoundary = "uncertain"
+    tracking_reached_budget = False
     observed_frames: dict[float, dict] = {}
     with tempfile.TemporaryDirectory(prefix="fiebatt-local-range-") as temp_dir:
         iteration = 0
@@ -408,9 +437,13 @@ async def resolve_local_range(
                         f"({type(exc).__name__})"
                     ),
                 )
-            track_start, track_end = tracked_span(
+            span_evidence = tracked_span_evidence(
                 track.frames, timestamps, seed_index
             )
+            track_start = span_evidence.start
+            track_end = span_evidence.end
+            final_left_boundary = span_evidence.left_boundary
+            final_right_boundary = span_evidence.right_boundary
             tolerance = 1.1 / analysis_fps
             first_ts = timestamps[0]
             last_ts = timestamps[-1]
@@ -433,6 +466,10 @@ async def resolve_local_range(
             ):
                 track_end = bounded_end
                 shot_end = bounded_end
+            if final_left_boundary == "confirmed_absent" and track_start is not None:
+                confirmed_track_start = track_start
+            if final_right_boundary == "confirmed_absent" and track_end is not None:
+                confirmed_track_end = track_end
             if track_start is not None:
                 observed_track_start = (
                     track_start
@@ -469,13 +506,13 @@ async def resolve_local_range(
             expand_left = (
                 start > source_start + 1e-3
                 and track_start is not None
-                and abs(track_start - first_ts) <= tolerance
+                and final_left_boundary != "confirmed_absent"
                 and abs(shot_start - first_ts) <= tolerance
             )
             expand_right = (
                 end < bounded_end - 1e-3
                 and track_end is not None
-                and abs(track_end - last_ts) <= tolerance
+                and final_right_boundary != "confirmed_absent"
                 and abs(shot_end - last_ts) <= tolerance
             )
             if not expand_left and not expand_right:
@@ -487,6 +524,7 @@ async def resolve_local_range(
             )
             if span >= max_window - 1e-3:
                 if expand_left and expand_right:
+                    tracking_reached_budget = True
                     break
                 if expand_right:
                     shift = min(span, selection.frame_ts - start)
@@ -505,11 +543,30 @@ async def resolve_local_range(
                 )
                 next_end = min(bounded_end, end + per_side) if expand_right else end
             if abs(next_start - start) < 1e-6 and abs(next_end - end) < 1e-6:
+                tracking_reached_budget = expand_left or expand_right
                 break
             start, end = next_start, next_end
             iteration += 1
 
     assert track is not None
+    # Confirmed disappearance wins. Ambiguous tracking does not: persistent
+    # edits continue to the surrounding shot boundary instead of silently
+    # cutting early because a CPU tracker lost confidence.
+    resolved_track_start = (
+        confirmed_track_start
+        if confirmed_track_start is not None
+        else observed_track_start
+    )
+    resolved_track_end = (
+        confirmed_track_end
+        if confirmed_track_end is not None
+        else observed_track_end
+    )
+    if confirmed_track_start is None and final_left_boundary == "uncertain":
+        resolved_track_start = observed_shot_start
+    if confirmed_track_end is None and final_right_boundary == "uncertain":
+        resolved_track_end = observed_shot_end
+
     resolution = resolve_window_from_evidence(
         intent=intent,
         seed_ts=selection.frame_ts,
@@ -518,11 +575,11 @@ async def resolve_local_range(
         analysis_end=end,
         shot_start=observed_shot_start,
         shot_end=observed_shot_end,
-        tracked_start=observed_track_start,
-        tracked_end=observed_track_end,
+        tracked_start=resolved_track_start,
+        tracked_end=resolved_track_end,
         frames_inspected=total_frames_inspected,
         explicit_core=explicit_core,
-        tracking_reached_budget=False,
+        tracking_reached_budget=tracking_reached_budget,
         source_start=source_start,
         source_end=bounded_end,
     )

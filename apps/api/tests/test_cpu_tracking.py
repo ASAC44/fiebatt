@@ -7,11 +7,18 @@ import pytest
 from app.services.cpu_tracking import track_frames
 
 
-def _moving_target_frames(tmp_path, *, count: int = 11, visible_until: int = 10):
+def _moving_target_frames(
+    tmp_path,
+    *,
+    count: int = 11,
+    visible_until: int = 10,
+    hidden: set[int] | None = None,
+):
+    hidden = hidden or set()
     paths = []
     for index in range(count):
         frame = np.full((120, 200, 3), 28, dtype=np.uint8)
-        if index <= visible_until:
+        if index <= visible_until and index not in hidden:
             left = 40 + index * 5
             target = np.zeros((36, 36, 3), dtype=np.uint8)
             target[::2, ::2] = (40, 220, 240)
@@ -33,8 +40,23 @@ async def test_cpu_tracker_follows_target_in_both_directions(tmp_path):
     )
 
     states = {frame["frame_index"]: frame["state"] for frame in result.frames}
-    assert result.tracker == "opencv_mil"
+    assert result.tracker == "opencv_optical_flow_reid"
     assert all(states[index] == "tracked" for index in range(11))
+
+
+@pytest.mark.asyncio
+async def test_cpu_tracker_reidentifies_after_temporary_occlusion(tmp_path):
+    paths = _moving_target_frames(tmp_path, hidden={6, 7})
+    result = await track_frames(
+        paths,
+        seed_frame_index=5,
+        bbox={"x": 65 / 200, "y": 42 / 120, "w": 36 / 200, "h": 36 / 120},
+    )
+
+    states = {frame["frame_index"]: frame["state"] for frame in result.frames}
+    assert states[6] in {"lost", "uncertain"}
+    assert states[7] in {"lost", "uncertain"}
+    assert all(states[index] == "tracked" for index in range(8, 11))
 
 
 @pytest.mark.asyncio
@@ -48,4 +70,4 @@ async def test_cpu_tracker_stops_when_target_disappears(tmp_path):
 
     states = {frame["frame_index"]: frame["state"] for frame in result.frames}
     assert states[7] == "tracked"
-    assert any(state == "lost" for index, state in states.items() if index >= 8)
+    assert all(states[index] == "lost" for index in range(8, 11))

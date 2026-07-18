@@ -66,3 +66,49 @@ def test_trajectory_change_covers_the_current_occurrence():
     assert result.intent.duration_policy == "trajectory_continuation"
     assert result.intent.temporal_behavior == "future_changing_motion"
     assert result.estimate.analysis_mode == "complete_local_occurrence"
+
+
+def test_created_event_defaults_to_bounded_local_window():
+    result = plan_prompt_intent("open this window and make a balloon come out")
+
+    assert result.intent.scope == "local"
+    assert result.intent.duration_policy == "bounded_action"
+    assert result.intent.temporal_behavior == "temporary"
+    assert result.intent.requires_recovery_motion is True
+    assert result.intent.estimated_action_seconds == 4.0
+    assert result.estimate.analysis_mode == "lazy_local"
+
+
+def test_created_event_repairs_overbroad_structured_intent():
+    intent = EditIntent(
+        raw_prompt="open this window and make a balloon come out",
+        scope="local",
+        change_type="motion",
+        duration_policy="trajectory_continuation",
+        temporal_behavior="future_changing_motion",
+        estimated_action_seconds=4.0,
+    )
+
+    result = plan_prompt_intent(intent.raw_prompt, structured_intent=intent)
+
+    assert result.intent.duration_policy == "bounded_action"
+    assert result.intent.temporal_behavior == "temporary"
+    assert result.intent.requires_recovery_motion is True
+    assert result.reason == "bounded created-event safety fallback"
+
+
+def test_explicit_created_event_continuation_stays_continuous():
+    intent = EditIntent(
+        raw_prompt="make a balloon come out and keep flying",
+        scope="local",
+        change_type="motion",
+        duration_policy="trajectory_continuation",
+        temporal_behavior="future_changing_motion",
+        estimated_action_seconds=5.0,
+    )
+
+    result = plan_prompt_intent(intent.raw_prompt, structured_intent=intent)
+
+    assert result.intent is intent
+    assert result.intent.duration_policy == "trajectory_continuation"
+    assert result.intent.temporal_behavior == "future_changing_motion"

@@ -56,6 +56,13 @@ RULES
   state. Use temporal_behavior "temporary" and duration_policy "bounded_action".
   Estimate enough time for preparation, action, landing/recovery, and a smooth
   return to source motion.
+- A created or revealed event such as "make a balloon come out of this window"
+  is normally a bounded local story beat, not permission to regenerate the full
+  shot. Unless the user says the result must remain or continue, use
+  temporal_behavior "temporary" and duration_policy "bounded_action". Include
+  enough preparation, emergence, completion, and recovery to rejoin the locked
+  source handles naturally. If the user explicitly says the new state or object
+  must remain, use the appropriate continuing policy instead.
 - Motion such as run, walk, fly, drive, leave, approach, follow, or chase changes
   the subject's later position or trajectory. Use temporal_behavior
   "future_changing_motion" and duration_policy "trajectory_continuation". Continue

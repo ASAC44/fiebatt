@@ -26,6 +26,19 @@ _TRAJECTORY_RE = re.compile(
     r"(s|ed|ing)?\b",
     re.IGNORECASE,
 )
+_CREATED_EVENT_RE = re.compile(
+    r"\b(appear|appears|appeared|appearing|emerge|emerges|emerged|emerging|"
+    r"come out|comes out|coming out|came out|pop out|pops out|popping out|"
+    r"reveal|reveals|revealed|revealing|release|releases|released|releasing|"
+    r"spawn|spawns|spawned|spawning|materialize|materializes|materialized|"
+    r"materializing)\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_CONTINUATION_RE = re.compile(
+    r"\b(keep|keeps|continue|continues|remain|remains|stay|stays|"
+    r"rest of (the )?(video|clip|shot)|from then on|throughout|forever)\b",
+    re.IGNORECASE,
+)
 _REMOVAL_RE = re.compile(r"\b(remove|erase|delete|make .+ disappear)\b", re.IGNORECASE)
 _REPLACEMENT_RE = re.compile(r"\b(replace|swap|turn .+ into)\b", re.IGNORECASE)
 _APPEARANCE_RE = re.compile(
@@ -64,6 +77,17 @@ def _change_type(prompt: str) -> ChangeType:
 
 def _motion_contract(prompt: str) -> tuple[list[str], float, bool]:
     lowered = prompt.lower()
+    if _bounded_created_event(prompt):
+        return (
+            [
+                "prepare source motion",
+                "introduce requested object",
+                "complete requested event",
+                "recover source continuity",
+            ],
+            4.0,
+            True,
+        )
     if not _MOTION_RE.search(prompt):
         return [], 2.0, False
     phases = ["prepare", "perform action"]
@@ -77,6 +101,43 @@ def _motion_contract(prompt: str) -> tuple[list[str], float, bool]:
     return phases, 3.0, recovery
 
 
+def _bounded_created_event(prompt: str) -> bool:
+    """Return whether a created/revealed effect should use a local story beat."""
+    return bool(
+        _CREATED_EVENT_RE.search(prompt)
+        and not _EXPLICIT_CONTINUATION_RE.search(prompt)
+        and not _GLOBAL_RE.search(prompt)
+        and not _PERSISTENT_RE.search(prompt)
+    )
+
+
+def _repair_created_event_intent(prompt: str, intent: EditIntent) -> EditIntent:
+    """Keep a semantic planner from turning a bounded reveal into a full shot.
+
+    The language model remains authoritative for ordinary appearance, action,
+    and trajectory requests. This only repairs the narrow unsafe case where a
+    locally created/revealed object was classified as a continuing trajectory
+    despite no request for it to remain or continue.
+    """
+    if intent.scope != "local" or not _bounded_created_event(prompt):
+        return intent
+    phases = list(intent.action_phases) or [
+        "prepare source motion",
+        "introduce requested object",
+        "complete requested event",
+        "recover source continuity",
+    ]
+    return intent.model_copy(
+        update={
+            "duration_policy": "bounded_action",
+            "temporal_behavior": "temporary",
+            "action_phases": phases,
+            "estimated_action_seconds": max(3.0, intent.estimated_action_seconds),
+            "requires_recovery_motion": True,
+        }
+    )
+
+
 def plan_prompt_intent(
     prompt: str,
     *,
@@ -87,8 +148,12 @@ def plan_prompt_intent(
 ) -> ScopeGateResult:
     """Cheap scope gate; a supplied structured interpretation is never recomputed."""
     if structured_intent is not None:
-        intent = structured_intent
-        reason = "reused structured intent"
+        intent = _repair_created_event_intent(prompt, structured_intent)
+        reason = (
+            "bounded created-event safety fallback"
+            if intent is not structured_intent
+            else "reused structured intent"
+        )
     else:
         if requested_scope is not None:
             scope = requested_scope
@@ -109,7 +174,9 @@ def plan_prompt_intent(
         change_type = _change_type(prompt)
         phases, action_seconds, recovery = _motion_contract(prompt)
         persistent = bool(_PERSISTENT_RE.search(prompt))
-        if change_type == "motion" and _TRAJECTORY_RE.search(prompt):
+        if _bounded_created_event(prompt):
+            temporal_behavior = "temporary"
+        elif change_type == "motion" and _TRAJECTORY_RE.search(prompt):
             temporal_behavior = "future_changing_motion"
         elif change_type == "motion":
             temporal_behavior = "temporary"

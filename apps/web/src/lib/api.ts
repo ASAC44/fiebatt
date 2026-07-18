@@ -197,7 +197,8 @@ export type EditPlanResp = {
   intent: {
     raw_prompt: string;
     change_type: "appearance" | "removal" | "replacement" | "motion" | "scene";
-    duration_policy: "bounded_action" | "continuous_occurrence" | "explicit_range" | "all_occurrences";
+    duration_policy: "bounded_action" | "continuous_occurrence" | "trajectory_continuation" | "explicit_range" | "all_occurrences";
+    temporal_behavior: "temporary" | "persistent_state" | "future_changing_motion";
     action_phases: string[];
     estimated_action_seconds: number;
     requires_recovery_motion: boolean;

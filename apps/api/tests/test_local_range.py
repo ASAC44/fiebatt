@@ -49,6 +49,32 @@ def test_range_uses_two_sided_handles_without_covering_whole_occurrence():
     assert result.generation_context.end_ts == pytest.approx(12.5)
 
 
+def test_trajectory_change_covers_occurrence_instead_of_old_local_position():
+    intent = EditIntent(
+        raw_prompt="make this person run",
+        change_type="motion",
+        duration_policy="trajectory_continuation",
+        temporal_behavior="future_changing_motion",
+    )
+    result = resolve_window_from_evidence(
+        intent=intent,
+        seed_ts=10.0,
+        duration=30.0,
+        analysis_start=7.0,
+        analysis_end=13.0,
+        shot_start=4.0,
+        shot_end=18.0,
+        tracked_start=5.0,
+        tracked_end=17.0,
+        frames_inspected=25,
+    )
+
+    assert result.edit_core.start_ts == pytest.approx(5.0)
+    assert result.edit_core.end_ts == pytest.approx(17.0)
+    assert result.generation_context.start_ts == pytest.approx(4.25)
+    assert result.generation_context.end_ts == pytest.approx(17.75)
+
+
 def test_range_never_crosses_active_source_clip():
     intent = EditIntent(
         raw_prompt="make this person jump",

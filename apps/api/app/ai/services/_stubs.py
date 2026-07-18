@@ -36,6 +36,7 @@ async def _gemini_interpret_edit(
             "scope": intent.scope,
             "change_type": intent.change_type,
             "duration_policy": intent.duration_policy,
+            "temporal_behavior": intent.temporal_behavior,
             "target_description": intent.target_description or region,
             "action_phases": intent.action_phases,
             "estimated_action_seconds": intent.estimated_action_seconds,

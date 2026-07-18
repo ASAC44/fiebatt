@@ -21,6 +21,11 @@ _MOTION_RE = re.compile(
     r"clap|nod|bow|fall|leap)(s|ed|ing)?\b",
     re.IGNORECASE,
 )
+_TRAJECTORY_RE = re.compile(
+    r"\b(run|walk|fly|drive|move|leave|approach|follow|chase|crawl|swim)"
+    r"(s|ed|ing)?\b",
+    re.IGNORECASE,
+)
 _REMOVAL_RE = re.compile(r"\b(remove|erase|delete|make .+ disappear)\b", re.IGNORECASE)
 _REPLACEMENT_RE = re.compile(r"\b(replace|swap|turn .+ into)\b", re.IGNORECASE)
 _APPEARANCE_RE = re.compile(
@@ -104,6 +109,12 @@ def plan_prompt_intent(
         change_type = _change_type(prompt)
         phases, action_seconds, recovery = _motion_contract(prompt)
         persistent = bool(_PERSISTENT_RE.search(prompt))
+        if change_type == "motion" and _TRAJECTORY_RE.search(prompt):
+            temporal_behavior = "future_changing_motion"
+        elif change_type == "motion":
+            temporal_behavior = "temporary"
+        else:
+            temporal_behavior = "persistent_state"
         preservation = ["preserve unedited subjects", "preserve camera and background"]
         if persistent:
             if "apply change for complete visible occurrence" not in preservation:
@@ -112,8 +123,10 @@ def plan_prompt_intent(
             duration_policy = "all_occurrences"
         elif scope == "explicit_range":
             duration_policy = "explicit_range"
-        elif change_type == "motion":
+        elif temporal_behavior == "temporary":
             duration_policy = "bounded_action"
+        elif temporal_behavior == "future_changing_motion":
+            duration_policy = "trajectory_continuation"
         else:
             # State changes should not visibly revert while the selected target
             # remains in the same continuous appearance.
@@ -125,6 +138,7 @@ def plan_prompt_intent(
             scope=scope,
             change_type=change_type,
             duration_policy=duration_policy,
+            temporal_behavior=temporal_behavior,
             action_phases=phases,
             estimated_action_seconds=action_seconds,
             requires_recovery_motion=recovery,
@@ -132,14 +146,17 @@ def plan_prompt_intent(
         )
 
     global_search = intent.scope == "all_occurrences"
-    persistent_local = intent.scope == "local" and bool(_PERSISTENT_RE.search(intent.raw_prompt))
+    continuous_local = intent.scope == "local" and intent.temporal_behavior in {
+        "persistent_state",
+        "future_changing_motion",
+    }
     if global_search:
         mode = "coarse_global_then_dense_candidates"
         tracking_seconds = None
     elif intent.scope == "selected_occurrences":
         mode = "selected_occurrences_only"
         tracking_seconds = None
-    elif persistent_local:
+    elif continuous_local:
         mode = "complete_local_occurrence"
         tracking_seconds = None
     elif intent.scope == "explicit_range":

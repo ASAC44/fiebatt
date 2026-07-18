@@ -18,6 +18,7 @@ from app.main import app  # noqa: E402
 from app.db.init import create_all  # noqa: E402
 from app.db.session import AsyncSessionLocal  # noqa: E402
 from app.models.job import Job  # noqa: E402
+from app.workers import generate_job  # noqa: E402
 from app.workers.runner import JobRunner  # noqa: E402
 
 
@@ -126,18 +127,32 @@ async def test_pending_corrective_retry_can_be_cancelled(client: AsyncClient):
             project_id=project_id,
             kind="generate",
             status="processing",
-            payload={
-                "retry_state": {
-                    "status": "waiting",
-                    "retry_at": 9999999999.0,
-                    "evidence": ["requested green was missing"],
-                }
-            },
+            payload={},
         )
         db.add(job)
         await db.commit()
         await db.refresh(job)
         job_id = job.id
+
+    permission = asyncio.create_task(
+        generate_job._await_retry_permission(
+            job_id,
+            ("requested green was missing",),
+            grace_seconds=2.0,
+            poll_seconds=0.01,
+        )
+    )
+    for _ in range(100):
+        async with AsyncSessionLocal() as db:
+            waiting_job = await db.get(Job, job_id)
+            retry_status = (waiting_job.payload or {}).get("retry_state", {}).get(
+                "status"
+            )
+            if retry_status == "waiting":
+                break
+        await asyncio.sleep(0.01)
+    else:
+        pytest.fail("worker did not expose the retry grace state")
 
     response = await client.post(
         f"/api/jobs/{job_id}/retry-decision",
@@ -147,6 +162,7 @@ async def test_pending_corrective_retry_can_be_cancelled(client: AsyncClient):
 
     assert response.status_code == 200
     assert response.json()["status"] == "cancelled"
+    assert await permission is False
     async with AsyncSessionLocal() as db:
         saved = await db.get(Job, job_id)
         assert saved.payload["retry_state"]["status"] == "cancelled"

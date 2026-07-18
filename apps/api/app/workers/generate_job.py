@@ -146,6 +146,73 @@ async def _emit_terminal(job_id: str, stage: str, msg: str, **data: Any) -> None
     await job_events.publish(job_id, event)
 
 
+async def _await_retry_permission(
+    job_id: str,
+    evidence: tuple[str, ...],
+    *,
+    grace_seconds: float = RETRY_GRACE_SECONDS,
+    poll_seconds: float = 0.5,
+) -> bool:
+    """Persist the grace window and return only when a retry may be dispatched."""
+    retry_at = time.time() + grace_seconds
+    correction = corrective_prompt(evidence)
+    retry_state = {
+        "status": "waiting",
+        "retry_at": retry_at,
+        "evidence": list(evidence),
+        "correction": correction,
+    }
+    async with AsyncSessionLocal() as db:
+        current_job = await db.get(Job, job_id)
+        if current_job is None:
+            return False
+        current_payload = dict(current_job.payload or {})
+        current_payload["retry_state"] = retry_state
+        current_job.payload = current_payload
+        await db.commit()
+    await _emit(
+        job_id,
+        "retry_pending",
+        "first pass review found a specific issue; corrective retry is waiting",
+        **retry_state,
+    )
+    while time.time() < retry_at:
+        await asyncio.sleep(poll_seconds)
+        async with AsyncSessionLocal() as db:
+            current_job = await db.get(Job, job_id)
+            if current_job is None:
+                return False
+            current_state = dict((current_job.payload or {}).get("retry_state") or {})
+        if current_state.get("status") == "cancelled":
+            await _emit(
+                job_id,
+                "retry_cancelled",
+                "corrective retry stopped; keeping the first pass",
+            )
+            return False
+        if current_state.get("status") == "retry_now":
+            break
+    async with AsyncSessionLocal() as db:
+        current_job = await db.get(Job, job_id)
+        if current_job is not None:
+            current_payload = dict(current_job.payload or {})
+            current_state = dict(current_payload.get("retry_state") or retry_state)
+            if current_state.get("status") == "cancelled":
+                return False
+            current_state["status"] = "dispatched"
+            current_state["dispatched_at"] = time.time()
+            current_payload["retry_state"] = current_state
+            current_job.payload = current_payload
+            await db.commit()
+    await _emit(
+        job_id,
+        "retry_dispatched",
+        "starting one evidence-driven corrective retry",
+        evidence=list(evidence),
+    )
+    return True
+
+
 async def _run_variant(
     job_id: str,
     variant_id: str,
@@ -1140,62 +1207,6 @@ async def run(job_id: str) -> None:
     )
     await persist_candidate_review(done[0], score, continuity_report)
 
-    async def await_retry_permission(evidence: tuple[str, ...]) -> bool:
-        retry_at = time.time() + RETRY_GRACE_SECONDS
-        correction = corrective_prompt(evidence)
-        retry_state = {
-            "status": "waiting",
-            "retry_at": retry_at,
-            "evidence": list(evidence),
-            "correction": correction,
-        }
-        async with AsyncSessionLocal() as db:
-            current_job = await db.get(Job, job_id)
-            if current_job is not None:
-                current_payload = dict(current_job.payload or {})
-                current_payload["retry_state"] = retry_state
-                current_job.payload = current_payload
-                await db.commit()
-        await _emit(
-            job_id,
-            "retry_pending",
-            "first pass review found a specific issue; corrective retry is waiting",
-            **retry_state,
-        )
-        while time.time() < retry_at:
-            await asyncio.sleep(0.5)
-            async with AsyncSessionLocal() as db:
-                current_job = await db.get(Job, job_id)
-                current_state = dict((current_job.payload or {}).get("retry_state") or {})
-            if current_state.get("status") == "cancelled":
-                await _emit(
-                    job_id,
-                    "retry_cancelled",
-                    "corrective retry stopped; keeping the first pass",
-                )
-                return False
-            if current_state.get("status") == "retry_now":
-                break
-        async with AsyncSessionLocal() as db:
-            current_job = await db.get(Job, job_id)
-            if current_job is not None:
-                current_payload = dict(current_job.payload or {})
-                current_state = dict(current_payload.get("retry_state") or retry_state)
-                if current_state.get("status") == "cancelled":
-                    return False
-                current_state["status"] = "dispatched"
-                current_state["dispatched_at"] = time.time()
-                current_payload["retry_state"] = current_state
-                current_job.payload = current_payload
-                await db.commit()
-        await _emit(
-            job_id,
-            "retry_dispatched",
-            "starting one evidence-driven corrective retry",
-            evidence=list(evidence),
-        )
-        return True
-
     quality_state = GenerationQualityAction.PASS
     quality_evidence: list[str] = []
     if generation_window.adaptive:
@@ -1213,7 +1224,7 @@ async def run(job_id: str) -> None:
             GenerationQualityAction.CORRECTIVE_RETRY,
             GenerationQualityAction.PROVIDER_FALLBACK,
         }:
-            if not await await_retry_permission(decision.evidence):
+            if not await _await_retry_permission(job_id, decision.evidence):
                 decision = final_candidate_quality(score, continuity_report)
                 break
             previous_variant = done[0]
@@ -1315,7 +1326,7 @@ async def run(job_id: str) -> None:
         )
         if needs_retry:
             retry_evidence = semantic_quality_evidence(score)
-            if not await await_retry_permission(retry_evidence):
+            if not await _await_retry_permission(job_id, retry_evidence):
                 needs_retry = False
             previous_variant = done[0]
             previous_score = score

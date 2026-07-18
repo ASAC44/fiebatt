@@ -39,6 +39,7 @@ import { ContinuityStatusBadge } from "@/features/continuity/ContinuityStatusBad
 import { useContinuityDashboard } from "@/features/continuity/useContinuityDashboard";
 import { useAgentEdlBridge } from "@/hooks/useAgentEdlBridge";
 import { EditorTopbar } from "@/components/editor-topbar";
+import { EditorGuide } from "@/components/editor-guide";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import "./studio.css";
@@ -227,6 +228,7 @@ function StudioInner({
   const [hydrateError, setHydrateError] = useState<string | null>(null);
   const [hydrateAttempt, setHydrateAttempt] = useState(0);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showGuide, setShowGuide] = useState(true);
   const [showCompare, setShowCompare] = useState(false);
   const [hydratingProject, setHydratingProject] = useState(Boolean(initialProject));
   const rootRef = useRef<HTMLDivElement>(null);
@@ -548,6 +550,7 @@ function StudioInner({
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         setShowShortcuts(false);
+        setShowGuide(false);
         return;
       }
       if (isEditableTarget(e.target)) return;
@@ -691,6 +694,7 @@ function StudioInner({
           setShowCompare(true);
         }}
         onShowShortcuts={() => setShowShortcuts(true)}
+        onShowGuide={() => setShowGuide(true)}
         onExport={handleExport}
         exporting={exporting}
         exportLabel={exportLabel}
@@ -760,6 +764,8 @@ function StudioInner({
           </div>
         </div>
       )}
+
+      {showGuide && <EditorGuide onClose={() => setShowGuide(false)} />}
 
       {showCompare && (
         <CompareOverlay onClose={() => setShowCompare(false)} />

@@ -7,6 +7,7 @@ import { ArrowLeft, Download } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { ProjectNameEditor } from "@/components/project-name-editor";
+import { EditorGuideButton } from "@/components/editor-guide";
 
 export function EditorTopbar({
   projectId,
@@ -14,6 +15,7 @@ export function EditorTopbar({
   onImport,
   onCompare,
   onShowShortcuts,
+  onShowGuide,
   onExport,
   exporting = false,
   exportLabel,
@@ -25,6 +27,7 @@ export function EditorTopbar({
   onImport?: () => void;
   onCompare?: () => void;
   onShowShortcuts?: () => void;
+  onShowGuide?: () => void;
   onExport?: () => void;
   exporting?: boolean;
   exportLabel?: string;
@@ -61,6 +64,7 @@ export function EditorTopbar({
           <Button className="h-8 shrink-0 px-2 text-xs md:px-2.5" onClick={onCompare} variant="ghost">
             Compare
           </Button>
+          {onShowGuide ? <EditorGuideButton onClick={onShowGuide} /> : null}
           <Button asChild className="hidden h-8 shrink-0 px-2 text-xs md:inline-flex md:px-2.5" variant="ghost">
             <Link href="/settings">Settings</Link>
           </Button>

@@ -537,29 +537,40 @@ function StudioInner({
 
   // keyboard shortcuts
   useEffect(() => {
+    function isEditableTarget(target: EventTarget | null): boolean {
+      return (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      );
+    }
+
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         setShowShortcuts(false);
         return;
       }
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (isEditableTarget(e.target)) return;
 
-      switch (e.key) {
-        case ' ':
+      switch (e.code) {
+        case "Space":
+          if (e.metaKey || e.ctrlKey || e.altKey) return;
           e.preventDefault();
-          dispatch({ type: 'set_playing', playing: !state.playing });
+          dispatch({ type: "set_playing", playing: !state.playing });
           break;
-        case 's':
-        case 'b':
-          if (!e.metaKey && !e.ctrlKey) {
-            dispatch({ type: 'split_at_playhead' });
-          }
+        case "KeyS":
+        case "KeyB":
+          if (e.metaKey || e.ctrlKey || e.altKey) return;
+          e.preventDefault();
+          dispatch({ type: "split_at_playhead" });
           break;
-        case 'Backspace':
-        case 'Delete':
+        case "Backspace":
+        case "Delete":
+          if (e.metaKey || e.ctrlKey || e.altKey) return;
+          e.preventDefault();
           if (state.selectedId) dispatch({ type: 'remove', id: state.selectedId });
           break;
-        case 'z':
+        case "KeyZ":
           if (e.metaKey || e.ctrlKey) {
             e.preventDefault();
             if (e.shiftKey) {
@@ -878,8 +889,8 @@ function StudioInner({
           orientation="vertical"
           cssVar="--right-w"
           rootRef={rootRef}
-          min={200}
-          max={360}
+          min={260}
+          max={520}
           anchor="left"
         />
 
@@ -970,7 +981,7 @@ function Splitter({
       const root = rootRef.current;
       if (!root) return;
       e.preventDefault();
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      e.currentTarget.setPointerCapture(e.pointerId);
 
       const cs = getComputedStyle(root);
       const startValue = parseFloat(cs.getPropertyValue(cssVar)) || 0;

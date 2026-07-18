@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { AnimatedSpan, Terminal, TypingAnimation } from "@/components/ui/terminal";
 import GradualBlur from "@/components/GradualBlur";
 import { SiteFooter } from "@/components/site-footer";
+import { TechnicalFlowDiagram } from "@/components/technical-flow-diagram";
 
 const navItems = [
   {
@@ -291,7 +292,9 @@ export default function Home() {
           <div className="mb-12 max-w-3xl">
             <p className="text-sm font-medium text-primary">Why different</p>
             <h2 className="mt-4 text-4xl font-semibold tracking-normal text-neutral-950 md:text-6xl">
-              Not another prompt-to-video wrapper.
+              <span className="whitespace-nowrap text-[clamp(1.75rem,5.4vw,3.75rem)]">
+                Not another prompt-to-video wrapper.
+              </span>
             </h2>
             <p className="mt-5 text-lg leading-8 text-neutral-700">
               fiebatt treats generation as one step inside an editable reel system,
@@ -343,9 +346,12 @@ export default function Home() {
               bind it to timeline context, plan tool calls, generate variants, then commit
               the accepted result back into the reel.
             </p>
+            <div className="overflow-hidden rounded-3xl border border-black/10 bg-white p-3 shadow-sm lg:col-span-2">
+              <TechnicalFlowDiagram />
+            </div>
             <Button asChild className="w-fit lg:col-start-2 lg:justify-self-end" variant="outline">
-              <Link href="/fiebatt-technical-flow.excalidraw">
-                Open Excalidraw
+              <Link href="/fiebatt-technical-flow.excalidraw" target="_blank" rel="noreferrer">
+                Open source in Excalidraw
               </Link>
             </Button>
           </div>

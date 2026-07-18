@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 import cv2
 import numpy as np
@@ -67,10 +68,16 @@ def select_best_seam(
     samples: list[SeamFrames],
     *,
     bbox: dict[str, float],
+    bbox_for_timestamp: Callable[[float], dict[str, float]] | None = None,
     prefer_late: bool = False,
     max_score: float = MAX_SEAM_SCORE,
 ) -> SeamChoice:
-    choice = rank_best_seam(samples, bbox=bbox, prefer_late=prefer_late)
+    choice = rank_best_seam(
+        samples,
+        bbox=bbox,
+        bbox_for_timestamp=bbox_for_timestamp,
+        prefer_late=prefer_late,
+    )
     if choice.score > max_score:
         raise ValueError(
             f"overlap failed seam validation ({choice.score:.3f} > {max_score:.3f})"
@@ -82,12 +89,24 @@ def rank_best_seam(
     samples: list[SeamFrames],
     *,
     bbox: dict[str, float],
+    bbox_for_timestamp: Callable[[float], dict[str, float]] | None = None,
     prefer_late: bool = False,
 ) -> SeamChoice:
     """Return the strongest candidate even when it is too weak to accept."""
     if not samples:
         raise ValueError("overlap has no seam samples")
-    scored = [(seam_score(sample, bbox), sample.timestamp) for sample in samples]
+    scored = [
+        (
+            seam_score(
+                sample,
+                bbox_for_timestamp(sample.timestamp)
+                if bbox_for_timestamp is not None
+                else bbox,
+            ),
+            sample.timestamp,
+        )
+        for sample in samples
+    ]
     score, timestamp = min(
         scored,
         key=lambda item: (item[0], -item[1] if prefer_late else item[1]),

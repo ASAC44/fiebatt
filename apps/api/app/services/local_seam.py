@@ -28,6 +28,7 @@ class LocalSeamSelection:
     context_start: float
     context_duration: float
     max_score: float = MAX_SEAM_SCORE
+    target_weighting: str = "selection_bbox"
 
     @property
     def passed(self) -> bool:
@@ -85,7 +86,37 @@ class LocalSeamSelection:
             "timeline_start": self.timeline_start,
             "timeline_end": self.timeline_end,
             "issues": list(self.issues),
+            "target_weighting": self.target_weighting,
         }
+
+
+def _tracked_bbox_resolver(
+    tracked_frames: list[dict],
+    *,
+    context_start: float,
+):
+    usable = [
+        frame
+        for frame in tracked_frames
+        if frame.get("state") == "tracked" and isinstance(frame.get("bbox"), dict)
+    ]
+    if not usable:
+        return None
+
+    def resolve(local_timestamp: float) -> dict[str, float]:
+        absolute_timestamp = context_start + local_timestamp
+        nearest = min(
+            usable,
+            key=lambda frame: abs(
+                float(frame.get("timestamp") or 0.0) - absolute_timestamp
+            ),
+        )
+        return {
+            key: float(nearest["bbox"].get(key, 0.0))
+            for key in ("x", "y", "w", "h")
+        }
+
+    return resolve
 
 
 def select_local_seams(
@@ -94,18 +125,37 @@ def select_local_seams(
     exit_samples: list[SeamFrames],
     bbox: dict[str, float],
     window: GenerationWindow,
+    tracked_frames: list[dict] | None = None,
 ) -> LocalSeamSelection:
+    bbox_for_timestamp = _tracked_bbox_resolver(
+        tracked_frames or [],
+        context_start=window.context_start,
+    )
     entry = (
-        rank_best_seam(entry_samples, bbox=bbox, prefer_late=True)
+        rank_best_seam(
+            entry_samples,
+            bbox=bbox,
+            bbox_for_timestamp=bbox_for_timestamp,
+            prefer_late=True,
+        )
         if entry_samples
         else None
     )
-    exit = rank_best_seam(exit_samples, bbox=bbox) if exit_samples else None
+    exit = (
+        rank_best_seam(
+            exit_samples,
+            bbox=bbox,
+            bbox_for_timestamp=bbox_for_timestamp,
+        )
+        if exit_samples
+        else None
+    )
     return LocalSeamSelection(
         entry=entry,
         exit=exit,
         context_start=window.context_start,
         context_duration=window.context_duration,
+        target_weighting=("tracked_bbox" if bbox_for_timestamp is not None else "selection_bbox"),
     )
 
 
@@ -131,6 +181,7 @@ def _match_local_context_sync(
     generated_path: Path,
     window: GenerationWindow,
     bbox: dict[str, float],
+    tracked_frames: list[dict] | None,
 ) -> LocalSeamSelection:
     source = cv2.VideoCapture(str(source_path))
     generated = cv2.VideoCapture(str(generated_path))
@@ -175,6 +226,7 @@ def _match_local_context_sync(
         exit_samples=exit_samples,
         bbox=bbox,
         window=window,
+        tracked_frames=tracked_frames,
     )
 
 
@@ -184,6 +236,7 @@ async def match_local_context(
     generated_path: Path,
     window: GenerationWindow,
     bbox: dict[str, float],
+    tracked_frames: list[dict] | None = None,
 ) -> LocalSeamSelection:
     return await asyncio.to_thread(
         _match_local_context_sync,
@@ -191,6 +244,7 @@ async def match_local_context(
         generated_path,
         window,
         bbox,
+        tracked_frames,
     )
 
 

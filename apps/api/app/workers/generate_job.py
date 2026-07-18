@@ -997,7 +997,7 @@ async def run(job_id: str) -> None:
             sampled_frames,
             generation_prompt,
             target_frames=target_frames,
-            reference_target_path=(str(crop_path) if crop_path is not None else None),
+            reference_target_path=subject_reference_effective,
         )
 
     validation_by_url: dict[str, tuple[ContinuityReport, dict | None]] = {}
@@ -1021,6 +1021,11 @@ async def run(job_id: str) -> None:
                         generated_path=generated_path,
                         window=generation_window,
                         bbox=bbox,
+                        tracked_frames=(
+                            (payload.get("planned_context") or {}).get("tracked_frames")
+                            if isinstance(payload.get("planned_context"), dict)
+                            else None
+                        ),
                     )
                 except Exception as seam_exc:
                     log.exception("frame-matched seam selection failed")

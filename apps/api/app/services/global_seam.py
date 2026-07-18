@@ -93,12 +93,14 @@ async def choose_chunk_seam(
             for timestamp in timestamps
         )
     )
-    bbox = target_bbox(
-        right.payload_json or {},
-        (overlap_start + overlap_end) / 2,
-    )
+    payload = right.payload_json or {}
+    bbox = target_bbox(payload, (overlap_start + overlap_end) / 2)
     try:
-        return select_best_seam(list(samples), bbox=bbox)
+        return select_best_seam(
+            list(samples),
+            bbox=bbox,
+            bbox_for_timestamp=lambda timestamp: target_bbox(payload, timestamp),
+        )
     except ValueError as exc:
         raise GlobalSeamError(
             str(exc),

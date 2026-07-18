@@ -19,6 +19,16 @@ def _sample(timestamp: float, left: int, right: int) -> SeamFrames:
     return SeamFrames(timestamp, _frame(left), _frame(left), _frame(right), _frame(right))
 
 
+def _regional_sample(timestamp: float, *, changed_side: str) -> SeamFrames:
+    source = np.zeros((24, 32, 3), dtype=np.uint8)
+    generated = source.copy()
+    if changed_side == "left":
+        generated[:, :16] = 255
+    else:
+        generated[:, 16:] = 255
+    return SeamFrames(timestamp, source, source, generated, generated)
+
+
 def test_local_seams_keep_full_context_until_matching_cut_frames():
     selection = select_local_seams(
         entry_samples=[_sample(0.25, 30, 31), _sample(0.75, 30, 30)],
@@ -32,6 +42,41 @@ def test_local_seams_keep_full_context_until_matching_cut_frames():
     assert selection.media_end == pytest.approx(3.25)
     assert selection.timeline_start == pytest.approx(2.75)
     assert selection.timeline_end == pytest.approx(5.25)
+
+
+def test_local_seams_weight_background_using_tracked_target_position():
+    samples = [
+        _regional_sample(0.25, changed_side="right"),
+        _regional_sample(0.75, changed_side="left"),
+    ]
+    fixed = select_local_seams(
+        entry_samples=samples,
+        exit_samples=[],
+        bbox={"x": 0.0, "y": 0.0, "w": 0.5, "h": 1.0},
+        window=WINDOW,
+    )
+    tracked = select_local_seams(
+        entry_samples=samples,
+        exit_samples=[],
+        bbox={"x": 0.0, "y": 0.0, "w": 0.5, "h": 1.0},
+        window=WINDOW,
+        tracked_frames=[
+            {
+                "timestamp": 2.25,
+                "state": "tracked",
+                "bbox": {"x": 0.5, "y": 0.0, "w": 0.5, "h": 1.0},
+            },
+            {
+                "timestamp": 2.75,
+                "state": "tracked",
+                "bbox": {"x": 0.5, "y": 0.0, "w": 0.5, "h": 1.0},
+            },
+        ],
+    )
+
+    assert fixed.entry.timestamp == pytest.approx(0.75)
+    assert tracked.entry.timestamp == pytest.approx(0.25)
+    assert tracked.target_weighting == "tracked_bbox"
 
 
 def test_local_seams_report_unsafe_boundaries_without_blending():

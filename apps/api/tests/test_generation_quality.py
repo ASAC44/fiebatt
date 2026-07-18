@@ -8,6 +8,7 @@ from app.services.generation_quality import (
     decide_generation_quality,
     final_semantic_quality,
     final_candidate_quality,
+    normalized_quality_state,
     quality_payload_for_candidate,
     cancel_waiting_retry,
     semantic_quality_evidence,
@@ -56,6 +57,19 @@ def test_old_validator_only_hard_fail_remains_applicable():
         "generation_quality_state": "hard_fail",
         "generation_quality_evidence": ["continuity validation unavailable"],
     }
+    assert acceptance_block_reason(payload) is None
+    assert acceptance_allowed(payload, override_requested=False, override_enabled=False)
+
+
+def test_frame_matcher_outage_is_warning_and_remains_applicable():
+    payload = {
+        "generation_quality_state": "hard_fail",
+        "generation_quality_evidence": ["frame matching unavailable"],
+    }
+    assert normalized_quality_state(
+        payload["generation_quality_state"],
+        payload["generation_quality_evidence"],
+    ) == "review_warning"
     assert acceptance_block_reason(payload) is None
     assert acceptance_allowed(payload, override_requested=False, override_enabled=False)
 
@@ -159,7 +173,7 @@ def test_production_bad_outputs_cannot_be_marked_clean():
     ).action == GenerationQualityAction.PASS
 
 
-def test_semantic_miss_warns_but_unsafe_or_missing_seam_blocks_apply():
+def test_semantic_miss_warns_measured_unsafe_seam_blocks_apply():
     clean = ContinuityReport(True, {})
     assert final_candidate_quality(
         {"visual_coherence": 8, "prompt_adherence": 2}, clean
@@ -169,7 +183,7 @@ def test_semantic_miss_warns_but_unsafe_or_missing_seam_blocks_apply():
     ).action == GenerationQualityAction.HARD_FAIL
     assert final_candidate_quality(
         {"visual_coherence": 8, "prompt_adherence": 8}, None
-    ).action == GenerationQualityAction.HARD_FAIL
+    ).action == GenerationQualityAction.REVIEW_WARNING
 
 
 def test_candidate_review_overrides_job_level_acceptance_state():
@@ -188,6 +202,28 @@ def test_candidate_review_overrides_job_level_acceptance_state():
 
     assert candidate["generation_quality_state"] == "hard_fail"
     assert not acceptance_allowed(
+        candidate,
+        override_requested=False,
+        override_enabled=False,
+    )
+
+
+def test_legacy_candidate_validator_outage_is_normalized_for_ui_and_apply():
+    payload = {
+        "generation_quality_state": "pass",
+        "candidate_reviews": {
+            "variant-unchecked": {
+                "quality_state": "hard_fail",
+                "evidence": ["frame matching unavailable"],
+                "selected_seams": None,
+            }
+        },
+    }
+
+    candidate = quality_payload_for_candidate(payload, "variant-unchecked")
+
+    assert candidate["generation_quality_state"] == "review_warning"
+    assert acceptance_allowed(
         candidate,
         override_requested=False,
         override_enabled=False,

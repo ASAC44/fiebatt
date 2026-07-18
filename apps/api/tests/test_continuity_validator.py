@@ -50,6 +50,24 @@ def test_matching_handles_and_motion_pass():
     assert report.sampled_frames == 24
 
 
+def test_full_window_edit_can_validate_from_tail_frames_without_handles():
+    moving = tuple(_frame(x) for x in (16, 18, 20))
+    report = score_continuity_samples(
+        ContinuitySamples(
+            source_tail=moving,
+            generated_tail=moving,
+        ),
+        bbox=BBOX,
+        source_duration=6.0,
+        generated_duration=6.0,
+        source_fps=24.0,
+        generated_fps=24.0,
+    )
+
+    assert report.passed is True
+    assert report.sampled_frames == 6
+
+
 def test_changed_protected_background_fails_both_handles():
     clean = _clean_samples()
     changed = tuple(_frame(x, background=180) for x in (16, 18, 20))

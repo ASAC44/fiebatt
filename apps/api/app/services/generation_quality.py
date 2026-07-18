@@ -14,6 +14,10 @@ from app.services.continuity_validator import ContinuityReport
 MAX_GENERATION_ATTEMPTS = 2
 MAX_GENERATED_SECONDS = 30.0
 CONTINUITY_UNAVAILABLE = "continuity validation unavailable"
+FRAME_MATCHING_UNAVAILABLE = "frame matching unavailable"
+TECHNICAL_VALIDATION_EVIDENCE = frozenset(
+    {CONTINUITY_UNAVAILABLE, FRAME_MATCHING_UNAVAILABLE}
+)
 
 
 class GenerationQualityAction(StrEnum):
@@ -100,11 +104,12 @@ def final_candidate_quality(
     score: dict | None,
     continuity: ContinuityReport | None,
 ) -> GenerationQualityDecision:
-    """Semantic uncertainty warns; unsafe or unavailable seams block Apply."""
+    """Block measured bad seams; warn when technical validation was unavailable."""
     if continuity is None:
+        evidence = (*semantic_quality_evidence(score), FRAME_MATCHING_UNAVAILABLE)
         return GenerationQualityDecision(
-            GenerationQualityAction.HARD_FAIL,
-            ("frame matching unavailable",),
+            GenerationQualityAction.REVIEW_WARNING,
+            evidence,
         )
     if not continuity.passed:
         evidence = quality_evidence(score, continuity)
@@ -181,7 +186,11 @@ def acceptance_block_reason(payload: dict | None) -> str | None:
         return None
     raw_evidence = data.get("generation_quality_evidence")
     evidence = (
-        [str(item) for item in raw_evidence if str(item) != CONTINUITY_UNAVAILABLE]
+        [
+            str(item)
+            for item in raw_evidence
+            if str(item).strip().lower() not in TECHNICAL_VALIDATION_EVIDENCE
+        ]
         if isinstance(raw_evidence, list)
         else []
     )
@@ -192,6 +201,21 @@ def acceptance_block_reason(payload: dict | None) -> str | None:
     if evidence:
         return "generation quality hard-failed: " + "; ".join(evidence[:3])
     return "generation quality hard-failed"
+
+
+def normalized_quality_state(
+    state: str | None,
+    evidence: list | tuple | None,
+) -> str | None:
+    """Repair persisted jobs where validator outages were labeled unsafe."""
+    raw = [str(item).strip().lower() for item in (evidence or []) if str(item).strip()]
+    if (
+        state == GenerationQualityAction.HARD_FAIL
+        and raw
+        and all(item in TECHNICAL_VALIDATION_EVIDENCE for item in raw)
+    ):
+        return GenerationQualityAction.REVIEW_WARNING.value
+    return state
 
 
 def quality_payload_for_candidate(
@@ -207,6 +231,10 @@ def quality_payload_for_candidate(
         output["generation_quality_evidence"] = review.get("evidence") or []
         output["continuity_validation"] = review.get("continuity_validation")
         output["selected_seams"] = review.get("selected_seams")
+    output["generation_quality_state"] = normalized_quality_state(
+        output.get("generation_quality_state"),
+        output.get("generation_quality_evidence"),
+    )
     return output
 
 

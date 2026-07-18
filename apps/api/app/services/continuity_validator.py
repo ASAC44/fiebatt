@@ -217,6 +217,8 @@ def score_continuity_samples(
         or samples.generated_post
         or samples.generated_entry
         or samples.generated_exit
+        or samples.source_tail
+        or samples.generated_tail
     )
     if not all_frames:
         raise ValueError("continuity validator received no frames")

@@ -17,6 +17,7 @@ from app.models.project import Project
 from app.models.session import Session as SessionModel
 from app.schemas.job import JobOut, VariantOut
 from app.services import job_events, storage
+from app.services.generation_quality import normalized_quality_state
 
 router = APIRouter(tags=["jobs"])
 
@@ -44,7 +45,10 @@ def _job_out(job: Job) -> JobOut:
         execution_window=payload.get("execution_window"),
         continuity_validation=payload.get("continuity_validation"),
         selected_seams=payload.get("selected_seams"),
-        generation_quality_state=payload.get("generation_quality_state"),
+        generation_quality_state=normalized_quality_state(
+            payload.get("generation_quality_state"),
+            payload.get("generation_quality_evidence"),
+        ),
         generation_quality_evidence=payload.get("generation_quality_evidence") or [],
         generation_attempts=payload.get("generation_attempts"),
         generated_seconds=payload.get("generated_seconds"),
@@ -65,7 +69,10 @@ def _job_out(job: Job) -> JobOut:
                 prompt_adherence=v.prompt_adherence,
                 error=v.error,
                 attempt_label=(candidate_reviews.get(v.id) or {}).get("label"),
-                quality_state=(candidate_reviews.get(v.id) or {}).get("quality_state"),
+                quality_state=normalized_quality_state(
+                    (candidate_reviews.get(v.id) or {}).get("quality_state"),
+                    (candidate_reviews.get(v.id) or {}).get("evidence"),
+                ),
                 quality_evidence=(candidate_reviews.get(v.id) or {}).get("evidence") or [],
                 continuity_validation=(candidate_reviews.get(v.id) or {}).get(
                     "continuity_validation"

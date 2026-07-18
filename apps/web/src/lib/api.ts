@@ -140,6 +140,15 @@ export type JobResp = {
   warnings?: string[];
   execution_window?: GenerationExecutionWindow | null;
   continuity_validation?: ContinuityValidation | null;
+  selected_seams?: {
+    passed: boolean;
+    media_start: number;
+    media_end: number;
+    timeline_start: number;
+    timeline_end: number;
+    entry?: { score: number; source_timestamp: number; media_timestamp: number } | null;
+    exit?: { score: number; source_timestamp: number; media_timestamp: number } | null;
+  } | null;
   generation_quality_state?: string | null;
   generation_quality_evidence?: string[];
   generation_attempts?: number | null;

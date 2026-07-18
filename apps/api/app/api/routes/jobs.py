@@ -35,6 +35,7 @@ def _job_out(job: Job) -> JobOut:
         warnings=payload.get("warnings") or [],
         execution_window=payload.get("execution_window"),
         continuity_validation=payload.get("continuity_validation"),
+        selected_seams=payload.get("selected_seams"),
         generation_quality_state=payload.get("generation_quality_state"),
         generation_quality_evidence=payload.get("generation_quality_evidence") or [],
         generation_attempts=payload.get("generation_attempts"),

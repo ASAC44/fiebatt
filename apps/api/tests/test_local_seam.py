@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 
 from app.services.generation_window import GenerationWindow
-from app.services.local_seam import select_local_seams
+from app.services.continuity_validator import ContinuityIssue, ContinuityReport
+from app.services.local_seam import continuity_at_selected_seams, select_local_seams
 from app.services.seam_matching import SeamFrames
 
 
@@ -44,3 +45,27 @@ def test_local_seams_report_unsafe_boundaries_without_blending():
     assert selection.passed is False
     assert len(selection.issues) == 2
     assert "entry_frame_match_score" in selection.issues[0]
+
+
+def test_selected_seams_replace_nominal_handle_failures_but_keep_media_failures():
+    selection = select_local_seams(
+        entry_samples=[_sample(0.5, 30, 30)],
+        exit_samples=[_sample(3.5, 30, 30)],
+        bbox=BBOX,
+        window=WINDOW,
+    )
+    base = ContinuityReport(
+        passed=False,
+        metrics={"pre_handle_background_delta": 0.113, "duration_delta_s": 0.2},
+        issues=[
+            ContinuityIssue("pre_handle_background_delta", 0.113, 0.09, "pre"),
+            ContinuityIssue("duration_delta_s", 0.2, 0.16),
+        ],
+        sampled_frames=12,
+    )
+
+    report = continuity_at_selected_seams(base, selection)
+
+    assert report.passed is False
+    assert [issue.code for issue in report.issues] == ["duration_delta_s"]
+    assert report.metrics["entry_frame_match_score"] == pytest.approx(0.0)

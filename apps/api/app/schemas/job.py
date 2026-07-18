@@ -34,6 +34,7 @@ class JobOut(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     execution_window: dict[str, Any] | None = None
     continuity_validation: dict[str, Any] | None = None
+    selected_seams: dict[str, Any] | None = None
     generation_quality_state: str | None = None
     generation_quality_evidence: list[str] = Field(default_factory=list)
     generation_attempts: int | None = None

@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 
 from app.services.generation_window import GenerationWindow
+from app.services.continuity_validator import ContinuityIssue, ContinuityReport
 from app.services.seam_matching import (
     MAX_SEAM_SCORE,
     SeamChoice,
@@ -190,4 +191,38 @@ async def match_local_context(
         generated_path,
         window,
         bbox,
+    )
+
+
+def continuity_at_selected_seams(
+    base: ContinuityReport,
+    selection: LocalSeamSelection,
+) -> ContinuityReport:
+    """Keep media-integrity failures and replace nominal cuts with chosen cuts."""
+    issues = [
+        issue
+        for issue in base.issues
+        if issue.code in {"duration_delta_s", "fps_delta_ratio", "frozen_tail"}
+    ]
+    metrics = dict(base.metrics)
+    for boundary, choice in (("entry", selection.entry), ("exit", selection.exit)):
+        if choice is None:
+            continue
+        code = f"{boundary}_frame_match_score"
+        metrics[code] = choice.score
+        if choice.score > selection.max_score:
+            issues.append(
+                ContinuityIssue(
+                    code,
+                    choice.score,
+                    selection.max_score,
+                    boundary,
+                )
+            )
+    return ContinuityReport(
+        passed=not issues,
+        metrics=metrics,
+        issues=issues,
+        sampled_frames=base.sampled_frames
+        + sum(choice.samples for choice in (selection.entry, selection.exit) if choice),
     )

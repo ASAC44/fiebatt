@@ -107,6 +107,8 @@ function generationActivity(event: JobStreamEvent): string {
     score_start: "checking visual quality and transitions…",
     continuity_validation_done: "transition check complete…",
     continuity_validation_unavailable: "finishing quality review…",
+    seam_match_done: "matching source and edit frames…",
+    seam_match_unavailable: "could not find safe cut frames…",
     gen_retry: "improving first render…",
     gen_provider_fallback: "trying backup video model…",
     gen_retry_rejected: "keeping stronger render…",

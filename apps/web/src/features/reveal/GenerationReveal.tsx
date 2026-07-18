@@ -483,6 +483,7 @@ function ContextPill({ k, v }: { k: string; v: string }) {
 
 function GenerationOutcome({ result }: { result: JobResp }) {
   const validation = result.continuity_validation;
+  const seams = result.selected_seams;
   const composite = result.localized_compositing?.at(-1);
   const quality = result.generation_quality_state ?? "not reported";
   const providers = result.provider_attempts?.length
@@ -497,6 +498,8 @@ function GenerationOutcome({ result }: { result: JobResp }) {
       <div className="reveal__outcome-pills mono">
         <span>quality {quality.replaceAll("_", " ")}</span>
         <span>seams {validation ? (validation.passed ? "passed" : "failed") : "unavailable"}</span>
+        {seams?.entry ? <span>entry match {seams.entry.score.toFixed(3)}</span> : null}
+        {seams?.exit ? <span>exit match {seams.exit.score.toFixed(3)}</span> : null}
         <span>{result.generation_attempts ?? 1} attempt(s)</span>
         {result.generated_seconds != null ? (
           <span>{result.generated_seconds.toFixed(1)} generated seconds</span>

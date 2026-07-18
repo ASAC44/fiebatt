@@ -47,6 +47,7 @@ from app.models.project import Project
 from app.schemas.edit_plan import EditIntent
 from app.services import ffmpeg, job_events, storage
 from app.services.continuity_validator import (
+    ContinuityIssue,
     ContinuityReport,
     validate_generated_continuity,
 )
@@ -64,6 +65,7 @@ from app.services.generation_quality import (
 )
 from app.services.generation_telemetry import build_local_flow_telemetry
 from app.services.local_compositor import composite_generated_target
+from app.services.local_seam import continuity_at_selected_seams, match_local_context
 from app.services.edit_prompt import planned_edit_prompt
 
 log = logging.getLogger("fiebatt.jobs.generate")
@@ -985,9 +987,12 @@ async def run(job_id: str) -> None:
             reference_target_path=(str(crop_path) if crop_path is not None else None),
         )
 
+    validation_by_url: dict[str, tuple[ContinuityReport, dict | None]] = {}
+
     async def validate_continuity(variant: Variant) -> ContinuityReport | None:
         if not variant.url:
             return None
+        seam_metadata: dict | None = None
         try:
             generated_path = await storage.path_from_url(variant.url)
             report = await validate_generated_continuity(
@@ -996,6 +1001,48 @@ async def run(job_id: str) -> None:
                 window=generation_window,
                 bbox=bbox,
             )
+            if generation_window.adaptive:
+                try:
+                    seam_selection = await match_local_context(
+                        source_path=clip_path,
+                        generated_path=generated_path,
+                        window=generation_window,
+                        bbox=bbox,
+                    )
+                except Exception as seam_exc:
+                    log.exception("frame-matched seam selection failed")
+                    report = ContinuityReport(
+                        passed=False,
+                        metrics={**report.metrics, "frame_matching_unavailable": 1.0},
+                        issues=[
+                            *report.issues,
+                            ContinuityIssue(
+                                "frame_matching_unavailable",
+                                1.0,
+                                0.0,
+                                "clip",
+                            ),
+                        ],
+                        sampled_frames=report.sampled_frames,
+                    )
+                    await _emit(
+                        job_id,
+                        "seam_match_unavailable",
+                        f"couldn't match safe cut frames: {seam_exc}",
+                    )
+                else:
+                    report = continuity_at_selected_seams(report, seam_selection)
+                    seam_metadata = seam_selection.metadata()
+                    await _emit(
+                        job_id,
+                        "seam_match_done",
+                        (
+                            "found safe source-to-edit cut frames"
+                            if seam_selection.passed
+                            else "no safe source-to-edit cut frames found"
+                        ),
+                        **seam_metadata,
+                    )
         except Exception as exc:
             log.exception("continuity validation failed")
             await _emit(
@@ -1004,13 +1051,7 @@ async def run(job_id: str) -> None:
                 f"couldn't validate generated seams: {exc}",
             )
             return None
-        async with AsyncSessionLocal() as db:
-            current_job = await db.get(Job, job_id)
-            if current_job is not None:
-                current_payload = dict(current_job.payload or {})
-                current_payload["continuity_validation"] = report.metadata()
-                current_job.payload = current_payload
-                await db.commit()
+        validation_by_url[variant.url] = (report, seam_metadata)
         await _emit(
             job_id,
             "continuity_validation_done",
@@ -1256,6 +1297,12 @@ async def run(job_id: str) -> None:
                     "selected_edit_mode": final_edit_mode,
                 }
             )
+            final_validation = validation_by_url.get(done[0].url or "")
+            if final_validation is not None:
+                final_report, final_seams = final_validation
+                current_payload["continuity_validation"] = final_report.metadata()
+                if final_seams is not None:
+                    current_payload["selected_seams"] = final_seams
             local_flow_telemetry = build_local_flow_telemetry(
                 payload=current_payload,
                 window=generation_window,

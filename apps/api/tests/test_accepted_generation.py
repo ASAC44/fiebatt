@@ -44,6 +44,23 @@ def test_range_keeps_core_context_and_media_offsets_distinct():
     assert job.payload["accepted_ranges"]["segment-1"]["media_start"] == 1.0
 
 
+def test_range_uses_safe_frame_matched_context_instead_of_nominal_core():
+    job = _job()
+    job.payload["committed_timeline_range"] = {"start": 10.0, "end": 12.0}
+    job.payload["selected_seams"] = {
+        "passed": True,
+        "media_start": 0.75,
+        "media_end": 3.5,
+        "timeline_start": 2.75,
+        "timeline_end": 5.5,
+    }
+
+    accepted = accepted_generation_range(job)
+
+    assert (accepted.media_start, accepted.media_end) == pytest.approx((0.75, 3.5))
+    assert (accepted.committed_start, accepted.committed_end) == pytest.approx((9.75, 12.5))
+
+
 def test_edl_splice_preserves_manual_order_and_uses_core_inside_padded_media():
     edl = PersistedEDL(
         clips=[

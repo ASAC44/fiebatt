@@ -195,11 +195,14 @@ export function Preview() {
       };
       v.addEventListener("loadedmetadata", onLoaded, { once: true });
       v.addEventListener("seeked", onSeeked, { once: true });
+      // Do not drop the freeze canvas merely because playhead state updates
+      // while the replacement clip is decoding. That was exposing a black,
+      // glitchy frame at every edited/source boundary.
+      const fallbackRelease = window.setTimeout(releaseFreeze, 1500);
       return () => {
         v.removeEventListener("loadedmetadata", onLoaded);
         v.removeEventListener("seeked", onSeeked);
-        // safety: if effect re-runs before seeked fires, release the freeze
-        releaseFreeze();
+        window.clearTimeout(fallbackRelease);
       };
     }
 

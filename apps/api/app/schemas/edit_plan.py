@@ -55,16 +55,26 @@ class SemanticEditDecision(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def infer_legacy_temporal_behavior(cls, value):
-        if isinstance(value, dict) and not value.get("temporal_behavior"):
+        if isinstance(value, dict):
             value = dict(value)
-            policy = value.get("duration_policy")
-            value["temporal_behavior"] = (
-                "future_changing_motion"
-                if policy == "trajectory_continuation"
-                else "persistent_state"
-                if policy == "continuous_occurrence"
-                else "temporary"
-            )
+            if not value.get("temporal_behavior"):
+                policy = value.get("duration_policy")
+                value["temporal_behavior"] = (
+                    "future_changing_motion"
+                    if policy == "trajectory_continuation"
+                    else "persistent_state"
+                    if policy == "continuous_occurrence"
+                    else "temporary"
+                )
+            # Some compatible chat models use zero to mean "not applicable"
+            # for a persistent state change. Duration is irrelevant to the
+            # occurrence tracker, so repair that harmless value instead of
+            # discarding the full grounded semantic plan.
+            try:
+                if float(value.get("estimated_action_seconds", 3.0)) <= 0.0:
+                    value["estimated_action_seconds"] = 3.0
+            except (TypeError, ValueError):
+                pass
         return value
 
 

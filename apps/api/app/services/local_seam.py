@@ -162,7 +162,9 @@ def select_local_seams(
 def _candidate_times(start: float, end: float, fps: float) -> list[float]:
     step = max(1.0 / max(fps, 1.0), 0.04)
     lower = start + step
-    upper = end - step
+    # Every candidate also reads `timestamp + step`. Keep that read strictly
+    # before the media duration; seeking to the exact duration has no frame.
+    upper = end - 2 * step
     if upper < lower:
         return []
     return np.linspace(lower, upper, LOCAL_SEAM_SAMPLES).tolist()

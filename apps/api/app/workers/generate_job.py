@@ -47,7 +47,6 @@ from app.models.project import Project
 from app.schemas.edit_plan import EditIntent
 from app.services import ffmpeg, job_events, storage
 from app.services.continuity_validator import (
-    ContinuityIssue,
     ContinuityReport,
     validate_generated_continuity,
 )
@@ -1163,20 +1162,6 @@ async def _run(job_id: str) -> None:
                     )
                 except Exception as seam_exc:
                     log.exception("frame-matched seam selection failed")
-                    report = ContinuityReport(
-                        passed=False,
-                        metrics={**report.metrics, "frame_matching_unavailable": 1.0},
-                        issues=[
-                            *report.issues,
-                            ContinuityIssue(
-                                "frame_matching_unavailable",
-                                1.0,
-                                0.0,
-                                "clip",
-                            ),
-                        ],
-                        sampled_frames=report.sampled_frames,
-                    )
                     await _emit(
                         job_id,
                         "seam_match_unavailable",

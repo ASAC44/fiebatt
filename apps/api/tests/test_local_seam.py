@@ -3,7 +3,11 @@ import pytest
 
 from app.services.generation_window import GenerationWindow
 from app.services.continuity_validator import ContinuityIssue, ContinuityReport
-from app.services.local_seam import continuity_at_selected_seams, select_local_seams
+from app.services.local_seam import (
+    _candidate_times,
+    continuity_at_selected_seams,
+    select_local_seams,
+)
 from app.services.seam_matching import SeamFrames
 
 
@@ -42,6 +46,17 @@ def test_local_seams_keep_full_context_until_matching_cut_frames():
     assert selection.media_end == pytest.approx(3.25)
     assert selection.timeline_start == pytest.approx(2.75)
     assert selection.timeline_end == pytest.approx(5.25)
+
+
+def test_candidate_reads_never_seek_to_exact_media_end():
+    duration = 5.25
+    fps = 24.0
+    step = 1.0 / fps
+
+    candidates = _candidate_times(4.5, duration, fps)
+
+    assert candidates
+    assert max(candidates) + step < duration
 
 
 def test_local_seams_weight_background_using_tracked_target_position():

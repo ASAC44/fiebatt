@@ -11,6 +11,9 @@ from app.services.local_range import (
     clear_local_range_cache,
     resolve_local_range,
     resolve_window_from_evidence,
+    project_target_through_parent,
+    temporal_tracking_bbox,
+    tracked_span,
 )
 
 
@@ -22,6 +25,45 @@ def test_local_jump_window_is_bounded_around_playhead():
         requires_recovery_motion=True,
     )
     assert analysis_window(intent, 50.0, 100.0) == (46.5, 53.5)
+
+
+def test_temporal_tracking_uses_parent_context_for_thin_detail():
+    selected = {"x": 0.438, "y": 0.642, "w": 0.313, "h": 0.068}
+
+    tracked = temporal_tracking_bbox(selected)
+
+    assert tracked["w"] > selected["w"]
+    assert tracked["h"] >= 0.28
+    assert tracked["x"] <= selected["x"]
+    assert tracked["y"] <= selected["y"]
+
+
+def test_tracked_span_bridges_brief_loss_but_not_real_disappearance():
+    timestamps = [float(index) for index in range(8)]
+    brief_loss = [
+        {"frame_index": index, "state": "lost" if index in {3, 4} else "tracked"}
+        for index in range(8)
+    ]
+    disappearance = [
+        {"frame_index": index, "state": "tracked" if index <= 2 or index == 6 else "lost"}
+        for index in range(8)
+    ]
+
+    assert tracked_span(brief_loss, timestamps, 2) == (0.0, 7.0)
+    assert tracked_span(disappearance, timestamps, 2) == (0.0, 2.0)
+
+
+def test_precise_target_moves_with_broader_parent_without_growing():
+    target = {"x": 0.45, "y": 0.50, "w": 0.10, "h": 0.05}
+    seed_parent = {"x": 0.30, "y": 0.30, "w": 0.40, "h": 0.40}
+    moved_parent = {"x": 0.40, "y": 0.20, "w": 0.50, "h": 0.50}
+
+    moved = project_target_through_parent(target, seed_parent, moved_parent)
+
+    assert moved["x"] == pytest.approx(0.5875)
+    assert moved["y"] == pytest.approx(0.45)
+    assert moved["w"] == pytest.approx(0.125)
+    assert moved["h"] == pytest.approx(0.0625)
 
 
 def test_range_uses_two_sided_handles_without_covering_whole_occurrence():
@@ -268,6 +310,65 @@ async def test_state_change_expands_outward_until_target_is_lost(tmp_path):
     assert result.occurrence_end == pytest.approx(60.0)
     assert result.generation_context.start_ts == pytest.approx(39.25)
     assert result.generation_context.end_ts == pytest.approx(60.75)
+
+
+@pytest.mark.asyncio
+async def test_thin_persistent_target_expands_to_full_local_presence(tmp_path):
+    clear_local_range_cache()
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"unused")
+    project = SimpleNamespace(video_path=str(source), video_url="", duration=10.08)
+    selection = SimpleNamespace(
+        id="selection-shirt-text",
+        source_revision="revision-shirt-text",
+        frame_ts=0.0,
+        bbox_json={"x": 0.438, "y": 0.642, "w": 0.313, "h": 0.068},
+        mask_url=None,
+    )
+    intent = EditIntent(
+        raw_prompt='replace the shirt text with "Hello World"',
+        change_type="replacement",
+        duration_policy="continuous_occurrence",
+        temporal_behavior="persistent_state",
+    )
+    seen_boxes = []
+
+    async def fake_extract(_source, _timestamp, output):
+        cv2.imwrite(str(output), np.full((72, 128, 3), 80, dtype=np.uint8))
+        return output
+
+    async def fake_track(paths, **kwargs):
+        seen_boxes.append(kwargs["bbox"])
+        return TrackResult(
+            tracker="test",
+            frames=[
+                {
+                    "frame_index": index,
+                    "state": "tracked",
+                    "confidence": 1.0,
+                }
+                for index in range(len(paths))
+            ],
+            processed_start_index=0,
+            processed_end_index=len(paths) - 1,
+        )
+
+    result = await resolve_local_range(
+        project,
+        selection,
+        intent,
+        extract_frame=fake_extract,
+        track_frames=fake_track,
+    )
+
+    assert result.edit_core.start_ts == pytest.approx(0.0)
+    assert result.edit_core.end_ts == pytest.approx(10.08)
+    assert len(seen_boxes) >= 2
+    assert all(box["h"] >= 0.28 for box in seen_boxes)
+    assert all(
+        frame["bbox"]["h"] == pytest.approx(selection.bbox_json["h"])
+        for frame in result.tracked_frames
+    )
 
 
 @pytest.mark.asyncio

@@ -31,6 +31,7 @@ INITIAL_CONTINUOUS_RADIUS_SECONDS = 3.0
 MAX_CONTINUOUS_EDIT_SECONDS = 30.0
 CONTINUOUS_EDGE_PROBE_SECONDS = 1.0
 SHOT_CHANGE_THRESHOLD = 0.32
+MAX_TRACK_GAP_FRAMES = 2
 
 _RANGE_CACHE: dict[str, LocalRangeResolution] = {}
 
@@ -194,11 +195,75 @@ def tracked_span(
         return None, None
     left = seed_index
     right = seed_index
-    while left - 1 >= 0 and states.get(left - 1) == "tracked":
-        left -= 1
-    while right + 1 < len(timestamps) and states.get(right + 1) == "tracked":
-        right += 1
+    cursor = seed_index - 1
+    gap = 0
+    while cursor >= 0:
+        if states.get(cursor) == "tracked":
+            left = cursor
+            gap = 0
+        elif states.get(cursor) == "lost":
+            gap += 1
+            if gap > MAX_TRACK_GAP_FRAMES:
+                break
+        else:
+            break
+        cursor -= 1
+    cursor = seed_index + 1
+    gap = 0
+    while cursor < len(timestamps):
+        if states.get(cursor) == "tracked":
+            right = cursor
+            gap = 0
+        elif states.get(cursor) == "lost":
+            gap += 1
+            if gap > MAX_TRACK_GAP_FRAMES:
+                break
+        else:
+            break
+        cursor += 1
     return timestamps[left], timestamps[right]
+
+
+def temporal_tracking_bbox(bbox: dict[str, float]) -> dict[str, float]:
+    """Use parent-object context when a tiny detail defines a persistent edit."""
+    x = float(bbox["x"])
+    y = float(bbox["y"])
+    width = float(bbox["w"])
+    height = float(bbox["h"])
+    smaller = max(1e-6, min(width, height))
+    thin_or_small = smaller < 0.12 or max(width, height) / smaller > 3.0
+    if not thin_or_small:
+        return dict(bbox)
+    center_x = x + width / 2
+    center_y = y + height / 2
+    tracked_width = min(1.0, max(width * 1.5, 0.24))
+    tracked_height = min(1.0, max(height * 4.0, 0.28))
+    left = max(0.0, min(1.0 - tracked_width, center_x - tracked_width / 2))
+    top = max(0.0, min(1.0 - tracked_height, center_y - tracked_height / 2))
+    return {"x": left, "y": top, "w": tracked_width, "h": tracked_height}
+
+
+def project_target_through_parent(
+    target: dict[str, float],
+    seed_parent: dict[str, float],
+    tracked_parent: dict[str, float],
+) -> dict[str, float]:
+    """Move/scale the precise target with its broader temporal parent box."""
+    seed_width = max(float(seed_parent["w"]), 1e-6)
+    seed_height = max(float(seed_parent["h"]), 1e-6)
+    relative_x = (float(target["x"]) - float(seed_parent["x"])) / seed_width
+    relative_y = (float(target["y"]) - float(seed_parent["y"])) / seed_height
+    relative_width = float(target["w"]) / seed_width
+    relative_height = float(target["h"]) / seed_height
+    parent_x = float(tracked_parent["x"])
+    parent_y = float(tracked_parent["y"])
+    parent_width = float(tracked_parent["w"])
+    parent_height = float(tracked_parent["h"])
+    width = min(1.0, max(1e-6, relative_width * parent_width))
+    height = min(1.0, max(1e-6, relative_height * parent_height))
+    x = max(0.0, min(1.0 - width, parent_x + relative_x * parent_width))
+    y = max(0.0, min(1.0 - height, parent_y + relative_y * parent_height))
+    return {"x": x, "y": y, "w": width, "h": height}
 
 
 def _cache_key(
@@ -260,6 +325,12 @@ async def resolve_local_range(
         source_end=bounded_end,
     )
     analysis_fps = CONTINUOUS_ANALYSIS_FPS if _continuous_change(intent) else ANALYSIS_FPS
+    tracking_bbox = (
+        temporal_tracking_bbox(selection.bbox_json)
+        if _continuous_change(intent)
+        else selection.bbox_json
+    )
+    tracking_uses_parent = tracking_bbox != selection.bbox_json
     total_frames_inspected = 0
     track: sam.TrackResult | None = None
     shot_start = start
@@ -307,8 +378,10 @@ async def resolve_local_range(
                 track = await track_frames(
                     frame_paths,
                     seed_frame_index=seed_index,
-                    bbox=selection.bbox_json,
-                    seed_mask_path=seed_mask_path,
+                    bbox=tracking_bbox,
+                    # A precise target mask may cover only text/eyes/logo.
+                    # Parent tracking deliberately uses its broader box.
+                    seed_mask_path=None if tracking_uses_parent else seed_mask_path,
                     max_frames=len(frame_paths),
                     max_seconds=30.0,
                     include_masks=False,
@@ -338,6 +411,28 @@ async def resolve_local_range(
             track_start, track_end = tracked_span(
                 track.frames, timestamps, seed_index
             )
+            tolerance = 1.1 / analysis_fps
+            first_ts = timestamps[0]
+            last_ts = timestamps[-1]
+            # Sampling rarely lands on a fractional clip endpoint exactly.
+            # If tracking and shot evidence both reach the outermost sample,
+            # snap to the true source boundary instead of dropping tail frames.
+            if (
+                start <= source_start + 1e-3
+                and track_start is not None
+                and abs(track_start - first_ts) <= tolerance
+                and abs(shot_start - first_ts) <= tolerance
+            ):
+                track_start = source_start
+                shot_start = source_start
+            if (
+                end >= bounded_end - 1e-3
+                and track_end is not None
+                and abs(track_end - last_ts) <= tolerance
+                and abs(shot_end - last_ts) <= tolerance
+            ):
+                track_end = bounded_end
+                shot_end = bounded_end
             if track_start is not None:
                 observed_track_start = (
                     track_start
@@ -356,18 +451,21 @@ async def resolve_local_range(
                 index = int(frame.get("frame_index", -1))
                 if 0 <= index < len(timestamps):
                     timestamp = timestamps[index]
+                    tracked_parent = frame.get("bbox") or tracking_bbox
                     observed_frames[timestamp] = {
                         "timestamp": timestamp,
                         "state": frame.get("state"),
                         "confidence": frame.get("confidence"),
-                        "bbox": frame.get("bbox") or selection.bbox_json,
+                        "bbox": project_target_through_parent(
+                            selection.bbox_json,
+                            tracking_bbox,
+                            tracked_parent,
+                        ),
+                        "tracking_bbox": tracked_parent,
                     }
             if not _continuous_change(intent):
                 break
 
-            tolerance = 1.1 / analysis_fps
-            first_ts = timestamps[0]
-            last_ts = timestamps[-1]
             expand_left = (
                 start > source_start + 1e-3
                 and track_start is not None

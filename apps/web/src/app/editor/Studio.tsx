@@ -40,6 +40,7 @@ import { useContinuityDashboard } from "@/features/continuity/useContinuityDashb
 import { useAgentEdlBridge } from "@/hooks/useAgentEdlBridge";
 import { EditorTopbar } from "@/components/editor-topbar";
 import { EditorGuide } from "@/components/editor-guide";
+import { isEditorGuideSeen, setEditorGuideSeen } from "@/features/onboarding/storage";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import "./studio.css";
@@ -228,11 +229,17 @@ function StudioInner({
   const [hydrateError, setHydrateError] = useState<string | null>(null);
   const [hydrateAttempt, setHydrateAttempt] = useState(0);
   const [showShortcuts, setShowShortcuts] = useState(false);
-  const [showGuide, setShowGuide] = useState(true);
+  const [showGuide, setShowGuide] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
   const [hydratingProject, setHydratingProject] = useState(Boolean(initialProject));
   const rootRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Show the guide once per browser, not every time the user opens another
+  // video. The top-bar Guide button remains available for manual reopening.
+  useEffect(() => {
+    if (!isEditorGuideSeen()) setShowGuide(true);
+  }, []);
 
   // lock body scroll when studio is mounted
   useEffect(() => {
@@ -550,6 +557,7 @@ function StudioInner({
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         setShowShortcuts(false);
+        if (showGuide) setEditorGuideSeen();
         setShowGuide(false);
         return;
       }
@@ -587,7 +595,7 @@ function StudioInner({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [state.playing, state.selectedId, dispatch]);
+  }, [showGuide, state.playing, state.selectedId, dispatch]);
 
   const [exporting, setExporting] = useState(false);
   const [exportStatus, setExportStatus] = useState("");
@@ -765,7 +773,14 @@ function StudioInner({
         </div>
       )}
 
-      {showGuide && <EditorGuide onClose={() => setShowGuide(false)} />}
+      {showGuide && (
+        <EditorGuide
+          onClose={() => {
+            setEditorGuideSeen();
+            setShowGuide(false);
+          }}
+        />
+      )}
 
       {showCompare && (
         <CompareOverlay onClose={() => setShowCompare(false)} />

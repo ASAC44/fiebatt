@@ -1,5 +1,6 @@
 const ONBOARDING_KEY_PREFIX = "fiebatt.onboarding.completed";
 const CHECKLIST_KEY_PREFIX = "fiebatt.editor.checklist.dismissed";
+const EDITOR_GUIDE_KEY = "fiebatt.editor.guide.seen";
 
 function safeRead(key: string): string | null {
   if (typeof window === "undefined") return null;
@@ -44,4 +45,12 @@ export function isEditorChecklistDismissed(scope: string) {
 
 export function setEditorChecklistDismissed(scope: string, dismissed: boolean) {
   safeWrite(checklistKey(scope), dismissed ? "1" : "0");
+}
+
+export function isEditorGuideSeen() {
+  return safeRead(EDITOR_GUIDE_KEY) === "1";
+}
+
+export function setEditorGuideSeen() {
+  safeWrite(EDITOR_GUIDE_KEY, "1");
 }

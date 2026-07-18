@@ -7,7 +7,7 @@ import {
   MessageContent,
 } from "@/components/ui/message";
 import { useAgentStream } from "@/hooks/useAgentStream";
-import { accept } from "@/lib/api";
+import { accept, decideGenerationRetry } from "@/lib/api";
 import { useEDL, totalDuration } from "@/stores/edl";
 import {
   useAgent,
@@ -122,6 +122,25 @@ export function AgentChat({ projectId }: AgentChatProps) {
       }
     },
     [projectId, applyingVariant, agentDispatch],
+  );
+
+  const handleRetryDecision = useCallback(
+    async (jobId: string, action: "cancel" | "retry_now") => {
+      try {
+        const result = await decideGenerationRetry(jobId, action);
+        agentDispatch({
+          type: "update_retry_control",
+          jobId,
+          status: result.status,
+        });
+      } catch (error) {
+        agentDispatch({
+          type: "add_error",
+          message: error instanceof Error ? error.message : "Could not update retry.",
+        });
+      }
+    },
+    [agentDispatch],
   );
 
   return (
@@ -457,6 +476,7 @@ export function AgentChat({ projectId }: AgentChatProps) {
               applyingVariant={applyingVariant}
               appliedVariant={appliedVariant}
               readyJobIds={readyJobIds}
+              onRetryDecision={handleRetryDecision}
             />
           ))}
         </div>
@@ -483,6 +503,7 @@ function MessageRenderer({
   applyingVariant,
   appliedVariant,
   readyJobIds,
+  onRetryDecision,
 }: {
   message: AgentMessage;
   onDismissSuggestion: (ts: number) => void;
@@ -490,6 +511,7 @@ function MessageRenderer({
   applyingVariant: string | null;
   appliedVariant: string | null;
   readyJobIds: Set<string>;
+  onRetryDecision: (jobId: string, action: "cancel" | "retry_now") => void | Promise<void>;
 }) {
   switch (message.type) {
     case "user":
@@ -564,6 +586,13 @@ function MessageRenderer({
         </div>
       );
 
+    case "retry_control":
+      return (
+        <div className="msg msg--tool">
+          <RetryControlCard message={message} onDecision={onRetryDecision} />
+        </div>
+      );
+
     case "suggestion":
       return (
         <div className="msg msg--suggestion">
@@ -623,6 +652,54 @@ function GenerationProgressCard({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function RetryControlCard({
+  message,
+  onDecision,
+}: {
+  message: Extract<AgentMessage, { type: "retry_control" }>;
+  onDecision: (jobId: string, action: "cancel" | "retry_now") => void | Promise<void>;
+}) {
+  const waiting = message.status === "waiting";
+  const statusText =
+    message.status === "cancelled"
+      ? "Corrective retry stopped. The first pass remains available."
+      : message.status === "completed"
+        ? "Corrected pass finished."
+        : message.status === "retry_now" || message.status === "dispatched"
+          ? "Corrected pass is starting with this review."
+          : "A corrected pass will start shortly unless you stop it.";
+
+  return (
+    <div className="rounded-lg border border-amber-400/25 bg-amber-400/5 px-3 py-2.5">
+      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-amber-200/80">
+        first-pass review
+      </div>
+      <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+        {message.evidence[0] ?? "The first pass missed a specific quality check."}
+      </p>
+      <p className="mt-1 text-xs text-foreground/70">{statusText}</p>
+      {waiting ? (
+        <div className="mt-3 flex gap-2">
+          <button
+            type="button"
+            className="suggestion-card__btn suggestion-card__btn--accept"
+            onClick={() => void onDecision(message.jobId, "retry_now")}
+          >
+            retry now
+          </button>
+          <button
+            type="button"
+            className="suggestion-card__btn"
+            onClick={() => void onDecision(message.jobId, "cancel")}
+          >
+            stop retry
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

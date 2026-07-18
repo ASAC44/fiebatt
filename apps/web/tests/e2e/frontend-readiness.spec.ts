@@ -251,6 +251,15 @@ test("generation preview returns after leaving and reopening editor", async ({ p
           description: "finished while away",
           visual_coherence: 8,
           prompt_adherence: 8,
+          quality_state: "pass",
+          quality_evidence: [],
+          continuity_validation: {
+            passed: true,
+            metrics: {},
+            issues: [],
+            sampled_frames: 12,
+          },
+          selected_seams: null,
           error: null,
         }]
       : [],

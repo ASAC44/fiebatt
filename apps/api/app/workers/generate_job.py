@@ -91,6 +91,7 @@ def _provider_label(provider: str) -> str:
     }.get(provider, _PROVIDER_LABEL)
 
 VARIANT_COUNT = 1
+RETRY_GRACE_SECONDS = 10.0
 
 
 def _provider_model(provider: str, edit_mode: str | None = None) -> str:
@@ -1134,6 +1135,62 @@ async def run(job_id: str) -> None:
     )
     await persist_candidate_review(done[0], score, continuity_report)
 
+    async def await_retry_permission(evidence: tuple[str, ...]) -> bool:
+        retry_at = time.time() + RETRY_GRACE_SECONDS
+        correction = corrective_prompt(evidence)
+        retry_state = {
+            "status": "waiting",
+            "retry_at": retry_at,
+            "evidence": list(evidence),
+            "correction": correction,
+        }
+        async with AsyncSessionLocal() as db:
+            current_job = await db.get(Job, job_id)
+            if current_job is not None:
+                current_payload = dict(current_job.payload or {})
+                current_payload["retry_state"] = retry_state
+                current_job.payload = current_payload
+                await db.commit()
+        await _emit(
+            job_id,
+            "retry_pending",
+            "first pass review found a specific issue; corrective retry is waiting",
+            **retry_state,
+        )
+        while time.time() < retry_at:
+            await asyncio.sleep(0.5)
+            async with AsyncSessionLocal() as db:
+                current_job = await db.get(Job, job_id)
+                current_state = dict((current_job.payload or {}).get("retry_state") or {})
+            if current_state.get("status") == "cancelled":
+                await _emit(
+                    job_id,
+                    "retry_cancelled",
+                    "corrective retry stopped; keeping the first pass",
+                )
+                return False
+            if current_state.get("status") == "retry_now":
+                break
+        async with AsyncSessionLocal() as db:
+            current_job = await db.get(Job, job_id)
+            if current_job is not None:
+                current_payload = dict(current_job.payload or {})
+                current_state = dict(current_payload.get("retry_state") or retry_state)
+                if current_state.get("status") == "cancelled":
+                    return False
+                current_state["status"] = "dispatched"
+                current_state["dispatched_at"] = time.time()
+                current_payload["retry_state"] = current_state
+                current_job.payload = current_payload
+                await db.commit()
+        await _emit(
+            job_id,
+            "retry_dispatched",
+            "starting one evidence-driven corrective retry",
+            evidence=list(evidence),
+        )
+        return True
+
     quality_state = GenerationQualityAction.PASS
     quality_evidence: list[str] = []
     if generation_window.adaptive:
@@ -1151,6 +1208,9 @@ async def run(job_id: str) -> None:
             GenerationQualityAction.CORRECTIVE_RETRY,
             GenerationQualityAction.PROVIDER_FALLBACK,
         }:
+            if not await await_retry_permission(decision.evidence):
+                decision = final_candidate_quality(score, continuity_report)
+                break
             previous_variant = done[0]
             previous_score = score
             previous_continuity = continuity_report
@@ -1249,28 +1309,38 @@ async def run(job_id: str) -> None:
             or int(score.get("prompt_adherence") or 0) < 6
         )
         if needs_retry:
+            retry_evidence = semantic_quality_evidence(score)
+            if not await await_retry_permission(retry_evidence):
+                needs_retry = False
             previous_variant = done[0]
             previous_score = score
             previous_continuity = continuity_report
-            attempts += 1
-            generated_seconds += generation_duration
-            provider_attempts.append(video_provider)
-            retry_variant_id = await create_attempt_variant(attempts - 1)
-            await _emit(
-                job_id,
-                "gen_retry",
-                "quality validation failed; making one corrective generation attempt",
-                attempt=attempts,
-                previous_score=score,
-            )
-            correction = corrective_prompt(semantic_quality_evidence(score))
-            succeeded = await dispatch(
+            attempts += int(needs_retry)
+            if not needs_retry:
+                final_quality = final_semantic_quality(score)
+                quality_state = final_quality.action
+                quality_evidence = list(final_quality.evidence)
+            else:
+                generated_seconds += generation_duration
+                provider_attempts.append(video_provider)
+                retry_variant_id = await create_attempt_variant(attempts - 1)
+            if needs_retry:
+                await _emit(
+                    job_id,
+                    "gen_retry",
+                    "quality validation failed; making one corrective generation attempt",
+                    attempt=attempts,
+                    previous_score=score,
+                )
+            correction = corrective_prompt(retry_evidence)
+            succeeded = needs_retry and await dispatch(
                 video_provider,
                 correction,
                 target_variant_id=retry_variant_id,
             )
-            async with AsyncSessionLocal() as db:
-                retried = await db.get(Variant, retry_variant_id)
+            if needs_retry:
+                async with AsyncSessionLocal() as db:
+                    retried = await db.get(Variant, retry_variant_id)
                 if retried is not None and succeeded and retried.status == "done":
                     done = [retried]
                     candidate_score, candidate_continuity = await asyncio.gather(
@@ -1303,9 +1373,10 @@ async def run(job_id: str) -> None:
                         "gen_retry_failed",
                         "corrective attempt failed; retaining the first generated result",
                     )
-            final_quality = final_semantic_quality(score)
-            quality_state = final_quality.action
-            quality_evidence = list(final_quality.evidence)
+            if needs_retry:
+                final_quality = final_semantic_quality(score)
+                quality_state = final_quality.action
+                quality_evidence = list(final_quality.evidence)
         else:
             final_quality = final_semantic_quality(score)
             quality_state = final_quality.action
@@ -1334,6 +1405,11 @@ async def run(job_id: str) -> None:
                     "selected_edit_mode": final_edit_mode,
                 }
             )
+            retry_state = dict(current_payload.get("retry_state") or {})
+            if retry_state.get("status") == "dispatched":
+                retry_state["status"] = "completed"
+                retry_state["completed_at"] = time.time()
+                current_payload["retry_state"] = retry_state
             final_validation = validation_by_url.get(done[0].url or "")
             if final_validation is not None:
                 final_report, final_seams = final_validation

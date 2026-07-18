@@ -9,6 +9,7 @@ from app.services.generation_quality import (
     final_semantic_quality,
     final_candidate_quality,
     quality_payload_for_candidate,
+    cancel_waiting_retry,
     semantic_quality_evidence,
     select_fallback_provider,
 )
@@ -191,6 +192,16 @@ def test_candidate_review_overrides_job_level_acceptance_state():
         override_requested=False,
         override_enabled=False,
     )
+
+
+def test_applying_first_pass_cancels_a_waiting_retry():
+    payload = cancel_waiting_retry(
+        {"retry_state": {"status": "waiting", "evidence": ["wrong colour"]}},
+        reason="candidate applied",
+    )
+
+    assert payload["retry_state"]["status"] == "cancelled"
+    assert payload["retry_state"]["cancel_reason"] == "candidate applied"
 
 
 def test_retry_replaces_previous_result_only_when_quality_improves():

@@ -210,6 +210,16 @@ def quality_payload_for_candidate(
     return output
 
 
+def cancel_waiting_retry(payload: dict | None, *, reason: str) -> dict:
+    output = dict(payload or {})
+    retry_state = dict(output.get("retry_state") or {})
+    if retry_state.get("status") == "waiting":
+        retry_state["status"] = "cancelled"
+        retry_state["cancel_reason"] = reason
+        output["retry_state"] = retry_state
+    return output
+
+
 def acceptance_allowed(
     payload: dict | None,
     *,

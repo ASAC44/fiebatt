@@ -16,6 +16,8 @@ os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./test_pipeline.db"
 
 from app.main import app  # noqa: E402
 from app.db.init import create_all  # noqa: E402
+from app.db.session import AsyncSessionLocal  # noqa: E402
+from app.models.job import Job  # noqa: E402
 from app.workers.runner import JobRunner  # noqa: E402
 
 
@@ -106,6 +108,48 @@ async def test_upload_and_project(client: AsyncClient):
     )
     assert renamed.status_code == 200
     assert renamed.json()["name"] == "Launch cut"
+
+
+@pytest.mark.asyncio
+async def test_pending_corrective_retry_can_be_cancelled(client: AsyncClient):
+    if not os.path.exists(FIXTURE_VIDEO):
+        pytest.skip("test fixture video not found")
+    with open(FIXTURE_VIDEO, "rb") as file:
+        uploaded = await client.post(
+            "/api/upload",
+            files={"file": ("test.mp4", file, "video/mp4")},
+            headers=headers(),
+        )
+    project_id = uploaded.json()["project_id"]
+    async with AsyncSessionLocal() as db:
+        job = Job(
+            project_id=project_id,
+            kind="generate",
+            status="processing",
+            payload={
+                "retry_state": {
+                    "status": "waiting",
+                    "retry_at": 9999999999.0,
+                    "evidence": ["requested green was missing"],
+                }
+            },
+        )
+        db.add(job)
+        await db.commit()
+        await db.refresh(job)
+        job_id = job.id
+
+    response = await client.post(
+        f"/api/jobs/{job_id}/retry-decision",
+        json={"action": "cancel"},
+        headers=headers(),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+    async with AsyncSessionLocal() as db:
+        saved = await db.get(Job, job_id)
+        assert saved.payload["retry_state"]["status"] == "cancelled"
 
 
 @pytest.mark.asyncio

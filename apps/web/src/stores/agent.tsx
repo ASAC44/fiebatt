@@ -127,6 +127,15 @@ export type AgentMessage =
       complete: boolean;
       ts: number;
     }
+  | {
+      type: "retry_control";
+      jobId: string;
+      status: string;
+      retryAt?: number;
+      evidence: string[];
+      correction?: string;
+      ts: number;
+    }
   | { type: "suggestion"; edit: SuggestedEdit; accepted?: boolean; ts: number }
   | { type: "error"; message: string; ts: number };
 
@@ -162,6 +171,14 @@ export type AgentAction =
       stage: string;
       text: string;
       complete?: boolean;
+    }
+  | {
+      type: "update_retry_control";
+      jobId: string;
+      status: string;
+      retryAt?: number;
+      evidence?: string[];
+      correction?: string;
     }
   | { type: "accept_suggestion"; ts: number }
   | { type: "dismiss_suggestion"; ts: number }
@@ -338,6 +355,33 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
                 : message,
             )
           : [...state.messages, progress],
+      };
+    }
+
+    case "update_retry_control": {
+      const existing = state.messages.find(
+        (message) => message.type === "retry_control" && message.jobId === action.jobId,
+      );
+      const retry = {
+        type: "retry_control" as const,
+        jobId: action.jobId,
+        status: action.status,
+        retryAt: action.retryAt ?? (existing?.type === "retry_control" ? existing.retryAt : undefined),
+        evidence:
+          action.evidence ?? (existing?.type === "retry_control" ? existing.evidence : []),
+        correction:
+          action.correction ?? (existing?.type === "retry_control" ? existing.correction : undefined),
+        ts: existing?.ts ?? now,
+      };
+      return {
+        ...state,
+        messages: existing
+          ? state.messages.map((message) =>
+              message.type === "retry_control" && message.jobId === action.jobId
+                ? retry
+                : message,
+            )
+          : [...state.messages, retry],
       };
     }
 

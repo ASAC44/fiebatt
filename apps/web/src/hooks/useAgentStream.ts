@@ -148,6 +148,7 @@ export function useAgentStream(projectId?: string | null) {
     let detailedStage = "";
     let lastHeartbeatAt = 0;
     let previewSignature = "";
+    let retrySignature = "";
     const eventStream = streamJobEvents(jobId, {
       onEvent: (event) => {
         detailedProgressAt = Date.now();
@@ -174,6 +175,20 @@ export function useAgentStream(projectId?: string | null) {
         if (watch.signal.aborted) return;
         const ready = job.variants.filter((variant) => variant.url);
         const failed = job.variants.filter((variant) => variant.status === "error");
+        if (job.retry_state) {
+          const nextRetrySignature = JSON.stringify(job.retry_state);
+          if (nextRetrySignature !== retrySignature) {
+            retrySignature = nextRetrySignature;
+            dispatch({
+              type: "update_retry_control",
+              jobId,
+              status: job.retry_state.status,
+              retryAt: job.retry_state.retry_at,
+              evidence: job.retry_state.evidence,
+              correction: job.retry_state.correction,
+            });
+          }
+        }
         const nextPreviewSignature = ready
           .map((variant) => `${variant.id}:${variant.url}`)
           .join("|");

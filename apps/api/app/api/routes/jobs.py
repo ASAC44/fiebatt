@@ -1,7 +1,10 @@
 import asyncio
 import json
+import time
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +19,10 @@ from app.schemas.job import JobOut, VariantOut
 from app.services import job_events, storage
 
 router = APIRouter(tags=["jobs"])
+
+
+class RetryDecisionRequest(BaseModel):
+    action: Literal["cancel", "retry_now"]
 
 
 def _job_out(job: Job) -> JobOut:
@@ -111,6 +118,31 @@ async def get_job(
         raise HTTPException(status_code=404, detail="job not found")
 
     return _job_out(job)
+
+
+@router.post("/jobs/{job_id}/retry-decision")
+async def decide_retry(
+    job_id: str,
+    body: RetryDecisionRequest,
+    session: SessionModel = Depends(get_session),
+    db: AsyncSession = Depends(get_db),
+):
+    job = await db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    project = await db.get(Project, job.project_id)
+    if project is None or project.session_id != session.id:
+        raise HTTPException(status_code=404, detail="job not found")
+    payload = dict(job.payload or {})
+    retry_state = dict(payload.get("retry_state") or {})
+    if retry_state.get("status") != "waiting":
+        raise HTTPException(status_code=409, detail="no retry is waiting for a decision")
+    retry_state["status"] = "cancelled" if body.action == "cancel" else "retry_now"
+    retry_state["decision_at"] = time.time()
+    payload["retry_state"] = retry_state
+    job.payload = payload
+    await db.commit()
+    return {"status": retry_state["status"]}
 
 
 @router.get("/jobs/{job_id}/stream")

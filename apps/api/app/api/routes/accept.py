@@ -28,6 +28,7 @@ from app.services.accepted_generation import (
 from app.services.generation_quality import (
     acceptance_allowed,
     acceptance_block_reason,
+    cancel_waiting_retry,
     quality_payload_for_candidate,
 )
 from app.services.timeline_response import build_timeline_response
@@ -62,6 +63,7 @@ async def accept(
     )
     if variant is None or variant.status != "done" or not variant.url:
         raise HTTPException(status_code=422, detail="variant not ready")
+    job.payload = cancel_waiting_retry(job.payload, reason="candidate applied")
     quality_payload = quality_payload_for_candidate(job.payload, variant.id)
     if not acceptance_allowed(
         quality_payload,

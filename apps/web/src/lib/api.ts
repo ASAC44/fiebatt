@@ -581,6 +581,16 @@ export function accept(job_id: string, variant_index: number): Promise<AcceptRes
 
 export const acceptVariant = accept;
 
+export function decideGenerationRetry(
+  jobId: string,
+  action: "cancel" | "retry_now",
+): Promise<{ status: string }> {
+  return request(`/api/jobs/${jobId}/retry-decision`, {
+    method: "POST",
+    body: JSON.stringify({ action }),
+  });
+}
+
 export function getEntity(entity_id: string): Promise<EntityResp> {
   return request<EntityResp>(`/api/entities/${entity_id}`);
 }

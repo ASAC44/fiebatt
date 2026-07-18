@@ -24,6 +24,7 @@ from app.services.accepted_generation import (
 from app.services.generation_quality import (
     acceptance_allowed,
     acceptance_block_reason,
+    cancel_waiting_retry,
     quality_payload_for_candidate,
 )
 from app.workers import entity_job
@@ -315,6 +316,7 @@ async def batch_accept(
         variant = next((v for v in job.variants if v.index == item.variant_index), None)
         if variant is None or variant.status != "done" or not variant.url:
             raise HTTPException(status_code=422, detail="variant not ready")
+        job.payload = cancel_waiting_retry(job.payload, reason="candidate applied")
         quality_payload = quality_payload_for_candidate(job.payload, variant.id)
         if not acceptance_allowed(
             quality_payload,

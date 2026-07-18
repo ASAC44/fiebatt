@@ -1,0 +1,439 @@
+---
+title: "Tracked local editing plan"
+description: "The implementation plan for SAM2 video tracking, spatially contained generation, new-object masks, and lossless compositing."
+---
+
+# Tracked local editing plan
+
+This plan makes local video edits change only the intended subject, for only the intended time. It covers the SAM2 video endpoint, target tracking, new generated objects, protected compositing, validation, failure handling, tests, and rollout.
+
+## Outcome
+
+For every local edit, fiebatt must know two things before Apply is enabled:
+
+1. **When may the video change?** A natural temporal window supported by positive target-occurrence evidence.
+2. **Where may each frame change?** A per-frame approved mask supported by target tracking and, when needed, generated-object tracking.
+
+Pixels outside the approved mask come from the current source timeline exactly. Tracking uncertainty may widen the search area, but it must never widen the editable area by itself.
+
+## Current state
+
+- The Hugging Face Space runs `SAM2ImagePredictor`. It receives one image and one box and returns one still-image mask through `/segment`.
+- The API already has a `/sam/track` client contract and a local compositor.
+- `apps/api/vision-worker/main.py` already contains a bounded `SAM2VideoPredictor` implementation, but that full worker is not what the deployed Hugging Face Space runs.
+- The backend deliberately reports video tracking as unavailable when `VISION_WORKER_URL` points to the current Hugging Face Space.
+- The CPU tracker can help choose time ranges, but it cannot provide the full-resolution masks required for protected compositing.
+- Video providers normally regenerate the full frame. A good prompt can reduce spill, but it cannot prove that unrelated pixels stayed unchanged.
+
+The immediate infrastructure task is therefore not a model migration. It is exposing and consuming SAM2.1 video tracking reliably.
+
+## Editing contract
+
+The completed pipeline follows these rules:
+
+- Use the current applied timeline as the source, never an obsolete original after earlier edits have been applied.
+- Start temporal search at the playhead and expand outward only while evidence and prompt meaning require it.
+- Keep a stable tracking anchor separate from the exact editable surface.
+- Require full-frame-rate masks before compositing. Sampled tracking is evidence for range selection, not sufficient evidence for pixel protection.
+- Keep source pixels outside the approved mask exactly unchanged, apart from a narrow documented edge feather.
+- Treat newly generated objects as separate tracked objects.
+- Reject generated cuts, camera changes, mask escape, and unstable tracking.
+- Do not silently replace SAM2 tracking with a rectangle or stub in production.
+- Do not spend another generation call when only tracking, compositing, or validation needs to be retried.
+
+## Target flow
+
+```text
+request + playhead + selection
+  -> understand target, edit behavior, and expected new objects
+  -> choose natural temporal occurrence from the playhead outward
+  -> create exact target mask and stable tracking-anchor mask
+  -> track source target and anchor through the chosen window
+  -> add locked source handles
+  -> generate draft
+  -> align draft frames with source frames
+  -> track target in generated draft
+  -> detect and track any requested new objects
+  -> build one approved mask per output frame
+  -> composite generated pixels only inside approved masks
+  -> restore source audio and media properties
+  -> validate scope, tracking, structure, and seams
+  -> show result and enable or block Apply with a precise reason
+```
+
+## 1. Extend the Hugging Face worker with video tracking
+
+Keep SAM2.1 Hiera Small for the first implementation.
+
+Add a named `/track` Gradio endpoint beside `/segment`. It must use `SAM2VideoPredictor`, accept a bounded frame sequence, and support:
+
+- seed frame index
+- initial box, mask, or positive and negative points
+- one or more object IDs
+- forward and reverse propagation
+- maximum frame and wall-time limits
+- optional returned masks
+- per-frame confidence and state
+- clean predictor-state reset in `finally`, including timeouts and errors
+
+Use the existing `/sam/track` response shape where possible:
+
+```json
+{
+  "tracker": "sam2_video",
+  "processed_start_index": 0,
+  "processed_end_index": 119,
+  "cancelled": false,
+  "frames": [
+    {
+      "frame_index": 0,
+      "objects": {
+        "target": {
+          "bbox": {"x": 0.2, "y": 0.2, "w": 0.3, "h": 0.4},
+          "mask_b64": "...",
+          "confidence": 0.93,
+          "state": "tracked"
+        }
+      }
+    }
+  ]
+}
+```
+
+Add a capability response that explicitly reports still segmentation, video tracking, multi-object support, mask output, and limits. The backend must check capabilities instead of assuming that every Hugging Face URL is image-only.
+
+Update the backend HF adapter to call the named Gradio `/track` endpoint. `SAM_SEGMENTATION_URL` and `VISION_WORKER_URL` may then point to the same Space.
+
+### Work limits
+
+Range discovery and final compositing have different requirements:
+
+- **Discovery pass:** use a bounded sample rate to locate the occurrence efficiently.
+- **Compositing pass:** track every output frame. Divide long sequences into overlapping batches, seed each batch from a confident overlap mask, and reconcile overlap masks before continuing.
+
+Start with the current Hugging Face ZeroGPU deployment. Measure queue time, cold-start time, payload size, GPU time, and failure rate on the maximum supported edit. If it cannot remain within its execution limit reliably, deploy the same worker contract on a dedicated GPU service without changing the backend pipeline.
+
+## 2. Produce two source masks, not one
+
+A small user selection is often unsuitable for identity tracking. Track two related regions:
+
+- **Tracking anchor:** a stable parent used to maintain identity and motion. Examples: torso for shirt text, car body for a badge, window assembly for a window pane.
+- **Editable target:** the precise surface or object allowed to change. Examples: shirt front, painted car panels, window opening.
+
+The semantic planning response should include:
+
+- requested subject
+- selected part
+- tracking parent
+- edit behavior
+- whether a new object is expected
+- expected new-object names
+- whether the effect persists after the action
+
+The anchor may help recover tracking, but it must never automatically become the editable mask. This prevents a stable person mask from authorizing changes to their trousers when only shirt text should change.
+
+Use the playhead box, SAM mask candidates, positive points, negative points, and the semantic target description to choose both masks. If the selected part cannot be separated confidently, stop before generation and ask for a clearer selection.
+
+## 3. Track the selected object across the chosen window
+
+Run source tracking forward and backward from the playhead. Range selection remains prompt-aware:
+
+- temporary action: use the local action and its context
+- persistent appearance change: cover the target's confidently established contiguous occurrence
+- bounded event with persistent result: begin near the requested event and continue while the result or target remains relevant
+- explicit full-occurrence or full-range request: follow the requested scope up to the product limit
+
+Shot boundaries cap the search; they are not proof that the target exists through the whole shot. The chosen edit window requires positive target evidence.
+
+Store per-frame masks, boxes, confidence, anchor relationship, and tracking state. Persist a compact summary on the job and store mask artifacts where workers can retrieve them after a restart.
+
+## 4. Handle tracking loss and re-identification
+
+Use four states rather than treating one weak frame as disappearance:
+
+- `tracked`: confident target and anchor agreement
+- `uncertain`: weak mask, occlusion, blur, or identity ambiguity
+- `lost`: no reliable mask yet, but disappearance is not confirmed
+- `absent`: several consecutive frames support true disappearance
+
+Default disappearance should require several confident absent frames, configurable by frame rate and sampling interval. A single missing frame must not end an occurrence.
+
+For a short uncertain gap:
+
+1. Continue SAM2 propagation using motion and memory.
+2. Search nearby frames from the gap outward.
+3. Match candidates against the masked anchor reference using appearance, predicted position, size, and motion.
+4. Re-seed SAM2 on the first confident matching frame.
+5. Propagate back across the gap and reconcile overlapping masks.
+
+Re-identification must stay centered on the selected instance. Text such as `person` may find several people, so semantic detection proposes candidates while the anchor reference chooses the correct identity.
+
+If a persistent edit reaches uncertain tracking near an occurrence boundary, expand **analysis** toward the shot boundary up to the 30-second product limit. Do not approve those uncertain frames for editing until tracking is recovered.
+
+## 5. Generate within a declared effect envelope
+
+Before generation, derive a conservative spatial envelope from the target track:
+
+- exact editable-mask trajectory
+- small motion-aware padding
+- allowed direction and maximum distance for an expected new object
+- protected regions that must stay source-exact
+
+The provider prompt must state:
+
+- exact target and requested change
+- what may change
+- what must remain untouched
+- locked entry and exit handles
+- prohibition on camera changes, cuts, dissolves, scene replacement, and unrelated object changes
+- expected origin and motion of new objects
+
+For example, a balloon request may authorize the selected window opening and a bounded path outward from that opening. It does not authorize replacing the building or frames before the window appears.
+
+The envelope is a safety cap, not the final mask. The final approved mask still requires generated-frame evidence.
+
+## 6. Detect and track newly generated objects
+
+SAM2 cannot track a balloon in the original video because it does not exist there. Handle new objects after the first generated draft:
+
+1. Align every generated frame to its corresponding source frame.
+2. Compute change proposals after compensating for harmless compression and small photometric differences.
+3. Keep proposals connected to or emerging near the declared origin/effect envelope.
+4. Use the semantic reviewer to confirm the expected object and locate its first stable appearance.
+5. Seed the new object as a separate SAM2 object ID.
+6. Track it forward and, when useful, backward to its true first appearance.
+7. Reject unrelated changed components rather than adding them to the mask.
+
+For a moving existing subject, track the subject in both source and generated video. The approved region must cover the source location, generated location, and swept trajectory so the old subject can be removed and the moved subject can be inserted without leaving duplicates.
+
+If an expected new object cannot be isolated confidently, keep the draft visible for review but block Apply. Do not authorize every changed pixel merely because the prompt requested a new object.
+
+## 7. Build temporally stable approved masks
+
+For each frame, build the approved mask from evidence appropriate to the edit:
+
+```text
+approved mask
+  = editable source target
+  + generated target trajectory when the target moves
+  + confirmed requested new-object masks
+  + small bounded edge and motion padding
+```
+
+Then apply:
+
+- temporal smoothing that cannot create a mask where no object evidence exists
+- hole filling for stable internal regions
+- limited dilation based on resolution and motion
+- overlap checks against protected objects
+- maximum area, growth-rate, and distance-from-anchor limits
+
+The tracking anchor is not included unless it is also the explicitly editable target.
+
+## 8. Composite only approved regions
+
+The compositor works frame by frame:
+
+1. Start with the current source frame.
+2. Copy generated pixels only inside the approved mask.
+3. Use a narrow edge-aware feather around the spatial mask boundary to avoid a cut-out edge.
+4. Keep all pixels outside that band byte-equivalent to the decoded source frame before final encoding.
+5. Preserve source audio unless the user explicitly requested an audio change.
+6. Conform duration, frame rate, dimensions, pixel format, colour metadata, and timestamps before muxing.
+
+Spatial edge feathering is different from fading the entire edit in or out. Temporal seams still use locked handles and frame/motion matching.
+
+For an appearance edit such as shirt text, the source shirt-front mask can persist through the full tracked occurrence while trousers remain untouched. For a balloon edit, the window mask and confirmed balloon mask are composited while the rest of the building remains source-exact.
+
+## 9. Validate before Apply
+
+Validation runs on the composited candidate, not only on the raw provider output.
+
+### Structural checks
+
+- video decodes completely
+- frame count and duration are within tolerance
+- requested frame timestamps stay inside the generated clip
+- audio exists and remains synchronized
+- no duplicate, frozen, reversed, or missing frame sequence
+
+### Tracking checks
+
+- sufficient mask coverage across the approved edit interval
+- no unexplained identity switch
+- uncertain gaps remain below the configured limit
+- source and generated target tracks agree at entry and exit handles
+
+### Spatial checks
+
+- changed pixels outside the approved mask stay below encoding tolerance
+- mask area and growth remain plausible
+- generated objects remain inside their allowed envelope
+- protected objects do not overlap changed regions
+- no unrelated source region was replaced
+
+### Scene and seam checks
+
+- no unrequested camera cut, camera motion, zoom, or dissolve
+- background registration remains stable
+- entry and exit frames are selected from the safest matching handle positions
+- motion remains continuous across both cuts
+
+A technical failure disables Apply and names the failed check. It must not appear as a generic red crash. A semantic warning may leave Apply available when the media is technically safe, but spatial escape, invalid media, identity switching, or unsafe seams block it.
+
+## 10. Failure behavior
+
+- If video tracking is unavailable before generation, stop the local edit before spending provider credits and explain that target tracking is temporarily unavailable.
+- If tracking fails after generation, keep the draft visible and retry tracking or compositing without regenerating.
+- Never enable protected compositing from `tracker: stub`, a fixed rectangle, or sparse sampled boxes.
+- Disable the production tracking stub by default.
+- Never expand the editable mask to the full frame merely to make Apply succeed.
+- Never retry with another provider automatically.
+- Keep the existing one evidence-driven generation retry only for a correctable generation failure.
+- Persist every stage so navigation or refresh does not lose the draft or restart paid work.
+
+## 11. Progress and observability
+
+Persist and stream distinct stages:
+
+- understanding the selected part
+- finding where the target appears
+- following the target through the edit window
+- recovering the target after an occlusion
+- preparing protected regions
+- generating the draft
+- locating the requested new object
+- preserving unchanged regions
+- checking scope and continuity
+- ready to Apply, or Apply blocked with a specific reason
+
+Log and retain:
+
+- tracker and checkpoint version
+- worker capability response
+- sampled and full-rate frame counts
+- tracking confidence distribution and state changes
+- re-identification attempts and outcomes
+- mask area and growth per frame
+- generated change area inside and outside the mask
+- new-object seeds and lifetimes
+- composition time, validation time, and total GPU time
+- exact Apply-blocking evidence
+
+Do not log image data, masks, provider keys, or private prompts beyond the existing privacy policy.
+
+## Implementation sequence
+
+### Phase 1 — Video-tracking foundation
+
+1. Add the HF `/track` endpoint using `SAM2VideoPredictor`.
+2. Add capability reporting and multi-object prompt support.
+3. Update the backend HF adapter and remove hostname-based video rejection when capability confirms tracking.
+4. Add bounded overlapping batches for full-frame-rate tracking.
+5. Disable the production stub and add clear tracking-unavailable behavior.
+
+### Phase 2 — Source identity and occurrence
+
+1. Extend semantic planning with selected part, tracking parent, and expected new objects.
+2. Create separate anchor and editable masks.
+3. Track both directions from the playhead.
+4. Add `tracked`, `uncertain`, `lost`, and `absent` states.
+5. Add bounded re-identification and confident disappearance rules.
+6. Ensure uncertainty expands analysis only, never edit authorization.
+
+### Phase 3 — Generated-object tracking and containment
+
+1. Align source and generated frames.
+2. Create prompt-aware effect envelopes.
+3. Detect generated change proposals.
+4. Seed and track requested new objects as separate IDs.
+5. Track generated positions for moving existing subjects.
+6. Build stable, bounded approved masks.
+
+### Phase 4 — Protected compositing and validation
+
+1. Composite generated pixels only inside approved masks.
+2. Preserve source audio and media metadata.
+3. Add spatial escape, identity, scene-cut, and mask-stability checks.
+4. Run seam selection on the composited output.
+5. Make Apply state use candidate-specific validation evidence.
+
+### Phase 5 — Product integration and rollout
+
+1. Stream persisted tracking and compositing progress.
+2. Recover correctly after navigation, refresh, and worker restart.
+3. Add feature flags for tracking and protected compositing during rollout.
+4. Dark-run validation on candidates without changing Apply behavior.
+5. Enable protected Apply after the fixed evaluation set passes.
+6. Benchmark the HF worker at maximum supported load and move the same contract to dedicated GPU infrastructure only if reliability requires it.
+
+## Verification gates
+
+No live provider credits are needed for most tests. Synthetic source and generated clips can prove masking, compositing, range, persistence, and failure behavior deterministically.
+
+### Worker tests
+
+- box, mask, positive-point, and negative-point seeds
+- forward and reverse tracking
+- multiple object IDs, including one introduced later
+- batch overlap and re-seeding
+- timeout, cancellation, malformed input, and predictor cleanup
+- capability detection and HF Gradio adapter behavior
+
+### Tracking tests
+
+- temporary occlusion followed by correct recovery
+- true disappearance requiring several absent frames
+- same-class distractor without identity switching
+- tiny selected detail tracked through a stable parent
+- persistent edit expanding analysis without approving uncertain frames
+- shot boundary used as a cap rather than occurrence evidence
+
+### Compositing tests
+
+- shirt text changes while trousers remain source-exact
+- car colour changes while windows, wheels, road, and nearby cars remain source-exact
+- a moved person leaves no duplicate at the old position
+- a balloon appears from the selected window without changing the building
+- mask feather does not alter pixels beyond its documented band
+- original audio remains synchronized
+- sequential edits use the already-applied timeline
+
+### Rejection tests
+
+- generated camera cut
+- full-scene replacement
+- new object outside the effect envelope
+- mask explosion or sudden identity switch
+- insufficient full-frame-rate mask coverage
+- generated clip shorter than the required edit range
+- seam timestamp beyond the generated clip
+- production worker returning a stub tracker
+
+### End-to-end evaluation
+
+Run a fixed live-provider set only after deterministic tests pass:
+
+1. `Make this car green.`
+2. `Change her T-shirt text to Hello World.`
+3. `Open this window and make a balloon come out.`
+4. `Make this person jump.`
+5. A temporary occlusion and reappearance case.
+6. Two sequential edits on the same project.
+
+For each case, record temporal coverage, target correctness, unrelated pixel change, seam score, audio preservation, provider calls, total time, tracking recoveries, and Apply result. A human must confirm that the requested effect is complete and unrelated regions remain unchanged before production enablement.
+
+## Definition of done
+
+This work is complete when:
+
+- the deployed worker provides reliable SAM2 video masks at the required frame rate
+- local edits cannot Apply without confident per-frame spatial authorization
+- temporary tracking loss does not prematurely end an occurrence
+- re-identification preserves the selected instance
+- generated objects receive separate tracked masks
+- unrelated source regions remain unchanged after compositing
+- scene cuts and escaped changes are rejected clearly
+- audio, seams, refresh recovery, and sequential edits work end to end
+- the deterministic suites and fixed live-provider evaluation set pass
+

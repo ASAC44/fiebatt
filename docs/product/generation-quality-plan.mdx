@@ -184,6 +184,8 @@ The lightweight SAM service provides still-image segmentation. That is useful fo
 
 The normal Wan source-video path does not gain full video-mask control from that still mask. Per-frame compositing is enabled only when a real SAM2 video tracker is available and tracking confidence passes its safety threshold. Otherwise the system must describe the fallback honestly and continue with bbox and frame evidence.
 
+The implementation and rollout details for full-rate tracking, new generated objects, protected masks, and compositing are defined in the [tracked local editing plan](/product/tracked-local-editing-plan).
+
 ## 10. Stream useful progress
 
 Chat should show persisted stage messages such as:

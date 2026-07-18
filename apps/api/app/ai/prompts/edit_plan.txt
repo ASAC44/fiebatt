@@ -16,6 +16,8 @@ Return one semantic decision and exactly one grounded variant:
     "duration_policy": "bounded_action" | "continuous_occurrence" | "trajectory_continuation" | "all_occurrences",
     "temporal_behavior": "temporary" | "persistent_state" | "future_changing_motion",
     "target_description": "selected object or feature",
+    "selection_match": "match" | "mismatch" | "uncertain",
+    "selection_match_reason": "why the selected pixels do or do not match the request",
     "action_phases": ["ordered phase names for motion; empty for a state change"],
     "estimated_action_seconds": 3.5,
     "requires_recovery_motion": true,
@@ -37,6 +39,13 @@ Return one semantic decision and exactly one grounded variant:
 
 RULES
 - Inspect the reference image. Ground every noun and visual attribute in it.
+- The reference image is the selected target isolated from the source frame when
+  segmentation is available. Decide whether an explicit target noun in the user
+  request matches it. Use "mismatch" only for a clear contradiction, such as a
+  request for a man when the selection clearly contains only a bus. Pronouns and
+  deictic words such as "this", "it", "him", or "her" are not contradictions;
+  use "match". Use "uncertain" when the pixels are ambiguous. Never invent a
+  mismatch from a requested action or property.
 - Decide temporal meaning before any source clip is cut.
 - A state change such as "make this ball pink", "remove this logo", or "give
   this cat human-like eyes" normally means the change persists for this selected

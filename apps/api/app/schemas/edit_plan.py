@@ -44,6 +44,8 @@ class SemanticEditDecision(BaseModel):
     duration_policy: DurationPolicy
     temporal_behavior: TemporalBehavior
     target_description: str | None = None
+    selection_match: Literal["match", "mismatch", "uncertain"] = "match"
+    selection_match_reason: str | None = None
     action_phases: list[str] = Field(default_factory=list)
     estimated_action_seconds: float = Field(default=3.0, ge=0.5, le=15.0)
     requires_recovery_motion: bool = False

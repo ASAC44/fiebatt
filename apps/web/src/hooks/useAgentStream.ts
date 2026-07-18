@@ -147,6 +147,7 @@ export function useAgentStream(projectId?: string | null) {
     let detailedProgressAt = 0;
     let detailedStage = "";
     let lastHeartbeatAt = 0;
+    let previewSignature = "";
     const eventStream = streamJobEvents(jobId, {
       onEvent: (event) => {
         detailedProgressAt = Date.now();
@@ -173,6 +174,30 @@ export function useAgentStream(projectId?: string | null) {
         if (watch.signal.aborted) return;
         const ready = job.variants.filter((variant) => variant.url);
         const failed = job.variants.filter((variant) => variant.status === "error");
+        const nextPreviewSignature = ready
+          .map((variant) => `${variant.id}:${variant.url}`)
+          .join("|");
+        if (ready.length > 0 && nextPreviewSignature !== previewSignature) {
+          previewSignature = nextPreviewSignature;
+          dispatch({
+            type: "add_variant_preview",
+            jobId,
+            variants: ready,
+            timelineStart: job.selected_seams?.timeline_start ?? job.execution_window?.core_start ?? job.start_ts,
+            timelineEnd: job.selected_seams?.timeline_end ?? job.execution_window?.core_end ?? job.end_ts,
+            mediaStart: job.selected_seams?.media_start ?? job.execution_window?.edit_start_offset ?? 0,
+            mediaEnd:
+              job.selected_seams?.media_end ??
+              job.execution_window?.edit_end_offset ??
+              (job.start_ts != null && job.end_ts != null
+                ? job.end_ts - job.start_ts
+                : null),
+          });
+          dispatch({
+            type: "set_activity",
+            activity: ready.length === 1 ? "first pass ready — reviewing it now…" : "corrected pass ready — finishing review…",
+          });
+        }
         if (job.status === "done" || job.status === "error") {
           if (projectId) clearPendingTurn(projectId);
           if (ready.length > 0) {
@@ -180,10 +205,11 @@ export function useAgentStream(projectId?: string | null) {
               type: "add_variant_preview",
               jobId,
               variants: ready,
-              timelineStart: job.execution_window?.core_start ?? job.start_ts,
-              timelineEnd: job.execution_window?.core_end ?? job.end_ts,
-              mediaStart: job.execution_window?.edit_start_offset ?? 0,
+              timelineStart: job.selected_seams?.timeline_start ?? job.execution_window?.core_start ?? job.start_ts,
+              timelineEnd: job.selected_seams?.timeline_end ?? job.execution_window?.core_end ?? job.end_ts,
+              mediaStart: job.selected_seams?.media_start ?? job.execution_window?.edit_start_offset ?? 0,
               mediaEnd:
+                job.selected_seams?.media_end ??
                 job.execution_window?.edit_end_offset ??
                 (job.start_ts != null && job.end_ts != null
                   ? job.end_ts - job.start_ts

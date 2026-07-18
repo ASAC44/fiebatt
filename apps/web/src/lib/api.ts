@@ -121,6 +121,11 @@ export type Variant = {
   visual_coherence: number | null;
   prompt_adherence: number | null;
   error: string | null;
+  attempt_label?: string | null;
+  quality_state?: string | null;
+  quality_evidence?: string[];
+  continuity_validation?: ContinuityValidation | null;
+  selected_seams?: JobResp["selected_seams"];
 };
 
 export type JobResp = {
@@ -156,6 +161,12 @@ export type JobResp = {
   provider_attempts?: string[];
   localized_compositing?: Array<{ applied?: boolean; reason?: string }>;
   local_flow_telemetry?: Record<string, unknown> | null;
+  retry_state?: {
+    status: string;
+    retry_at?: number;
+    evidence?: string[];
+    correction?: string;
+  } | null;
 };
 
 export type GenerationExecutionWindow = {

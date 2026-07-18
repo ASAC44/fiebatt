@@ -52,6 +52,9 @@ export interface VariantPreview {
   description: string | null;
   visual_coherence: number | null;
   prompt_adherence: number | null;
+  attempt_label?: string | null;
+  quality_state?: string | null;
+  quality_evidence?: string[];
 }
 
 export interface GenerationProgressEntry {

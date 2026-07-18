@@ -18,6 +18,7 @@ CONTINUITY_UNAVAILABLE = "continuity validation unavailable"
 
 class GenerationQualityAction(StrEnum):
     PASS = "pass"
+    REVIEW_WARNING = "review_warning"
     CORRECTIVE_RETRY = "corrective_retry"
     PROVIDER_FALLBACK = "provider_fallback"
     HARD_FAIL = "hard_fail"
@@ -90,9 +91,25 @@ def attempt_quality_rank(
 def final_semantic_quality(score: dict | None) -> GenerationQualityDecision:
     evidence = semantic_quality_evidence(score)
     return GenerationQualityDecision(
-        GenerationQualityAction.HARD_FAIL if evidence else GenerationQualityAction.PASS,
+        GenerationQualityAction.REVIEW_WARNING if evidence else GenerationQualityAction.PASS,
         evidence,
     )
+
+
+def final_candidate_quality(
+    score: dict | None,
+    continuity: ContinuityReport | None,
+) -> GenerationQualityDecision:
+    """Semantic uncertainty warns; unsafe or unavailable seams block Apply."""
+    if continuity is None:
+        return GenerationQualityDecision(
+            GenerationQualityAction.HARD_FAIL,
+            ("frame matching unavailable",),
+        )
+    if not continuity.passed:
+        evidence = quality_evidence(score, continuity)
+        return GenerationQualityDecision(GenerationQualityAction.HARD_FAIL, evidence)
+    return final_semantic_quality(score)
 
 
 def select_fallback_provider(current_provider: str, duration: float) -> str | None:
@@ -132,7 +149,12 @@ def decide_generation_quality(
         and generated_seconds + duration <= MAX_GENERATED_SECONDS + 0.05
     )
     if not can_generate_again:
-        return GenerationQualityDecision(GenerationQualityAction.HARD_FAIL, evidence)
+        return final_candidate_quality(score, continuity)
+
+    # Missing semantic scoring cannot describe a useful correction. Missing
+    # structural validation cannot be repaired by asking the model to guess.
+    if score is None or continuity is None:
+        return final_candidate_quality(score, continuity)
 
     # A provider switch is not a seam repair. It historically spent another
     # paid render and replaced Wan with a weaker result. Retry this provider
@@ -170,6 +192,22 @@ def acceptance_block_reason(payload: dict | None) -> str | None:
     if evidence:
         return "generation quality hard-failed: " + "; ".join(evidence[:3])
     return "generation quality hard-failed"
+
+
+def quality_payload_for_candidate(
+    payload: dict | None,
+    variant_id: str,
+) -> dict:
+    """Overlay one candidate's review onto the legacy job-level fields."""
+    output = dict(payload or {})
+    reviews = output.get("candidate_reviews")
+    review = reviews.get(variant_id) if isinstance(reviews, dict) else None
+    if isinstance(review, dict):
+        output["generation_quality_state"] = review.get("quality_state")
+        output["generation_quality_evidence"] = review.get("evidence") or []
+        output["continuity_validation"] = review.get("continuity_validation")
+        output["selected_seams"] = review.get("selected_seams")
+    return output
 
 
 def acceptance_allowed(

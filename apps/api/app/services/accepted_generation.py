@@ -25,12 +25,21 @@ class AcceptedGenerationRange:
         return asdict(self)
 
 
-def accepted_generation_range(job: Job) -> AcceptedGenerationRange:
+def accepted_generation_range(
+    job: Job,
+    *,
+    variant: Variant | None = None,
+) -> AcceptedGenerationRange:
     if job.start_ts is None or job.end_ts is None:
         raise ValueError("generation job has no requested range")
     requested_start = float(job.start_ts)
     requested_end = float(job.end_ts)
     payload = dict(job.payload or {})
+    if variant is not None:
+        reviews = payload.get("candidate_reviews")
+        review = reviews.get(variant.id) if isinstance(reviews, dict) else None
+        if isinstance(review, dict):
+            payload["selected_seams"] = review.get("selected_seams")
     raw_window = payload.get("execution_window")
     window = raw_window if isinstance(raw_window, dict) else {}
     core_start = float(window.get("core_start", requested_start))

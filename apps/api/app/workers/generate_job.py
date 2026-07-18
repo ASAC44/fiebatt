@@ -60,6 +60,7 @@ from app.services.generation_quality import (
     attempt_quality_rank,
     corrective_prompt,
     decide_generation_quality,
+    final_candidate_quality,
     final_semantic_quality,
     semantic_quality_evidence,
 )
@@ -679,13 +680,17 @@ async def run(job_id: str) -> None:
         variant_count=len(list(plans)),
     )
 
-    # create the single Variant row so the polling endpoint sees it from t0
-    async with AsyncSessionLocal() as db:
-        v = Variant(job_id=job_id, index=0, status="pending")
-        db.add(v)
-        await db.flush()
-        variant_id = v.id
-        await db.commit()
+    async def create_attempt_variant(index: int) -> str:
+        async with AsyncSessionLocal() as db:
+            variant = Variant(job_id=job_id, index=index, status="pending")
+            db.add(variant)
+            await db.flush()
+            variant_id = variant.id
+            await db.commit()
+            return variant_id
+
+    # The first row exists before dispatch so polling can show its live state.
+    variant_id = await create_attempt_variant(0)
 
     source_video_url = _public_url_or_none(clip_url)
     mask_public_url = _public_url_or_none(mask_image_url or "")
@@ -749,7 +754,12 @@ async def run(job_id: str) -> None:
         )
         return base + correction
 
-    async def dispatch(provider: str, correction: str = "") -> bool:
+    async def dispatch(
+        provider: str,
+        correction: str = "",
+        *,
+        target_variant_id: str,
+    ) -> bool:
         attempt_mode = select_source_edit_mode(
             provider,
             duration=generation_duration,
@@ -764,7 +774,7 @@ async def run(job_id: str) -> None:
         )
         return await _run_variant(
             job_id=job_id,
-            variant_id=variant_id,
+            variant_id=target_variant_id,
             clip_path=clip_path,
             clip_url=clip_url,
             plan={
@@ -795,7 +805,7 @@ async def run(job_id: str) -> None:
     generated_seconds = generation_duration
     provider_attempts = [video_provider]
     fallback_used = False
-    initial_ok = await dispatch(video_provider)
+    initial_ok = await dispatch(video_provider, target_variant_id=variant_id)
 
     if generation_window.adaptive and not initial_ok:
         async with AsyncSessionLocal() as db:
@@ -823,6 +833,7 @@ async def run(job_id: str) -> None:
             attempts += 1
             generated_seconds += generation_duration
             provider_attempts.append(video_provider)
+            retry_variant_id = await create_attempt_variant(attempts - 1)
             await _emit(
                 job_id,
                 (
@@ -838,6 +849,7 @@ async def run(job_id: str) -> None:
             initial_ok = await dispatch(
                 video_provider,
                 corrective_prompt(failure_decision.evidence),
+                target_variant_id=retry_variant_id,
             )
 
     # collect outcome
@@ -1060,6 +1072,57 @@ async def run(job_id: str) -> None:
         )
         return report
 
+    async def persist_candidate_review(
+        variant: Variant,
+        candidate_score: dict | None,
+        candidate_continuity: ContinuityReport | None,
+    ) -> None:
+        decision = (
+            final_candidate_quality(candidate_score, candidate_continuity)
+            if generation_window.adaptive
+            else final_semantic_quality(candidate_score)
+        )
+        final_validation = validation_by_url.get(variant.url or "")
+        seams = final_validation[1] if final_validation is not None else None
+        review = {
+            "attempt": variant.index + 1,
+            "label": "First pass" if variant.index == 0 else "Corrected pass",
+            "quality_state": decision.action.value,
+            "evidence": list(decision.evidence),
+            "continuity_validation": (
+                candidate_continuity.metadata() if candidate_continuity is not None else None
+            ),
+            "selected_seams": seams,
+            "semantic_score": candidate_score,
+        }
+        async with AsyncSessionLocal() as db:
+            current_job = await db.get(Job, job_id)
+            if current_job is not None:
+                current_payload = dict(current_job.payload or {})
+                reviews = dict(current_payload.get("candidate_reviews") or {})
+                reviews[variant.id] = review
+                current_payload["candidate_reviews"] = reviews
+                current_job.payload = current_payload
+            await _update_variant(
+                db,
+                variant.id,
+                visual_coherence=(candidate_score or {}).get("visual_coherence"),
+                prompt_adherence=(candidate_score or {}).get("prompt_adherence"),
+            )
+            await db.commit()
+        await _emit(
+            job_id,
+            "candidate_review_done",
+            (
+                "first pass review complete"
+                if variant.index == 0
+                else "corrected pass review complete"
+            ),
+            variant_id=variant.id,
+            variant_index=variant.index,
+            **review,
+        )
+
     await _emit(
         job_id,
         "score_start",
@@ -1069,6 +1132,7 @@ async def run(job_id: str) -> None:
         score_variant(done[0]),
         validate_continuity(done[0]),
     )
+    await persist_candidate_review(done[0], score, continuity_report)
 
     quality_state = GenerationQualityAction.PASS
     quality_evidence: list[str] = []
@@ -1087,8 +1151,7 @@ async def run(job_id: str) -> None:
             GenerationQualityAction.CORRECTIVE_RETRY,
             GenerationQualityAction.PROVIDER_FALLBACK,
         }:
-            previous_url = done[0].url
-            previous_description = done[0].description
+            previous_variant = done[0]
             previous_score = score
             previous_continuity = continuity_report
             previous_provider = video_provider
@@ -1100,6 +1163,7 @@ async def run(job_id: str) -> None:
             attempts += 1
             generated_seconds += generation_duration
             provider_attempts.append(next_provider)
+            retry_variant_id = await create_attempt_variant(attempts - 1)
             await _emit(
                 job_id,
                 (
@@ -1118,10 +1182,11 @@ async def run(job_id: str) -> None:
             succeeded = await dispatch(
                 next_provider,
                 corrective_prompt(decision.evidence),
+                target_variant_id=retry_variant_id,
             )
             video_provider = next_provider
             async with AsyncSessionLocal() as db:
-                retried = await db.get(Variant, variant_id)
+                retried = await db.get(Variant, retry_variant_id)
                 generation_error = (
                     retried.error
                     if retried is not None and not succeeded
@@ -1129,23 +1194,16 @@ async def run(job_id: str) -> None:
                 )
                 if retried is not None and succeeded and retried.status == "done":
                     done = [retried]
-                elif retried is not None:
-                    await _update_variant(
-                        db,
-                        variant_id,
-                        status="done",
-                        url=previous_url,
-                        description=previous_description,
-                        error=None,
-                    )
-                    restored = await db.get(Variant, variant_id)
-                    if restored is not None:
-                        done = [restored]
+                else:
+                    done = [previous_variant]
             if succeeded:
                 done = [await maybe_composite(done[0], video_provider)]
                 candidate_score, candidate_continuity = await asyncio.gather(
                     score_variant(done[0]),
                     validate_continuity(done[0]),
+                )
+                await persist_candidate_review(
+                    done[0], candidate_score, candidate_continuity
                 )
                 if attempt_quality_rank(
                     candidate_score,
@@ -1154,18 +1212,7 @@ async def run(job_id: str) -> None:
                     score = candidate_score
                     continuity_report = candidate_continuity
                 else:
-                    async with AsyncSessionLocal() as db:
-                        await _update_variant(
-                            db,
-                            variant_id,
-                            status="done",
-                            url=previous_url,
-                            description=previous_description,
-                            error=None,
-                        )
-                        restored = await db.get(Variant, variant_id)
-                        if restored is not None:
-                            done = [restored]
+                    done = [previous_variant]
                     score = previous_score
                     continuity_report = previous_continuity
                     video_provider = previous_provider
@@ -1202,13 +1249,13 @@ async def run(job_id: str) -> None:
             or int(score.get("prompt_adherence") or 0) < 6
         )
         if needs_retry:
-            previous_url = done[0].url
-            previous_description = done[0].description
+            previous_variant = done[0]
             previous_score = score
             previous_continuity = continuity_report
             attempts += 1
             generated_seconds += generation_duration
             provider_attempts.append(video_provider)
+            retry_variant_id = await create_attempt_variant(attempts - 1)
             await _emit(
                 job_id,
                 "gen_retry",
@@ -1217,14 +1264,21 @@ async def run(job_id: str) -> None:
                 previous_score=score,
             )
             correction = corrective_prompt(semantic_quality_evidence(score))
-            succeeded = await dispatch(video_provider, correction)
+            succeeded = await dispatch(
+                video_provider,
+                correction,
+                target_variant_id=retry_variant_id,
+            )
             async with AsyncSessionLocal() as db:
-                retried = await db.get(Variant, variant_id)
+                retried = await db.get(Variant, retry_variant_id)
                 if retried is not None and succeeded and retried.status == "done":
                     done = [retried]
                     candidate_score, candidate_continuity = await asyncio.gather(
                         score_variant(retried),
                         validate_continuity(retried),
+                    )
+                    await persist_candidate_review(
+                        retried, candidate_score, candidate_continuity
                     )
                     if attempt_quality_rank(
                         candidate_score,
@@ -1233,17 +1287,7 @@ async def run(job_id: str) -> None:
                         score = candidate_score
                         continuity_report = candidate_continuity
                     else:
-                        await _update_variant(
-                            db,
-                            variant_id,
-                            status="done",
-                            url=previous_url,
-                            description=previous_description,
-                            error=None,
-                        )
-                        restored = await db.get(Variant, variant_id)
-                        if restored is not None:
-                            done = [restored]
+                        done = [previous_variant]
                         score = previous_score
                         continuity_report = previous_continuity
                         await _emit(
@@ -1253,14 +1297,7 @@ async def run(job_id: str) -> None:
                             attempt=attempts,
                         )
                 elif retried is not None:
-                    await _update_variant(
-                        db,
-                        variant_id,
-                        status="done",
-                        url=previous_url,
-                        description=previous_description,
-                        error=None,
-                    )
+                    done = [previous_variant]
                     await _emit(
                         job_id,
                         "gen_retry_failed",

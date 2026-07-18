@@ -347,6 +347,22 @@ export function AgentChat({ projectId }: AgentChatProps) {
           text-align: center;
           margin-top: 6px;
         }
+        .variant-preview__attempt {
+          display: inline-block;
+          margin: 0 0 6px;
+          color: var(--foreground);
+          font-size: 12px;
+          font-weight: 600;
+        }
+        .variant-preview__review {
+          margin: 6px 0 0;
+          color: var(--ink-fade);
+          font-size: 11px;
+          line-height: 1.45;
+        }
+        .variant-preview__review--unsafe {
+          color: rgba(255, 120, 120, 0.9);
+        }
 
         /* ── prompt plan brief ─ */
 
@@ -708,8 +724,13 @@ function VariantPreviewCard({
           const key = `${jobId}:${v.index}`;
           const isApplying = applyingVariant === key;
           const isApplied = appliedVariant === key;
+          const reviewPending = !v.quality_state;
+          const unsafe = v.quality_state === "hard_fail";
           return (
             <div key={v.id}>
+              <span className="variant-preview__attempt">
+                {v.attempt_label ?? (v.index === 0 ? "First pass" : "Corrected pass")}
+              </span>
               <div className="variant-preview__thumb">
                 {v.url ? (
                   <video
@@ -730,16 +751,33 @@ function VariantPreviewCard({
               {v.description && (
                 <p className="variant-preview__desc">{v.description}</p>
               )}
+              <p className={`variant-preview__review ${unsafe ? "variant-preview__review--unsafe" : ""}`}>
+                {reviewPending
+                  ? "Reviewing requested change and cut frames…"
+                  : unsafe
+                    ? `Apply blocked: ${v.quality_evidence?.[0] ?? "no safe cut frames found"}`
+                    : v.quality_state === "review_warning"
+                      ? `Review warning: ${v.quality_evidence?.[0] ?? "please inspect this result"}`
+                      : "Requested change and cut frames passed review."}
+              </p>
               {v.url && (
                 <button
                   type="button"
                   className="suggestion-card__btn suggestion-card__btn--accept"
                   style={{ marginTop: 4, width: "100%" }}
                   onClick={() => void onApply(jobId, v.index)}
-                  disabled={applyingVariant !== null || isApplied}
+                  disabled={applyingVariant !== null || isApplied || reviewPending || unsafe}
                   title="apply this variant to the timeline"
                 >
-                  {isApplying ? "applying…" : isApplied ? "applied" : "apply"}
+                  {isApplying
+                    ? "applying…"
+                    : isApplied
+                      ? "applied"
+                      : reviewPending
+                        ? "reviewing…"
+                        : unsafe
+                          ? "unsafe seam"
+                          : "apply"}
                 </button>
               )}
             </div>

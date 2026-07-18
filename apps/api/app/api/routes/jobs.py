@@ -20,6 +20,7 @@ router = APIRouter(tags=["jobs"])
 
 def _job_out(job: Job) -> JobOut:
     payload = job.payload or {}
+    candidate_reviews = payload.get("candidate_reviews") or {}
     return JobOut(
         job_id=job.id,
         kind=job.kind,
@@ -43,6 +44,7 @@ def _job_out(job: Job) -> JobOut:
         provider_attempts=payload.get("provider_attempts") or [],
         localized_compositing=payload.get("localized_compositing") or [],
         local_flow_telemetry=payload.get("local_flow_telemetry"),
+        retry_state=payload.get("retry_state"),
         variants=[
             VariantOut(
                 id=v.id,
@@ -53,6 +55,13 @@ def _job_out(job: Job) -> JobOut:
                 visual_coherence=v.visual_coherence,
                 prompt_adherence=v.prompt_adherence,
                 error=v.error,
+                attempt_label=(candidate_reviews.get(v.id) or {}).get("label"),
+                quality_state=(candidate_reviews.get(v.id) or {}).get("quality_state"),
+                quality_evidence=(candidate_reviews.get(v.id) or {}).get("evidence") or [],
+                continuity_validation=(candidate_reviews.get(v.id) or {}).get(
+                    "continuity_validation"
+                ),
+                selected_seams=(candidate_reviews.get(v.id) or {}).get("selected_seams"),
             )
             for v in sorted(job.variants, key=lambda v: v.index)
         ],

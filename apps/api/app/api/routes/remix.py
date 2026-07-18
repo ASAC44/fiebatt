@@ -21,7 +21,11 @@ from app.services.accepted_generation import (
     record_accepted_range,
     update_project_edl_for_acceptance,
 )
-from app.services.generation_quality import acceptance_allowed, acceptance_block_reason
+from app.services.generation_quality import (
+    acceptance_allowed,
+    acceptance_block_reason,
+    quality_payload_for_candidate,
+)
 from app.workers import entity_job
 from app.workers import generate_job as generate_worker
 
@@ -122,7 +126,7 @@ async def _accept_variant_for_job(
 ) -> tuple[str, str | None]:
     if job.start_ts is None or job.end_ts is None:
         raise HTTPException(status_code=422, detail="job has no segment range")
-    accepted_range = accepted_generation_range(job)
+    accepted_range = accepted_generation_range(job, variant=variant)
 
     overlapping = (
         await db.execute(
@@ -311,12 +315,16 @@ async def batch_accept(
         variant = next((v for v in job.variants if v.index == item.variant_index), None)
         if variant is None or variant.status != "done" or not variant.url:
             raise HTTPException(status_code=422, detail="variant not ready")
+        quality_payload = quality_payload_for_candidate(job.payload, variant.id)
         if not acceptance_allowed(
-            job.payload,
+            quality_payload,
             override_requested=item.continuity_override,
             override_enabled=get_settings().allow_hard_failed_acceptance,
         ):
-            raise HTTPException(status_code=409, detail=acceptance_block_reason(job.payload))
+            raise HTTPException(
+                status_code=409,
+                detail=acceptance_block_reason(quality_payload),
+            )
 
         segment_id, entity_job_id = await _accept_variant_for_job(
             db=db,

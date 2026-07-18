@@ -1,0 +1,230 @@
+---
+title: "Generation quality work plan"
+description: "The implementation plan for scoped edits, frame-matched seams, live review, and one evidence-driven retry."
+---
+
+# Generation quality work plan
+
+This document defines the target generation flow. It is a work plan, not a description of behavior already available in production.
+
+## Product decisions
+
+The completed flow must follow these rules:
+
+- show every generated candidate as soon as it is available
+- keep the first candidate while it is reviewed
+- allow at most one automatic retry, using specific evidence from the first result
+- never switch video providers automatically during a quality retry
+- preserve and use the complete generated context, including its handles
+- choose splice points by matching source and generated frames
+- do not hide a candidate merely because semantic review dislikes it
+- block Apply only when the media or seam is technically unsafe, and show the reason before the user clicks Apply
+- do not use opacity fades as the default seam repair
+- do not generate a separate transition clip
+
+## Target flow
+
+```text
+request
+  -> validate selected target
+  -> classify edit behavior
+  -> resolve natural edit range
+  -> add locked source handles
+  -> generate first candidate
+  -> show candidate immediately
+  -> review meaning and measure seams
+  -> choose matching entry and exit frames
+  -> pass, or announce one evidence-driven retry
+  -> allow the user to stop the retry
+  -> show the final candidate and Apply state
+```
+
+Each stage must be persisted on the job and streamed to chat. Leaving the editor, refreshing the page, or opening the dashboard must not stop the worker or lose its result.
+
+## 1. Validate the target before spending generation credits
+
+The playhead, bounding box, still-image segmentation, object description, and user request must refer to the same target.
+
+If the selected object and requested object conflict, generation stops before calling a video provider. The chat asks the user to move the playhead or select the correct object. It must not warn about a mismatch and continue generating anyway.
+
+SAM is useful here for a precise still-image target mask. A bounding-box crop remains the fallback.
+
+## 2. Classify how the edit affects time
+
+Prompt planning must classify every edit into one of three behaviors:
+
+| Behavior | Example | Range rule |
+| --- | --- | --- |
+| Temporary | "Make him blink" | Use a local core with handles and rejoin the original motion. |
+| Persistent state | "Make this car green" | Continue while the target remains visible. Do not return to its old state while it is still present. |
+| Future-changing motion | "Make the man run" | Continue until the generated motion can naturally rejoin the source, or until the target leaves the shot. |
+
+The planner must return the behavior, confidence, reason, requested target, and a provider-ready edit instruction in one structured response.
+
+This classification prevents impossible timelines such as a green car suddenly returning to red or a running person teleporting back to an old walking position.
+
+## 3. Resolve the range from the playhead outward
+
+Range search starts at the selected playhead and expands only as far as the request requires.
+
+- temporary edits stop at a natural local action boundary
+- persistent edits follow the target until it disappears, the shot changes, or the video ends
+- future-changing motion continues until source and generated motion can plausibly rejoin
+- an explicit user range overrides automatic scope when it is valid
+
+Object detection and tracking provide occurrence evidence. They must not scan the entire video when a local action is sufficient.
+
+If the resolved range exceeds the supported limit, finish range analysis first, then stop before video generation and show the product limit message. Long supported ranges are divided into bounded chunks only after the complete occurrence is known.
+
+## 4. Send strict, locked handles
+
+The provider receives the edit range plus source context on both sides whenever both sides exist.
+
+The generation prompt must include exact relative timestamps and a strict contract similar to:
+
+> The first `{pre_handle}` seconds and final `{post_handle}` seconds are locked source handles. Keep their visual content identical to the source: objects, colour, lighting, pose, camera, background, and motion. Do not introduce cuts, fades, freezes, or appearing or disappearing objects. Inside the editable interval, begin from the same pose and motion, perform the requested change continuously frame by frame, and leave in a state that can continue naturally.
+
+The task-specific prompt must also name what may change and what must remain untouched. For example, a colour edit should identify the exact surface, required colour, and protected windows, wheels, reflections, road, and nearby objects.
+
+Prompting is a constraint, not proof. Handle preservation is verified after generation.
+
+## 5. Keep the full generated context
+
+The generated handles must not be discarded before editing the timeline. They provide the overlap needed to find safe splice points.
+
+For an entry seam, compare source and generated frames throughout the pre-handle. For an exit seam, do the same throughout the post-handle. The accepted media range begins and ends at the selected matching frames rather than always at the nominal edit-core boundaries.
+
+Persistent edits need an exit handle only after the target leaves view or reaches a state where returning to source is semantically valid.
+
+## 6. Choose seams by frame and motion matching
+
+Seam selection is deterministic. It does not rely only on a visual-language model.
+
+For each possible cut frame in a handle, measure:
+
+- full-frame visual difference
+- background difference outside the target
+- target position and shape difference
+- camera and optical-motion difference across neighboring frames
+- temporal direction, so the cut does not reverse or freeze motion
+
+Choose the lowest-cost valid entry and exit pair. Require a minimum safety threshold. Save the chosen timestamps, scores, and rejected alternatives in job telemetry.
+
+If no safe pair exists, keep the candidate visible but disable Apply with the seam evidence. That evidence may drive the single corrective retry.
+
+An opacity dissolve can create ghosts and false motion, so it is not the default solution. A separately generated transition adds another model inconsistency and two more seams, so it is not part of this flow.
+
+## 7. Review the candidate while the user can see it
+
+As soon as the first provider result is stored, stream it to the chat as `First pass`. Do not wait for semantic scoring or seam analysis before showing it.
+
+Two reviews then run:
+
+### Semantic review
+
+A visual model checks chronological full frames and target crops against explicit questions:
+
+- was the correct target changed?
+- was the requested property or action produced?
+- did the change spill outside the target?
+- did unrelated content change?
+
+Semantic review writes a short, concrete explanation. It helps decide whether to retry, but it does not hide the candidate or override the user's visual judgment.
+
+### Structural review
+
+Deterministic media checks verify duration, decoding, frame order, audio, handle preservation, and entry and exit seam quality. A structural failure disables Apply immediately and displays its reason beside the candidate.
+
+## 8. Allow one visible, evidence-driven retry
+
+A retry is allowed only when the first candidate has a clear, high-confidence failure that can be expressed as a concrete correction.
+
+Example:
+
+```text
+First pass missed the requested colour: the car became white instead of green.
+Retrying with: change only the painted body panels to saturated green; preserve all other surfaces.
+[Stop retry]
+```
+
+The first candidate remains visible. Before dispatching the retry, the client receives the review and a short cancellation window with `Retry now` and `Stop retry` actions.
+
+If the provider call has already started, cancellation is best effort: stop polling and downstream processing and discard a late result. The UI must not imply that already-spent provider credits can always be recovered.
+
+The retry must:
+
+- use the same provider
+- use the same resolved range and locked handles
+- append the precise review evidence to the prompt
+- create a separate candidate record instead of overwriting the first result
+- never trigger another automatic retry
+
+## 9. Use SAM only where it provides real evidence
+
+The lightweight SAM service provides still-image segmentation. That is useful for:
+
+- validating the selected target
+- making a clean target crop for prompt grounding
+- weighting seam measurements toward background preservation
+- giving semantic review a precise target crop
+
+The normal Wan source-video path does not gain full video-mask control from that still mask. Per-frame compositing is enabled only when a real SAM2 video tracker is available and tracking confidence passes its safety threshold. Otherwise the system must describe the fallback honestly and continue with bbox and frame evidence.
+
+## 10. Stream useful progress
+
+Chat should show persisted stage messages such as:
+
+- checking the selected object
+- deciding whether the change is temporary or persistent
+- following the target from the playhead
+- preparing locked context
+- generating first pass with Wan
+- first pass ready
+- checking requested change
+- matching entry and exit frames
+- first pass missed the requested colour
+- retry begins in 10 seconds — Stop retry
+- corrected pass ready
+- ready to Apply, or Apply blocked because no safe seam was found
+
+Repeated generic messages such as `Creating edit` are not sufficient.
+
+## 11. Preserve audio and timeline state
+
+Generated video is conformed to the source frame rate, dimensions, duration, and audio layout. Original audio remains authoritative unless the request explicitly changes sound.
+
+Apply commits the frame-matched generated range into the EDL. A follow-up edit uses the current applied timeline as its source, so it cannot silently revert earlier edits.
+
+Candidate records, review evidence, selected seams, retry state, and final Apply state survive refresh and navigation.
+
+## Implementation sequence
+
+1. Remove the experimental default opacity seam blend before shipping this work.
+2. Add the three-way temporal behavior to prompt planning and range resolution.
+3. Store the complete generated context and candidate attempts separately.
+4. Implement frame and motion seam search across both handles.
+5. Change acceptance to use the selected media timestamps.
+6. Stream the first candidate before review finishes.
+7. Add semantic and structural review cards with correct Apply state.
+8. Add the retry grace period, cancel endpoint, and one-retry state machine.
+9. Connect SAM crops to target validation, semantic review, and seam weighting.
+10. Verify audio, refresh recovery, follow-up edits, Compare, export, and Apply end to end.
+
+## Verification gates
+
+The work is ready to merge only when all of these pass:
+
+- unit tests for all three temporal behaviors and range rules
+- synthetic seam tests with known best entry and exit frames
+- motion tests that reject freeze, reversal, and teleport seams
+- integration test proving the first candidate appears before review completes
+- integration test proving Stop retry prevents a second dispatch
+- integration test proving only one targeted retry can run
+- integration test proving both candidates remain stored
+- integration test proving Apply uses selected seam timestamps
+- integration test proving a follow-up edit uses the applied timeline
+- browser test covering navigation away, refresh, return, Compare, Apply, and export
+- audio test proving original sound remains synchronized
+- production build, backend suite, frontend suite, and CLI suite
+
+Before enabling the new acceptance path in production, run a small fixed evaluation set containing colour changes, appearance changes, temporary actions, persistent state edits, trajectory-changing motion, target mismatches, and sequential edits. Record generation time, provider calls, semantic success, seam score, Apply success, and human review.

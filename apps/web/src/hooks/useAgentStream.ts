@@ -94,7 +94,20 @@ function clearPendingTurn(projectId: string): void {
   localStorage.removeItem(pendingTurnKey(projectId));
 }
 
-function generationActivity(event: JobStreamEvent): string {
+function generationActivity(event: JobStreamEvent, retryRendering = false): string {
+  if (retryRendering) {
+    if (event.stage === "gen_poll" || event.stage === "gen_submit") {
+      return "video model improving the corrected pass…";
+    }
+    if (
+      event.stage === "score_start" ||
+      event.stage.startsWith("continuity_") ||
+      event.stage.startsWith("seam_match_") ||
+      event.stage === "candidate_review_done"
+    ) {
+      return "reviewing the corrected pass…";
+    }
+  }
   if (event.stage.startsWith("chunk_")) {
     return event.msg.replace(/\.\.\./g, "…");
   }
@@ -155,11 +168,22 @@ export function useAgentStream(projectId?: string | null) {
     let retrySignature = "";
     let persistedProgressSignature = "";
     let pollFailures = 0;
+    let retryRendering = false;
+    let retryWaiting = false;
     const eventStream = streamJobEvents(jobId, {
       onEvent: (event) => {
+        if (event.stage === "retry_pending") retryWaiting = true;
+        if (
+          event.stage === "retry_dispatched" ||
+          event.stage === "gen_retry" ||
+          event.stage === "gen_provider_fallback"
+        ) {
+          retryWaiting = false;
+          retryRendering = true;
+        }
         detailedProgressAt = Date.now();
         detailedStage = event.stage;
-        const text = generationActivity(event);
+        const text = generationActivity(event, retryRendering);
         dispatch({ type: "set_activity", activity: text });
         const now = Date.now();
         const periodicStage = event.stage === "gen_poll" || event.stage === "chunk_poll";
@@ -204,6 +228,11 @@ export function useAgentStream(projectId?: string | null) {
         const ready = job.variants.filter((variant) => variant.url);
         const failed = job.variants.filter((variant) => variant.status === "error");
         if (job.retry_state) {
+          retryWaiting = job.retry_state.status === "waiting";
+          if (job.retry_state.status === "dispatched") {
+            retryWaiting = false;
+            retryRendering = true;
+          }
           const nextRetrySignature = JSON.stringify(job.retry_state);
           if (nextRetrySignature !== retrySignature) {
             retrySignature = nextRetrySignature;
@@ -249,10 +278,6 @@ export function useAgentStream(projectId?: string | null) {
               (job.start_ts != null && job.end_ts != null
                 ? job.end_ts - job.start_ts
                 : null),
-          });
-          dispatch({
-            type: "set_activity",
-            activity: ready.length === 1 ? "first pass ready — reviewing it now…" : "corrected pass ready — finishing review…",
           });
         }
         if (job.status === "done" || job.status === "error") {
@@ -305,9 +330,11 @@ export function useAgentStream(projectId?: string | null) {
             detailedStage.startsWith("continuity");
           const heartbeat =
             job.status === "processing"
-              ? reviewing
-                ? `checking quality and transitions · ${elapsed}s elapsed…`
-                : `video model rendering · ${elapsed}s elapsed…`
+              ? retryWaiting
+                ? `first pass reviewed; corrective retry waiting · ${elapsed}s elapsed…`
+                : reviewing
+                ? `${retryRendering ? "reviewing corrected pass" : "reviewing first pass"} · ${elapsed}s elapsed…`
+                : `${retryRendering ? "video model improving corrected pass" : "video model rendering"} · ${elapsed}s elapsed…`
               : "waiting for video model…";
           dispatch({
             type: "set_activity",

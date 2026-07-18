@@ -25,6 +25,7 @@ async function installApi(
   timeline?: unknown,
   jobs?: {
     agentSse: string;
+    jobSse?: string;
     current: () => unknown | null;
     onAgentChat?: () => void;
   },
@@ -37,6 +38,13 @@ async function installApi(
       jobs.onAgentChat?.();
       return route.fulfill({
         body: jobs.agentSse,
+        contentType: "text/event-stream",
+        status: 200,
+      });
+    }
+    if (path === "/api/jobs/job-navigation/stream" && jobs) {
+      return route.fulfill({
+        body: jobs.jobSse ?? "",
         contentType: "text/event-stream",
         status: 200,
       });
@@ -334,6 +342,53 @@ test("failed render restores as a safe status instead of a raw red error", async
   await expect(page.getByText(/not added to your timeline/i)).toBeVisible();
   await expect(page.getByText(/3\.88s|4\.04s|ffmpeg|exception/i)).toHaveCount(0);
   await expect(page.locator(".msg--error")).toHaveCount(0);
+});
+
+test("corrective retry keeps one stable corrected-pass status", async ({ page }) => {
+  const currentJob = () => ({
+    job_id: "job-navigation",
+    kind: "generate",
+    status: "processing",
+    error: null,
+    created_at: new Date().toISOString(),
+    accepted: false,
+    start_ts: 0,
+    end_ts: 5,
+    retry_state: {
+      status: "dispatched",
+      retry_at: Date.now() / 1000,
+      evidence: ["target text was incomplete"],
+    },
+    variants: [{
+      id: "first-pass",
+      index: 0,
+      status: "done",
+      url: "/first-pass.mp4",
+      description: "first pass",
+      quality_state: "review_warning",
+      quality_evidence: ["target text was incomplete"],
+      error: null,
+    }],
+  });
+  const jobSse = [
+    `data: ${JSON.stringify({ stage: "gen_retry", msg: "starting corrected pass", ts: 1 })}`,
+    "",
+    `data: ${JSON.stringify({ stage: "gen_poll", msg: "Wan still rendering", ts: 2 })}`,
+    "",
+    `data: ${JSON.stringify({ stage: "score_start", msg: "reviewing result", ts: 3 })}`,
+    "",
+    "",
+  ].join("\n");
+
+  await installApi(page, [project], undefined, {
+    agentSse: "event: done\ndata: {}\n\n",
+    jobSse,
+    current: currentJob,
+  });
+  await page.goto(`/editor?projectId=${project.project_id}`);
+
+  await expect(page.getByText("reviewing the corrected pass…")).toBeVisible();
+  await expect(page.getByText(/reviewing first pass/i)).toHaveCount(0);
 });
 
 test("prompt card separates user request from refined prompt", async ({ page }) => {

@@ -15,6 +15,11 @@ class VariantOut(BaseModel):
     visual_coherence: int | None = None
     prompt_adherence: int | None = None
     error: str | None = None
+    attempt_label: str | None = None
+    quality_state: str | None = None
+    quality_evidence: list[str] = Field(default_factory=list)
+    continuity_validation: dict[str, Any] | None = None
+    selected_seams: dict[str, Any] | None = None
 
 
 class JobOut(BaseModel):
@@ -34,6 +39,7 @@ class JobOut(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     execution_window: dict[str, Any] | None = None
     continuity_validation: dict[str, Any] | None = None
+    selected_seams: dict[str, Any] | None = None
     generation_quality_state: str | None = None
     generation_quality_evidence: list[str] = Field(default_factory=list)
     generation_attempts: int | None = None
@@ -41,3 +47,4 @@ class JobOut(BaseModel):
     provider_attempts: list[str] = Field(default_factory=list)
     localized_compositing: list[dict[str, Any]] = Field(default_factory=list)
     local_flow_telemetry: dict[str, Any] | None = None
+    retry_state: dict[str, Any] | None = None

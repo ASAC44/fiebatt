@@ -13,8 +13,11 @@ Return one semantic decision and exactly one grounded variant:
   "decision": {
     "scope": "local" | "all_occurrences",
     "change_type": "appearance" | "removal" | "replacement" | "motion" | "scene",
-    "duration_policy": "bounded_action" | "continuous_occurrence" | "all_occurrences",
+    "duration_policy": "bounded_action" | "continuous_occurrence" | "trajectory_continuation" | "all_occurrences",
+    "temporal_behavior": "temporary" | "persistent_state" | "future_changing_motion",
     "target_description": "selected object or feature",
+    "selection_match": "match" | "mismatch" | "uncertain",
+    "selection_match_reason": "why the selected pixels do or do not match the request",
     "action_phases": ["ordered phase names for motion; empty for a state change"],
     "estimated_action_seconds": 3.5,
     "requires_recovery_motion": true,
@@ -36,14 +39,28 @@ Return one semantic decision and exactly one grounded variant:
 
 RULES
 - Inspect the reference image. Ground every noun and visual attribute in it.
+- The reference image is the selected target isolated from the source frame when
+  segmentation is available. Decide whether an explicit target noun in the user
+  request matches it. Use "mismatch" only for a clear contradiction, such as a
+  request for a man when the selection clearly contains only a bus. Pronouns and
+  deictic words such as "this", "it", "him", or "her" are not contradictions;
+  use "match". Use "uncertain" when the pixels are ambiguous. Never invent a
+  mismatch from a requested action or property.
 - Decide temporal meaning before any source clip is cut.
 - A state change such as "make this ball pink", "remove this logo", or "give
   this cat human-like eyes" normally means the change persists for this selected
   target's complete continuous appearance. Use scope "local" and duration_policy
-  "continuous_occurrence". Do not limit such changes to an arbitrary few seconds.
-- An action such as bounce, jump, wave, or turn is local and time-bounded. Use
-  duration_policy "bounded_action" and estimate enough time for preparation,
-  action, landing/recovery, and smooth return to source motion.
+  "continuous_occurrence" with temporal_behavior "persistent_state". Do not
+  limit such changes to an arbitrary few seconds.
+- An action such as blink, bounce, jump, wave, or turn can end near its original
+  state. Use temporal_behavior "temporary" and duration_policy "bounded_action".
+  Estimate enough time for preparation, action, landing/recovery, and a smooth
+  return to source motion.
+- Motion such as run, walk, fly, drive, leave, approach, follow, or chase changes
+  the subject's later position or trajectory. Use temporal_behavior
+  "future_changing_motion" and duration_policy "trajectory_continuation". Continue
+  until the generated motion can naturally rejoin the source or the target leaves
+  the shot. Never force it back into an old source position.
 - Use scope "all_occurrences" and duration_policy "all_occurrences" only when
   the user clearly asks for every appearance, everywhere, throughout, or the
   whole video. Never interpret an ordinary state change as permission to search

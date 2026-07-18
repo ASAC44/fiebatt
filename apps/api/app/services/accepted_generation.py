@@ -25,12 +25,21 @@ class AcceptedGenerationRange:
         return asdict(self)
 
 
-def accepted_generation_range(job: Job) -> AcceptedGenerationRange:
+def accepted_generation_range(
+    job: Job,
+    *,
+    variant: Variant | None = None,
+) -> AcceptedGenerationRange:
     if job.start_ts is None or job.end_ts is None:
         raise ValueError("generation job has no requested range")
     requested_start = float(job.start_ts)
     requested_end = float(job.end_ts)
     payload = dict(job.payload or {})
+    if variant is not None:
+        reviews = payload.get("candidate_reviews")
+        review = reviews.get(variant.id) if isinstance(reviews, dict) else None
+        if isinstance(review, dict):
+            payload["selected_seams"] = review.get("selected_seams")
     raw_window = payload.get("execution_window")
     window = raw_window if isinstance(raw_window, dict) else {}
     core_start = float(window.get("core_start", requested_start))
@@ -43,6 +52,21 @@ def accepted_generation_range(job: Job) -> AcceptedGenerationRange:
     committed = raw_committed if isinstance(raw_committed, dict) else {}
     committed_start = float(committed.get("start", core_start))
     committed_end = float(committed.get("end", core_end))
+    raw_seams = payload.get("selected_seams")
+    seams = raw_seams if isinstance(raw_seams, dict) else {}
+    if seams.get("passed") is True:
+        candidate_media_start = float(seams.get("media_start", media_start))
+        candidate_media_end = float(seams.get("media_end", media_end))
+        candidate_timeline_start = float(seams.get("timeline_start", core_start))
+        candidate_timeline_end = float(seams.get("timeline_end", core_end))
+        if (
+            0.0 <= candidate_media_start < candidate_media_end <= context_end - context_start + 0.05
+            and context_start - 0.05 <= candidate_timeline_start < candidate_timeline_end <= context_end + 0.05
+        ):
+            media_start = candidate_media_start
+            media_end = candidate_media_end
+            committed_start += candidate_timeline_start - core_start
+            committed_end += candidate_timeline_end - core_end
     return AcceptedGenerationRange(
         requested_start=requested_start,
         requested_end=requested_end,

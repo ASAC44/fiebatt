@@ -48,6 +48,7 @@ def test_state_change_defaults_to_current_continuous_occurrence():
 
     assert result.intent.scope == "local"
     assert result.intent.duration_policy == "continuous_occurrence"
+    assert result.intent.temporal_behavior == "persistent_state"
 
 
 def test_action_defaults_to_bounded_local_window():
@@ -55,3 +56,13 @@ def test_action_defaults_to_bounded_local_window():
 
     assert result.intent.scope == "local"
     assert result.intent.duration_policy == "bounded_action"
+    assert result.intent.temporal_behavior == "temporary"
+
+
+def test_trajectory_change_covers_the_current_occurrence():
+    result = plan_prompt_intent("make this man run")
+
+    assert result.intent.scope == "local"
+    assert result.intent.duration_policy == "trajectory_continuation"
+    assert result.intent.temporal_behavior == "future_changing_motion"
+    assert result.estimate.analysis_mode == "complete_local_occurrence"

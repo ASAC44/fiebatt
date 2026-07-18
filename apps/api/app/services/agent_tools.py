@@ -820,7 +820,12 @@ async def _accept_variant(
         record_accepted_range,
         update_project_edl_for_acceptance,
     )
-    from app.services.generation_quality import acceptance_allowed, acceptance_block_reason
+    from app.services.generation_quality import (
+        acceptance_allowed,
+        acceptance_block_reason,
+        cancel_waiting_retry,
+        quality_payload_for_candidate,
+    )
     from app.services.timeline_response import build_timeline_response
     from app.workers import entity_job
 
@@ -846,16 +851,18 @@ async def _accept_variant(
     )
     if variant is None or variant.status != "done" or not variant.url:
         raise ValueError("variant not ready")
+    job.payload = cancel_waiting_retry(job.payload, reason="candidate applied")
+    quality_payload = quality_payload_for_candidate(job.payload, variant.id)
     if not acceptance_allowed(
-        job.payload,
+        quality_payload,
         override_requested=continuity_override,
         override_enabled=_get_backend_settings().allow_hard_failed_acceptance,
     ):
-        raise ValueError(acceptance_block_reason(job.payload))
+        raise ValueError(acceptance_block_reason(quality_payload))
 
     if job.start_ts is None or job.end_ts is None:
         raise ValueError("job has no segment range")
-    accepted_range = accepted_generation_range(job)
+    accepted_range = accepted_generation_range(job, variant=variant)
 
     # deactivate overlapping generated segments
     overlapping = (

@@ -121,6 +121,11 @@ export type Variant = {
   visual_coherence: number | null;
   prompt_adherence: number | null;
   error: string | null;
+  attempt_label?: string | null;
+  quality_state?: string | null;
+  quality_evidence?: string[];
+  continuity_validation?: ContinuityValidation | null;
+  selected_seams?: JobResp["selected_seams"];
 };
 
 export type JobResp = {
@@ -140,6 +145,15 @@ export type JobResp = {
   warnings?: string[];
   execution_window?: GenerationExecutionWindow | null;
   continuity_validation?: ContinuityValidation | null;
+  selected_seams?: {
+    passed: boolean;
+    media_start: number;
+    media_end: number;
+    timeline_start: number;
+    timeline_end: number;
+    entry?: { score: number; source_timestamp: number; media_timestamp: number } | null;
+    exit?: { score: number; source_timestamp: number; media_timestamp: number } | null;
+  } | null;
   generation_quality_state?: string | null;
   generation_quality_evidence?: string[];
   generation_attempts?: number | null;
@@ -147,6 +161,12 @@ export type JobResp = {
   provider_attempts?: string[];
   localized_compositing?: Array<{ applied?: boolean; reason?: string }>;
   local_flow_telemetry?: Record<string, unknown> | null;
+  retry_state?: {
+    status: string;
+    retry_at?: number;
+    evidence?: string[];
+    correction?: string;
+  } | null;
 };
 
 export type GenerationExecutionWindow = {
@@ -197,7 +217,8 @@ export type EditPlanResp = {
   intent: {
     raw_prompt: string;
     change_type: "appearance" | "removal" | "replacement" | "motion" | "scene";
-    duration_policy: "bounded_action" | "continuous_occurrence" | "explicit_range" | "all_occurrences";
+    duration_policy: "bounded_action" | "continuous_occurrence" | "trajectory_continuation" | "explicit_range" | "all_occurrences";
+    temporal_behavior: "temporary" | "persistent_state" | "future_changing_motion";
     action_phases: string[];
     estimated_action_seconds: number;
     requires_recovery_motion: boolean;
@@ -559,6 +580,16 @@ export function accept(job_id: string, variant_index: number): Promise<AcceptRes
 }
 
 export const acceptVariant = accept;
+
+export function decideGenerationRetry(
+  jobId: string,
+  action: "cancel" | "retry_now",
+): Promise<{ status: string }> {
+  return request(`/api/jobs/${jobId}/retry-decision`, {
+    method: "POST",
+    body: JSON.stringify({ action }),
+  });
+}
 
 export function getEntity(entity_id: string): Promise<EntityResp> {
   return request<EntityResp>(`/api/entities/${entity_id}`);

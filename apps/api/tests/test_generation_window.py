@@ -97,4 +97,7 @@ def test_protected_context_prompt_names_edit_offsets_and_handles():
     assert "0.500 through 4.000" in rendered
     assert "first 0.500 seconds" in rendered
     assert "final 2.000 seconds" in rendered
+    assert "locked source handles" in rendered
+    assert "identical to the source" in rendered
+    assert "Do not use a cut, fade, dissolve" in rendered
     assert rendered.endswith("Make the person jump.")

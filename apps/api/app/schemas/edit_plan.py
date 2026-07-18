@@ -17,8 +17,14 @@ ChangeType = Literal["appearance", "removal", "replacement", "motion", "scene"]
 DurationPolicy = Literal[
     "bounded_action",
     "continuous_occurrence",
+    "trajectory_continuation",
     "explicit_range",
     "all_occurrences",
+]
+TemporalBehavior = Literal[
+    "temporary",
+    "persistent_state",
+    "future_changing_motion",
 ]
 
 
@@ -36,12 +42,30 @@ class SemanticEditDecision(BaseModel):
     scope: EditScope
     change_type: ChangeType
     duration_policy: DurationPolicy
+    temporal_behavior: TemporalBehavior
     target_description: str | None = None
+    selection_match: Literal["match", "mismatch", "uncertain"] = "match"
+    selection_match_reason: str | None = None
     action_phases: list[str] = Field(default_factory=list)
     estimated_action_seconds: float = Field(default=3.0, ge=0.5, le=15.0)
     requires_recovery_motion: bool = False
     preservation_requirements: list[str] = Field(default_factory=list)
     reasoning: str = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode="before")
+    @classmethod
+    def infer_legacy_temporal_behavior(cls, value):
+        if isinstance(value, dict) and not value.get("temporal_behavior"):
+            value = dict(value)
+            policy = value.get("duration_policy")
+            value["temporal_behavior"] = (
+                "future_changing_motion"
+                if policy == "trajectory_continuation"
+                else "persistent_state"
+                if policy == "continuous_occurrence"
+                else "temporary"
+            )
+        return value
 
 
 class SemanticEditPlan(BaseModel):
@@ -55,6 +79,7 @@ class SemanticEditPlan(BaseModel):
             scope=decision.scope,
             change_type=decision.change_type,
             duration_policy=decision.duration_policy,
+            temporal_behavior=decision.temporal_behavior,
             target_description=decision.target_description,
             action_phases=decision.action_phases,
             estimated_action_seconds=decision.estimated_action_seconds,
@@ -70,6 +95,7 @@ class EditIntent(BaseModel):
     scope: EditScope = "local"
     change_type: ChangeType
     duration_policy: DurationPolicy = "bounded_action"
+    temporal_behavior: TemporalBehavior = "temporary"
     target_description: str | None = None
     action_phases: list[str] = Field(default_factory=list)
     estimated_action_seconds: float = Field(default=3.0, gt=0.0)
@@ -77,6 +103,21 @@ class EditIntent(BaseModel):
     preservation_requirements: list[str] = Field(default_factory=list)
     reasoning: str | None = None
     grounded_edit: GroundedEditInstruction | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def infer_legacy_temporal_behavior(cls, value):
+        if isinstance(value, dict) and not value.get("temporal_behavior"):
+            value = dict(value)
+            policy = value.get("duration_policy")
+            value["temporal_behavior"] = (
+                "future_changing_motion"
+                if policy == "trajectory_continuation"
+                else "persistent_state"
+                if policy == "continuous_occurrence"
+                else "temporary"
+            )
+        return value
 
 
 class EditCore(BaseModel):

@@ -185,6 +185,60 @@ async def test_state_change_plan_covers_current_occurrence(client, owned_selecti
 
 
 @pytest.mark.asyncio
+async def test_clear_target_mismatch_stops_before_range_and_generation(
+    client, owned_selection, monkeypatch
+):
+    project_id, selection_id = owned_selection
+    planning_frames = []
+
+    async def subject_reference_path(url):
+        assert url == "/media/subject.png"
+        return "/tmp/isolated-subject.png"
+
+    async def mismatched_plan(prompt, bbox, planning_frame):
+        planning_frames.append(planning_frame)
+        return {
+            "decision": {
+                "scope": "local",
+                "change_type": "motion",
+                "duration_policy": "trajectory_continuation",
+                "temporal_behavior": "future_changing_motion",
+                "target_description": "red double-decker bus",
+                "selection_match": "mismatch",
+                "selection_match_reason": "The selection contains a bus, not the requested man.",
+                "action_phases": ["begin running"],
+                "estimated_action_seconds": 3.0,
+                "requires_recovery_motion": False,
+                "preservation_requirements": ["preserve the background"],
+                "reasoning": "the requested person is not selected",
+            },
+            "variants": [{
+                "intent": "transform",
+                "description": "Make the man run",
+                "region_emphasis": "selected man",
+                "prompt_for_video_edit": "Edit only the selected target. Make the selected man run naturally while preserving the source scene. Do not regenerate the scene.",
+            }],
+        }
+
+    monkeypatch.setattr(route.storage, "path_from_url", subject_reference_path)
+    monkeypatch.setattr(route.ai.gemini, "interpret_edit", mismatched_plan)
+    response = await client.post(
+        "/api/edit-plans",
+        headers={"X-Session-Id": "plan-owner"},
+        json={
+            "project_id": project_id,
+            "selection_id": selection_id,
+            "prompt": "make the man run",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "selection_target_mismatch"
+    assert "bus" in response.json()["detail"]["message"]
+    assert planning_frames == ["/tmp/isolated-subject.png"]
+
+
+@pytest.mark.asyncio
 async def test_long_local_edit_is_split_into_provider_sized_chunks(
     client, owned_selection, monkeypatch
 ):

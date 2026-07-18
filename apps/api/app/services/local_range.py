@@ -44,8 +44,11 @@ class EditWindowLimitError(ValueError):
         )
 
 
-def _persistent_change(intent: EditIntent) -> bool:
-    return intent.duration_policy == "continuous_occurrence"
+def _continuous_change(intent: EditIntent) -> bool:
+    return intent.duration_policy in {
+        "continuous_occurrence",
+        "trajectory_continuation",
+    }
 
 
 def analysis_window(
@@ -61,7 +64,7 @@ def analysis_window(
         raise ValueError("active source clip must have positive duration")
     if seed_ts < source_start - 1e-3 or seed_ts > upper + 1e-3:
         raise ValueError("selection is outside the active source clip")
-    if _persistent_change(intent):
+    if _continuous_change(intent):
         radius = INITIAL_CONTINUOUS_RADIUS_SECONDS
     else:
         radius = intent.estimated_action_seconds / 2 + HANDLE_SECONDS + LOCAL_MARGIN_SECONDS
@@ -118,7 +121,7 @@ def resolve_window_from_evidence(
         core_end = min(occurrence_end, explicit_core.end_ts)
         if core_end <= core_start:
             raise ValueError("explicit range does not overlap selected occurrence")
-    elif _persistent_change(intent):
+    elif _continuous_change(intent):
         core_start, core_end = occurrence_start, occurrence_end
         if tracking_reached_budget:
             warnings.append("target remains visible at local tracking budget; adjust range to continue")
@@ -256,7 +259,7 @@ async def resolve_local_range(
         source_start=source_start,
         source_end=bounded_end,
     )
-    analysis_fps = CONTINUOUS_ANALYSIS_FPS if _persistent_change(intent) else ANALYSIS_FPS
+    analysis_fps = CONTINUOUS_ANALYSIS_FPS if _continuous_change(intent) else ANALYSIS_FPS
     total_frames_inspected = 0
     track: sam.TrackResult | None = None
     shot_start = start
@@ -311,7 +314,7 @@ async def resolve_local_range(
                     include_masks=False,
                 )
             except Exception as exc:
-                if _persistent_change(intent):
+                if _continuous_change(intent):
                     raise ValueError(
                         "could not reliably track the selected subject; please choose a tighter box"
                     ) from exc
@@ -359,7 +362,7 @@ async def resolve_local_range(
                         "confidence": frame.get("confidence"),
                         "bbox": frame.get("bbox") or selection.bbox_json,
                     }
-            if not _persistent_change(intent):
+            if not _continuous_change(intent):
                 break
 
             tolerance = 1.1 / analysis_fps
@@ -426,7 +429,7 @@ async def resolve_local_range(
         source_end=bounded_end,
     )
     if (
-        _persistent_change(intent)
+        _continuous_change(intent)
         and resolution.edit_core.duration > MAX_CONTINUOUS_EDIT_SECONDS + 0.05
     ):
         raise EditWindowLimitError(resolution.edit_core.duration)

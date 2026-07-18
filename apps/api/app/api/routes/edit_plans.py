@@ -131,13 +131,27 @@ async def create_edit_plan(
     structured_intent = body.structured_intent
     if structured_intent is None:
         planning_frame = ""
-        try:
-            frame_path, _ = storage.new_path("keyframes", "jpg")
-            source_path = await materialize_edit_source(project, edit_source)
-            await ffmpeg.extract_frame(source_path, selection.frame_ts, frame_path)
-            planning_frame = str(frame_path)
-        except Exception:
-            log.warning("semantic planning frame unavailable", exc_info=True)
+        if selection.subject_reference_url:
+            try:
+                planning_frame = str(
+                    await storage.path_from_url(selection.subject_reference_url)
+                )
+            except Exception:
+                log.warning("segmented subject reference unavailable", exc_info=True)
+        if not planning_frame:
+            try:
+                frame_path, _ = storage.new_path("keyframes", "jpg")
+                source_path = await materialize_edit_source(project, edit_source)
+                await ffmpeg.extract_frame(source_path, selection.frame_ts, frame_path)
+                crop_path, _ = storage.new_path("keyframes", "png")
+                await ffmpeg.crop_bbox_from_frame(
+                    frame_path,
+                    selection.bbox_json,
+                    crop_path,
+                )
+                planning_frame = str(crop_path)
+            except Exception:
+                log.warning("semantic planning frame unavailable", exc_info=True)
         try:
             interpretation = SemanticEditPlan.model_validate(
                 await ai.gemini.interpret_edit(
@@ -146,7 +160,21 @@ async def create_edit_plan(
                     planning_frame,
                 )
             )
+            if interpretation.decision.selection_match == "mismatch":
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "selection_target_mismatch",
+                        "message": (
+                            interpretation.decision.selection_match_reason
+                            or "the selected object does not match the requested target"
+                        ),
+                        "selected_target": interpretation.decision.target_description,
+                    },
+                )
             structured_intent = interpretation.as_intent(body.prompt)
+        except HTTPException:
+            raise
         except Exception as exc:
             log.warning("semantic edit interpretation failed; using safe rules", exc_info=True)
             semantic_warning = (

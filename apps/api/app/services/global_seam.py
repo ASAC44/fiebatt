@@ -19,8 +19,15 @@ from app.services.generation_window import GenerationWindow
 from app.services.global_chunk_execution import target_bbox
 
 
+from app.services.seam_matching import (
+    SeamChoice,
+    SeamFrames,
+    seam_score,
+    select_best_seam,
+)
+
+
 SEAM_SAMPLES = 9
-MAX_SEAM_SCORE = 0.22
 
 
 class GlobalSeamError(ValueError):
@@ -30,82 +37,10 @@ class GlobalSeamError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
-class SeamFrames:
-    timestamp: float
-    left_before: np.ndarray
-    left_at: np.ndarray
-    right_at: np.ndarray
-    right_after: np.ndarray
-
-
-@dataclass(frozen=True, slots=True)
-class SeamChoice:
-    timestamp: float
-    score: float
-    samples: int
-
-    def metadata(self) -> dict[str, float | int]:
-        return {
-            "timestamp": self.timestamp,
-            "score": self.score,
-            "samples": self.samples,
-        }
-
-
-@dataclass(frozen=True, slots=True)
 class AssemblyResult:
     output_url: str
     seams: tuple[SeamChoice, ...]
     continuity: dict
-
-
-def _bbox_mask(shape: tuple[int, ...], bbox: dict[str, float], *, invert: bool) -> np.ndarray:
-    height, width = shape[:2]
-    left = max(0, round(float(bbox["x"]) * width))
-    top = max(0, round(float(bbox["y"]) * height))
-    right = min(width, round((float(bbox["x"]) + float(bbox["w"])) * width))
-    bottom = min(height, round((float(bbox["y"]) + float(bbox["h"])) * height))
-    mask = np.zeros((height, width), dtype=bool)
-    mask[top:bottom, left:right] = True
-    return ~mask if invert else mask
-
-
-def _mean_delta(left: np.ndarray, right: np.ndarray, mask: np.ndarray) -> float:
-    if left.shape != right.shape:
-        right = cv2.resize(right, (left.shape[1], left.shape[0]))
-    selected = cv2.absdiff(left, right).astype(np.float32)[mask] / 255.0
-    return float(selected.mean()) if selected.size else 0.0
-
-
-def seam_score(sample: SeamFrames, bbox: dict[str, float]) -> float:
-    target = _bbox_mask(sample.left_at.shape, bbox, invert=False)
-    background = _bbox_mask(sample.left_at.shape, bbox, invert=True)
-    appearance_background = _mean_delta(sample.left_at, sample.right_at, background)
-    appearance_target = _mean_delta(sample.left_at, sample.right_at, target)
-    left_motion = cv2.absdiff(sample.left_before, sample.left_at)
-    right_motion = cv2.absdiff(sample.right_at, sample.right_after)
-    motion_delta = _mean_delta(left_motion, right_motion, np.ones_like(target))
-    return (
-        0.50 * appearance_background
-        + 0.20 * appearance_target
-        + 0.30 * motion_delta
-    )
-
-
-def select_best_seam(
-    samples: list[SeamFrames],
-    *,
-    bbox: dict[str, float],
-) -> SeamChoice:
-    if not samples:
-        raise ValueError("global chunk overlap has no seam samples")
-    scored = [(seam_score(sample, bbox), sample.timestamp) for sample in samples]
-    score, timestamp = min(scored)
-    if score > MAX_SEAM_SCORE:
-        raise ValueError(
-            f"global chunk overlap failed seam validation ({score:.3f} > {MAX_SEAM_SCORE:.3f})"
-        )
-    return SeamChoice(timestamp=timestamp, score=score, samples=len(samples))
 
 
 def _read_frame(path: Path, timestamp: float) -> np.ndarray:
@@ -158,12 +93,14 @@ async def choose_chunk_seam(
             for timestamp in timestamps
         )
     )
-    bbox = target_bbox(
-        right.payload_json or {},
-        (overlap_start + overlap_end) / 2,
-    )
+    payload = right.payload_json or {}
+    bbox = target_bbox(payload, (overlap_start + overlap_end) / 2)
     try:
-        return select_best_seam(list(samples), bbox=bbox)
+        return select_best_seam(
+            list(samples),
+            bbox=bbox,
+            bbox_for_timestamp=lambda timestamp: target_bbox(payload, timestamp),
+        )
     except ValueError as exc:
         raise GlobalSeamError(
             str(exc),

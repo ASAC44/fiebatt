@@ -88,9 +88,12 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
         const wantedTime = sourceTimeFor(clip, hit.offsetInClip);
         if (editedClipIdRef.current !== clip.id) {
           editedClipIdRef.current = clip.id;
+          const seekWhenReady = () => {
+            editedVideo.currentTime = wantedTime;
+          };
+          editedVideo.addEventListener("loadedmetadata", seekWhenReady, { once: true });
           editedVideo.src = clip.url;
           editedVideo.load();
-          editedVideo.currentTime = wantedTime;
         } else if (force || Math.abs(editedVideo.currentTime - wantedTime) > 0.12) {
           editedVideo.currentTime = wantedTime;
         }

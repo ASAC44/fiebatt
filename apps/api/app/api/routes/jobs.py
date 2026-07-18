@@ -1,7 +1,10 @@
 import asyncio
 import json
+import time
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,8 +21,13 @@ from app.services import job_events, storage
 router = APIRouter(tags=["jobs"])
 
 
+class RetryDecisionRequest(BaseModel):
+    action: Literal["cancel", "retry_now"]
+
+
 def _job_out(job: Job) -> JobOut:
     payload = job.payload or {}
+    candidate_reviews = payload.get("candidate_reviews") or {}
     return JobOut(
         job_id=job.id,
         kind=job.kind,
@@ -35,6 +43,7 @@ def _job_out(job: Job) -> JobOut:
         warnings=payload.get("warnings") or [],
         execution_window=payload.get("execution_window"),
         continuity_validation=payload.get("continuity_validation"),
+        selected_seams=payload.get("selected_seams"),
         generation_quality_state=payload.get("generation_quality_state"),
         generation_quality_evidence=payload.get("generation_quality_evidence") or [],
         generation_attempts=payload.get("generation_attempts"),
@@ -42,6 +51,7 @@ def _job_out(job: Job) -> JobOut:
         provider_attempts=payload.get("provider_attempts") or [],
         localized_compositing=payload.get("localized_compositing") or [],
         local_flow_telemetry=payload.get("local_flow_telemetry"),
+        retry_state=payload.get("retry_state"),
         variants=[
             VariantOut(
                 id=v.id,
@@ -52,6 +62,13 @@ def _job_out(job: Job) -> JobOut:
                 visual_coherence=v.visual_coherence,
                 prompt_adherence=v.prompt_adherence,
                 error=v.error,
+                attempt_label=(candidate_reviews.get(v.id) or {}).get("label"),
+                quality_state=(candidate_reviews.get(v.id) or {}).get("quality_state"),
+                quality_evidence=(candidate_reviews.get(v.id) or {}).get("evidence") or [],
+                continuity_validation=(candidate_reviews.get(v.id) or {}).get(
+                    "continuity_validation"
+                ),
+                selected_seams=(candidate_reviews.get(v.id) or {}).get("selected_seams"),
             )
             for v in sorted(job.variants, key=lambda v: v.index)
         ],
@@ -101,6 +118,31 @@ async def get_job(
         raise HTTPException(status_code=404, detail="job not found")
 
     return _job_out(job)
+
+
+@router.post("/jobs/{job_id}/retry-decision")
+async def decide_retry(
+    job_id: str,
+    body: RetryDecisionRequest,
+    session: SessionModel = Depends(get_session),
+    db: AsyncSession = Depends(get_db),
+):
+    job = await db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    project = await db.get(Project, job.project_id)
+    if project is None or project.session_id != session.id:
+        raise HTTPException(status_code=404, detail="job not found")
+    payload = dict(job.payload or {})
+    retry_state = dict(payload.get("retry_state") or {})
+    if retry_state.get("status") != "waiting":
+        raise HTTPException(status_code=409, detail="no retry is waiting for a decision")
+    retry_state["status"] = "cancelled" if body.action == "cancel" else "retry_now"
+    retry_state["decision_at"] = time.time()
+    payload["retry_state"] = retry_state
+    job.payload = payload
+    await db.commit()
+    return {"status": retry_state["status"]}
 
 
 @router.get("/jobs/{job_id}/stream")

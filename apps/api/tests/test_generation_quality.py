@@ -7,6 +7,9 @@ from app.services.generation_quality import (
     corrective_prompt,
     decide_generation_quality,
     final_semantic_quality,
+    final_candidate_quality,
+    quality_payload_for_candidate,
+    cancel_waiting_retry,
     semantic_quality_evidence,
     select_fallback_provider,
 )
@@ -83,7 +86,7 @@ def test_first_source_edit_failure_gets_evidence_driven_retry():
     assert "exit_subject_motion_jump" in corrective_prompt(decision.evidence)
 
 
-def test_image_provider_failure_routes_to_source_video_fallback():
+def test_failed_source_edit_never_switches_provider_automatically():
     decision = decide_generation_quality(
         score={"visual_coherence": 8, "prompt_adherence": 8},
         continuity=_failed_continuity(),
@@ -94,11 +97,11 @@ def test_image_provider_failure_routes_to_source_video_fallback():
         fallback_used=False,
         source_video_available=True,
     )
-    assert decision.action == GenerationQualityAction.PROVIDER_FALLBACK
-    assert decision.next_provider == "wan"
+    assert decision.action == GenerationQualityAction.CORRECTIVE_RETRY
+    assert decision.next_provider is None
 
 
-def test_retry_then_fallback_is_capped_by_generated_seconds():
+def test_corrective_retry_is_capped_by_generated_seconds():
     decision = decide_generation_quality(
         score={"visual_coherence": 4, "prompt_adherence": 8},
         continuity=_failed_continuity(),
@@ -112,7 +115,7 @@ def test_retry_then_fallback_is_capped_by_generated_seconds():
     assert decision.action == GenerationQualityAction.HARD_FAIL
 
 
-def test_provider_fallback_respects_full_context_limit():
+def test_fallback_helper_remains_duration_aware_for_explicit_use():
     assert select_fallback_provider("veo", 8.0) == "wan"
     assert select_fallback_provider("wan", 12.0) == "happyhorse"
     assert select_fallback_provider("happyhorse", 12.0) is None
@@ -147,13 +150,58 @@ def test_production_bad_outputs_cannot_be_marked_clean():
     assert semantic_quality_evidence(None) == ("semantic quality scoring unavailable",)
     assert final_semantic_quality(
         {"visual_coherence": 8, "prompt_adherence": 1}
-    ).action == GenerationQualityAction.HARD_FAIL
+    ).action == GenerationQualityAction.REVIEW_WARNING
     assert final_semantic_quality(
         {"visual_coherence": 4, "prompt_adherence": 2}
-    ).action == GenerationQualityAction.HARD_FAIL
+    ).action == GenerationQualityAction.REVIEW_WARNING
     assert final_semantic_quality(
         {"visual_coherence": 8, "prompt_adherence": 8}
     ).action == GenerationQualityAction.PASS
+
+
+def test_semantic_miss_warns_but_unsafe_or_missing_seam_blocks_apply():
+    clean = ContinuityReport(True, {})
+    assert final_candidate_quality(
+        {"visual_coherence": 8, "prompt_adherence": 2}, clean
+    ).action == GenerationQualityAction.REVIEW_WARNING
+    assert final_candidate_quality(
+        {"visual_coherence": 8, "prompt_adherence": 8}, _failed_continuity()
+    ).action == GenerationQualityAction.HARD_FAIL
+    assert final_candidate_quality(
+        {"visual_coherence": 8, "prompt_adherence": 8}, None
+    ).action == GenerationQualityAction.HARD_FAIL
+
+
+def test_candidate_review_overrides_job_level_acceptance_state():
+    payload = {
+        "generation_quality_state": "pass",
+        "candidate_reviews": {
+            "variant-unsafe": {
+                "quality_state": "hard_fail",
+                "evidence": ["exit_frame_match_score at exit"],
+                "selected_seams": {"passed": False},
+            }
+        },
+    }
+
+    candidate = quality_payload_for_candidate(payload, "variant-unsafe")
+
+    assert candidate["generation_quality_state"] == "hard_fail"
+    assert not acceptance_allowed(
+        candidate,
+        override_requested=False,
+        override_enabled=False,
+    )
+
+
+def test_applying_first_pass_cancels_a_waiting_retry():
+    payload = cancel_waiting_retry(
+        {"retry_state": {"status": "waiting", "evidence": ["wrong colour"]}},
+        reason="candidate applied",
+    )
+
+    assert payload["retry_state"]["status"] == "cancelled"
+    assert payload["retry_state"]["cancel_reason"] == "candidate applied"
 
 
 def test_retry_replaces_previous_result_only_when_quality_improves():

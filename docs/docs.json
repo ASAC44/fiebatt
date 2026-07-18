@@ -32,6 +32,7 @@
         "pages": [
           "product/editor-workflow",
           "product/continuity",
+          "product/generation-quality-plan",
           "product/library-and-projects"
         ]
       },

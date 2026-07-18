@@ -107,6 +107,8 @@ function generationActivity(event: JobStreamEvent): string {
     score_start: "checking visual quality and transitions…",
     continuity_validation_done: "transition check complete…",
     continuity_validation_unavailable: "finishing quality review…",
+    seam_match_done: "matching source and edit frames…",
+    seam_match_unavailable: "could not find safe cut frames…",
     gen_retry: "improving first render…",
     gen_provider_fallback: "trying backup video model…",
     gen_retry_rejected: "keeping stronger render…",
@@ -145,6 +147,8 @@ export function useAgentStream(projectId?: string | null) {
     let detailedProgressAt = 0;
     let detailedStage = "";
     let lastHeartbeatAt = 0;
+    let previewSignature = "";
+    let retrySignature = "";
     const eventStream = streamJobEvents(jobId, {
       onEvent: (event) => {
         detailedProgressAt = Date.now();
@@ -171,6 +175,44 @@ export function useAgentStream(projectId?: string | null) {
         if (watch.signal.aborted) return;
         const ready = job.variants.filter((variant) => variant.url);
         const failed = job.variants.filter((variant) => variant.status === "error");
+        if (job.retry_state) {
+          const nextRetrySignature = JSON.stringify(job.retry_state);
+          if (nextRetrySignature !== retrySignature) {
+            retrySignature = nextRetrySignature;
+            dispatch({
+              type: "update_retry_control",
+              jobId,
+              status: job.retry_state.status,
+              retryAt: job.retry_state.retry_at,
+              evidence: job.retry_state.evidence,
+              correction: job.retry_state.correction,
+            });
+          }
+        }
+        const nextPreviewSignature = ready
+          .map((variant) => `${variant.id}:${variant.url}`)
+          .join("|");
+        if (ready.length > 0 && nextPreviewSignature !== previewSignature) {
+          previewSignature = nextPreviewSignature;
+          dispatch({
+            type: "add_variant_preview",
+            jobId,
+            variants: ready,
+            timelineStart: job.selected_seams?.timeline_start ?? job.execution_window?.core_start ?? job.start_ts,
+            timelineEnd: job.selected_seams?.timeline_end ?? job.execution_window?.core_end ?? job.end_ts,
+            mediaStart: job.selected_seams?.media_start ?? job.execution_window?.edit_start_offset ?? 0,
+            mediaEnd:
+              job.selected_seams?.media_end ??
+              job.execution_window?.edit_end_offset ??
+              (job.start_ts != null && job.end_ts != null
+                ? job.end_ts - job.start_ts
+                : null),
+          });
+          dispatch({
+            type: "set_activity",
+            activity: ready.length === 1 ? "first pass ready — reviewing it now…" : "corrected pass ready — finishing review…",
+          });
+        }
         if (job.status === "done" || job.status === "error") {
           if (projectId) clearPendingTurn(projectId);
           if (ready.length > 0) {
@@ -178,10 +220,11 @@ export function useAgentStream(projectId?: string | null) {
               type: "add_variant_preview",
               jobId,
               variants: ready,
-              timelineStart: job.execution_window?.core_start ?? job.start_ts,
-              timelineEnd: job.execution_window?.core_end ?? job.end_ts,
-              mediaStart: job.execution_window?.edit_start_offset ?? 0,
+              timelineStart: job.selected_seams?.timeline_start ?? job.execution_window?.core_start ?? job.start_ts,
+              timelineEnd: job.selected_seams?.timeline_end ?? job.execution_window?.core_end ?? job.end_ts,
+              mediaStart: job.selected_seams?.media_start ?? job.execution_window?.edit_start_offset ?? 0,
               mediaEnd:
+                job.selected_seams?.media_end ??
                 job.execution_window?.edit_end_offset ??
                 (job.start_ts != null && job.end_ts != null
                   ? job.end_ts - job.start_ts

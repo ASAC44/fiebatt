@@ -104,13 +104,16 @@ def protected_context_prompt(prompt: str, window: GenerationWindow) -> str:
     if not window.adaptive:
         return prompt
     return (
-        "PADDED SOURCE EDIT CONTRACT: The supplied video includes protected "
-        "motion context before and after the requested edit. Modify only seconds "
+        "LOCKED SOURCE-CONTINUITY CONTRACT: Modify only seconds "
         f"{window.edit_start_offset:.3f} through {window.edit_end_offset:.3f} "
-        "relative to the supplied clip. Preserve frames, subject motion, camera "
-        f"motion, background, and audio in the first {window.pre_handle:.3f} "
-        f"seconds and final {window.post_handle:.3f} seconds. Use those handles "
-        "only to enter and leave the edit continuously; do not introduce a cut, "
-        "fade, freeze, or transition.\n\n"
+        f"relative to the supplied clip. The first {window.pre_handle:.3f} seconds "
+        f"and final {window.post_handle:.3f} seconds are locked source handles. "
+        "Keep their visual and temporal content identical to the source: the same "
+        "objects, colours, lighting, pose, camera, background, and motion. Do not "
+        "change, restyle, regenerate, freeze, or replace any handle frame. Inside "
+        "the editable interval, begin from the source pose and velocity, perform "
+        "the requested change continuously frame by frame, and leave in a state "
+        "that can continue naturally into the final locked handle. Do not use a "
+        "cut, fade, dissolve, freeze, or sudden appearance or disappearance.\n\n"
         + prompt
     )

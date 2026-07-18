@@ -5,7 +5,21 @@ description: "The implementation plan for scoped edits, frame-matched seams, liv
 
 # Generation quality work plan
 
-This document defines the target generation flow. It is a work plan, not a description of behavior already available in production.
+This document defines the generation contract and its rollout checks.
+
+## Implementation status
+
+The `generation-quality` branch implements the local-edit flow described here:
+
+- temporal behavior and playhead-outward range planning
+- locked context handles and full-context candidate storage
+- tracked-target frame and motion seam selection
+- candidate-specific Apply safety and media timestamps
+- immediate first-pass preview with persisted review evidence
+- one same-provider corrective retry with a 10-second cancellation window
+- clear target-mismatch blocking before tracking and video generation
+
+Automated verification passes across the API, CLI, production web build, and browser suite. The fixed live-provider evaluation set at the end of this document remains a required pre-production check because model output quality cannot be proven by deterministic tests alone.
 
 ## Product decisions
 

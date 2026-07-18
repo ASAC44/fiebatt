@@ -70,6 +70,21 @@ def select_best_seam(
     prefer_late: bool = False,
     max_score: float = MAX_SEAM_SCORE,
 ) -> SeamChoice:
+    choice = rank_best_seam(samples, bbox=bbox, prefer_late=prefer_late)
+    if choice.score > max_score:
+        raise ValueError(
+            f"overlap failed seam validation ({choice.score:.3f} > {max_score:.3f})"
+        )
+    return choice
+
+
+def rank_best_seam(
+    samples: list[SeamFrames],
+    *,
+    bbox: dict[str, float],
+    prefer_late: bool = False,
+) -> SeamChoice:
+    """Return the strongest candidate even when it is too weak to accept."""
     if not samples:
         raise ValueError("overlap has no seam samples")
     scored = [(seam_score(sample, bbox), sample.timestamp) for sample in samples]
@@ -77,8 +92,4 @@ def select_best_seam(
         scored,
         key=lambda item: (item[0], -item[1] if prefer_late else item[1]),
     )
-    if score > max_score:
-        raise ValueError(
-            f"overlap failed seam validation ({score:.3f} > {max_score:.3f})"
-        )
     return SeamChoice(timestamp=timestamp, score=score, samples=len(samples))

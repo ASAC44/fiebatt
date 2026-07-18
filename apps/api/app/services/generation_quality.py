@@ -11,7 +11,7 @@ from app.ai.services.provider_capabilities import (
 from app.services.continuity_validator import ContinuityReport
 
 
-MAX_GENERATION_ATTEMPTS = 3
+MAX_GENERATION_ATTEMPTS = 2
 MAX_GENERATED_SECONDS = 30.0
 CONTINUITY_UNAVAILABLE = "continuity validation unavailable"
 
@@ -134,35 +134,10 @@ def decide_generation_quality(
     if not can_generate_again:
         return GenerationQualityDecision(GenerationQualityAction.HARD_FAIL, evidence)
 
-    current_capabilities = VIDEO_PROVIDER_CAPABILITIES.get(current_provider)
-    fallback = (
-        select_fallback_provider(current_provider, duration)
-        if source_video_available
-        else None
-    )
-    provider_limited = (
-        generation_error is not None
-        or current_capabilities is None
-        or not current_capabilities.source_video_edit
-    )
-    if provider_limited and not fallback_used and fallback:
-        return GenerationQualityDecision(
-            GenerationQualityAction.PROVIDER_FALLBACK,
-            evidence,
-            fallback,
-        )
-    if attempts == 1:
-        return GenerationQualityDecision(
-            GenerationQualityAction.CORRECTIVE_RETRY,
-            evidence,
-        )
-    if not fallback_used and fallback:
-        return GenerationQualityDecision(
-            GenerationQualityAction.PROVIDER_FALLBACK,
-            evidence,
-            fallback,
-        )
-    return GenerationQualityDecision(GenerationQualityAction.HARD_FAIL, evidence)
+    # A provider switch is not a seam repair. It historically spent another
+    # paid render and replaced Wan with a weaker result. Retry this provider
+    # once with concrete evidence, then fail closed.
+    return GenerationQualityDecision(GenerationQualityAction.CORRECTIVE_RETRY, evidence)
 
 
 def corrective_prompt(evidence: tuple[str, ...]) -> str:

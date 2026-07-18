@@ -83,7 +83,7 @@ def test_first_source_edit_failure_gets_evidence_driven_retry():
     assert "exit_subject_motion_jump" in corrective_prompt(decision.evidence)
 
 
-def test_image_provider_failure_routes_to_source_video_fallback():
+def test_failed_source_edit_never_switches_provider_automatically():
     decision = decide_generation_quality(
         score={"visual_coherence": 8, "prompt_adherence": 8},
         continuity=_failed_continuity(),
@@ -94,11 +94,11 @@ def test_image_provider_failure_routes_to_source_video_fallback():
         fallback_used=False,
         source_video_available=True,
     )
-    assert decision.action == GenerationQualityAction.PROVIDER_FALLBACK
-    assert decision.next_provider == "wan"
+    assert decision.action == GenerationQualityAction.CORRECTIVE_RETRY
+    assert decision.next_provider is None
 
 
-def test_retry_then_fallback_is_capped_by_generated_seconds():
+def test_corrective_retry_is_capped_by_generated_seconds():
     decision = decide_generation_quality(
         score={"visual_coherence": 4, "prompt_adherence": 8},
         continuity=_failed_continuity(),
@@ -112,7 +112,7 @@ def test_retry_then_fallback_is_capped_by_generated_seconds():
     assert decision.action == GenerationQualityAction.HARD_FAIL
 
 
-def test_provider_fallback_respects_full_context_limit():
+def test_fallback_helper_remains_duration_aware_for_explicit_use():
     assert select_fallback_provider("veo", 8.0) == "wan"
     assert select_fallback_provider("wan", 12.0) == "happyhorse"
     assert select_fallback_provider("happyhorse", 12.0) is None

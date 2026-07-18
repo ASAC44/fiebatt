@@ -300,6 +300,42 @@ test("generation preview returns after leaving and reopening editor", async ({ p
   await expect(page.getByRole("button", { name: "apply" })).toBeVisible();
 });
 
+test("failed render restores as a safe status instead of a raw red error", async ({ page }) => {
+  const currentJob = () => ({
+    job_id: "job-navigation",
+    kind: "generate",
+    status: "error",
+    error: "The video model returned an incomplete clip, so it was not added to your timeline.",
+    failure_state: {
+      code: "invalid_provider_duration",
+      user_message: "The video model returned an incomplete clip, so it was not added to your timeline.",
+      retryable: true,
+    },
+    progress_state: {
+      stage: "failed",
+      message: "The video model returned an incomplete clip, so it was not added to your timeline.",
+      status: "failed",
+      updated_at: Date.now() / 1000,
+    },
+    created_at: new Date().toISOString(),
+    accepted: false,
+    start_ts: 0,
+    end_ts: 4,
+    variants: [],
+  });
+
+  await installApi(page, [project], undefined, {
+    agentSse: "event: done\ndata: {}\n\n",
+    current: currentJob,
+  });
+  await page.goto(`/editor?projectId=${project.project_id}`);
+
+  await expect(page.getByText("render stopped safely")).toBeVisible();
+  await expect(page.getByText(/not added to your timeline/i)).toBeVisible();
+  await expect(page.getByText(/3\.88s|4\.04s|ffmpeg|exception/i)).toHaveCount(0);
+  await expect(page.locator(".msg--error")).toHaveCount(0);
+});
+
 test("prompt card separates user request from refined prompt", async ({ page }) => {
   const agentSse = [
     "event: prompt_plan_started",

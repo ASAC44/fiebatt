@@ -213,6 +213,8 @@ async def test_chunk_worker_renders_in_order_and_publishes_one_variant(
         ).scalars().all()
         assert job.status == "done"
         assert job.payload["generation_quality_state"] == "pass"
+        assert job.payload["progress_state"]["status"] == "done"
+        assert job.payload["progress_state"]["stage"] == "done"
         assert variant.status == "done"
         assert variant.url == "https://media.example/final.mp4"
         assert [chunk.status for chunk in chunks] == ["generated", "generated"]

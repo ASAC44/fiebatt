@@ -38,7 +38,7 @@ const STATUS_LABELS: Record<ToolCallCardProps["status"], string> = {
   pending: "queued",
   running: "working",
   done: "done",
-  error: "error",
+  error: "stopped safely",
 };
 
 const STATUS_CLASSES: Record<ToolCallCardProps["status"], string> = {
@@ -57,7 +57,9 @@ export function ToolCallCard({ tool, args, status, progress, result }: ToolCallC
     typeof result === "object" &&
     "variants" in (result as Record<string, unknown>);
 
-  const resultSummary = hasVariants
+  const resultSummary = status === "error"
+    ? "This step could not finish. Nothing was changed on the timeline."
+    : hasVariants
     ? (() => {
         const variants =
           ((result as Record<string, unknown>).variants as
@@ -67,8 +69,7 @@ export function ToolCallCard({ tool, args, status, progress, result }: ToolCallC
         const errored = variants.filter((v) => v.status === "error");
         if (ready.length > 0) return `${ready.length} variant ready`;
         if (errored.length > 0) {
-          const errBlurb = (errored[0].error as string | undefined) ?? "unknown";
-          return `generation failed: ${errBlurb.slice(0, 120)}`;
+          return "The render could not finish. Nothing was changed on the timeline.";
         }
         return `${variants.length} variant queued`;
       })()
@@ -123,7 +124,7 @@ export function ToolCallCard({ tool, args, status, progress, result }: ToolCallC
           opacity: 0.95;
         }
         .tool-status__state--error {
-          color: var(--destructive);
+          color: #d6a84f;
           opacity: 0.95;
         }
         .tool-status__body {

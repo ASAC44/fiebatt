@@ -20,6 +20,8 @@ from app.schemas.edit_plan import EditIntent, LocalRangeResolution
 from app.services import ffmpeg, job_events, storage
 from app.services.edit_prompt import planned_edit_prompt
 from app.services.generation_quality import final_semantic_quality
+from app.services.generation_failure import classify_generation_failure
+from app.services.job_progress import persist_job_progress
 from app.services.generation_window import GenerationWindow
 from app.services.global_chunk_execution import (
     PreviousChunk,
@@ -61,6 +63,15 @@ async def _emit(job_id: str, stage: str, message: str, *, terminal: bool = False
     if data:
         event["data"] = data
     await job_events.publish(job_id, event)
+    if stage != "chunk_poll":
+        await persist_job_progress(
+            job_id,
+            stage=stage,
+            message=message,
+            status=("done" if stage == "done" else "failed" if terminal else "running"),
+            data={key: value for key, value in data.items() if key != "variant_url"},
+            session_factory=AsyncSessionLocal,
+        )
 
 
 async def _reference_subject(
@@ -85,23 +96,33 @@ async def _fail(
     variant_id: str | None = None,
     chunk_id: str | None = None,
 ) -> None:
-    message = error[:500]
+    failure = classify_generation_failure(error)
     async with AsyncSessionLocal() as db:
         job = await db.get(Job, job_id)
         if job is not None:
+            payload = dict(job.payload or {})
+            payload["failure_state"] = failure.metadata()
+            job.payload = payload
             job.status = "error"
-            job.error = message
+            job.error = failure.user_message
         if variant_id:
             variant = await db.get(Variant, variant_id)
             if variant is not None:
                 variant.status = "error"
-                variant.error = message
+                variant.error = failure.user_message
         if chunk_id:
             chunk = await db.get(GenerationChunk, chunk_id)
             if chunk is not None:
                 chunk.status = "error"
         await db.commit()
-    await _emit(job_id, "error", message, terminal=True)
+    await _emit(
+        job_id,
+        "failed",
+        failure.user_message,
+        terminal=True,
+        code=failure.code,
+        retryable=failure.retryable,
+    )
 
 
 async def run(job_id: str) -> None:
@@ -205,6 +226,23 @@ async def run(job_id: str) -> None:
                 chunk_index=chunk.index,
                 provider=chunk.provider,
             )
+
+            async def chunk_tick(event: dict, *, chunk_index: int = chunk.index) -> None:
+                kind = str(event.get("kind") or "gen.poll")
+                elapsed = event.get("elapsed")
+                await _emit(
+                    job_id,
+                    "chunk_submit" if kind == "gen.submit" else "chunk_poll",
+                    (
+                        f"video model accepted clip {chunk_index + 1} of {len(executable)}"
+                        if kind == "gen.submit"
+                        else f"rendering clip {chunk_index + 1} of {len(executable)}"
+                        + (f" · {elapsed}s elapsed" if elapsed is not None else "")
+                    ),
+                    chunk_index=chunk_index,
+                    elapsed=elapsed,
+                )
+
             try:
                 result = await execute_global_chunk(
                     project=project,
@@ -212,6 +250,7 @@ async def run(job_id: str) -> None:
                     prompt=generation_prompt,
                     reference_subject_path=reference_subject,
                     previous=previous,
+                    on_tick=chunk_tick,
                 )
             except Exception as exc:
                 await _fail(

@@ -170,6 +170,9 @@ async def test_generation_uses_source_video_target_box_and_accepted_reference(
     reference_path = tmp_path / "reference.png"
     calls = []
 
+    async def on_tick(event):
+        return None
+
     async def prepare_source(**kwargs):
         return source_path
 
@@ -221,6 +224,7 @@ async def test_generation_uses_source_video_target_box_and_accepted_reference(
         prompt="make the jacket blue",
         reference_subject_path=reference_path,
         previous=None,
+        on_tick=on_tick,
     )
 
     assert result.output_url == "https://media.example/source.mp4"
@@ -229,6 +233,7 @@ async def test_generation_uses_source_video_target_box_and_accepted_reference(
     assert "make the jacket blue" in plan["_edit_prompt"]
     assert kwargs["source_video_url"] == "https://media.example/source.mp4"
     assert kwargs["subject_reference_path"] == str(reference_path)
+    assert kwargs["on_tick"] is on_tick
     assert result.metadata["target_bbox"]["w"] == pytest.approx(0.3)
 
 

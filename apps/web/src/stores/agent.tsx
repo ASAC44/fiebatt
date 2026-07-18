@@ -125,6 +125,7 @@ export type AgentMessage =
       jobId: string;
       entries: GenerationProgressEntry[];
       complete: boolean;
+      failed: boolean;
       ts: number;
     }
   | {
@@ -171,6 +172,7 @@ export type AgentAction =
       stage: string;
       text: string;
       complete?: boolean;
+      failed?: boolean;
     }
   | {
       type: "update_retry_control";
@@ -211,6 +213,7 @@ export type AgentAction =
       vendor: string;
     }
   | { type: "set_analysis"; analysis: VideoAnalysis }
+  | { type: "add_notice"; message: string }
   | { type: "add_error"; message: string }
   | { type: "clear_messages" }
   | { type: "set_conversation_id"; id: string }
@@ -344,6 +347,7 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
         jobId: action.jobId,
         entries,
         complete: action.complete ?? false,
+        failed: action.failed ?? false,
         ts: existing?.ts ?? now,
       };
       return {
@@ -495,6 +499,15 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
 
     case "set_analysis":
       return { ...state, analysis: action.analysis };
+
+    case "add_notice":
+      return {
+        ...state,
+        messages: [
+          ...state.messages,
+          { type: "agent", text: action.message, ts: now, streaming: false },
+        ],
+      };
 
     case "add_error":
       return {

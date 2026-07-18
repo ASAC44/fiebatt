@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Awaitable, Callable
 from urllib.parse import urlparse
 
 from app.ai import services as ai
@@ -187,6 +188,7 @@ async def execute_global_chunk(
     prompt: str,
     reference_subject_path: Path,
     previous: PreviousChunk | None,
+    on_tick: Callable[[dict], Awaitable[None] | None] | None = None,
 ) -> ChunkExecution:
     source_path = await _prepare_source_clip(
         project=project,
@@ -240,6 +242,7 @@ async def execute_global_chunk(
         mask_frame_id=mask_frame_id,
         duration=math.ceil(duration - 1e-6),
         resolution="720P",
+        on_tick=on_tick,
     )
     raw_url = str(result.get("url") or "")
     generated_path = Path(str(result.get("path") or ""))

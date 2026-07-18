@@ -95,6 +95,9 @@ function clearPendingTurn(projectId: string): void {
 }
 
 function generationActivity(event: JobStreamEvent): string {
+  if (event.stage.startsWith("chunk_")) {
+    return event.msg.replace(/\.\.\./g, "…");
+  }
   const labels: Record<string, string> = {
     queued: "preparing edit window…",
     extract_clip: "preparing source context…",
@@ -111,6 +114,7 @@ function generationActivity(event: JobStreamEvent): string {
     seam_match_unavailable: "could not find safe cut frames…",
     gen_retry: "improving first render…",
     gen_provider_fallback: "trying backup video model…",
+    attempt_failed: "render attempt could not be used; checking recovery…",
     gen_retry_rejected: "keeping stronger render…",
     done: "preview ready…",
   };
@@ -149,6 +153,8 @@ export function useAgentStream(projectId?: string | null) {
     let lastHeartbeatAt = 0;
     let previewSignature = "";
     let retrySignature = "";
+    let persistedProgressSignature = "";
+    let pollFailures = 0;
     const eventStream = streamJobEvents(jobId, {
       onEvent: (event) => {
         detailedProgressAt = Date.now();
@@ -156,7 +162,8 @@ export function useAgentStream(projectId?: string | null) {
         const text = generationActivity(event);
         dispatch({ type: "set_activity", activity: text });
         const now = Date.now();
-        if (event.stage !== "gen_poll" || now - lastHeartbeatAt >= 30_000) {
+        const periodicStage = event.stage === "gen_poll" || event.stage === "chunk_poll";
+        if (!periodicStage || now - lastHeartbeatAt >= 30_000) {
           lastHeartbeatAt = now;
           dispatch({
             type: "update_generation_progress",
@@ -171,7 +178,28 @@ export function useAgentStream(projectId?: string | null) {
     const watchStartedAt = Date.now();
     try {
       while (!watch.signal.aborted) {
-        const job = await getJob(jobId);
+        let job;
+        try {
+          job = await getJob(jobId);
+          pollFailures = 0;
+        } catch {
+          pollFailures += 1;
+          const reconnectText =
+            "Status connection interrupted; the backend render is still running";
+          dispatch({ type: "set_activity", activity: `${reconnectText}…` });
+          if (pollFailures === 1 || pollFailures % 6 === 0) {
+            dispatch({
+              type: "update_generation_progress",
+              jobId,
+              stage: "status_reconnect",
+              text: reconnectText,
+            });
+          }
+          await new Promise((resolve) =>
+            window.setTimeout(resolve, Math.min(5000, 1000 * pollFailures)),
+          );
+          continue;
+        }
         if (watch.signal.aborted) return;
         const ready = job.variants.filter((variant) => variant.url);
         const failed = job.variants.filter((variant) => variant.status === "error");
@@ -186,6 +214,20 @@ export function useAgentStream(projectId?: string | null) {
               retryAt: job.retry_state.retry_at,
               evidence: job.retry_state.evidence,
               correction: job.retry_state.correction,
+            });
+          }
+        }
+        if (job.progress_state) {
+          const nextProgressSignature = JSON.stringify(job.progress_state);
+          if (nextProgressSignature !== persistedProgressSignature) {
+            persistedProgressSignature = nextProgressSignature;
+            dispatch({
+              type: "update_generation_progress",
+              jobId,
+              stage: job.progress_state.stage,
+              text: job.progress_state.message,
+              complete: job.progress_state.status !== "running",
+              failed: job.progress_state.status === "failed",
             });
           }
         }
@@ -240,9 +282,18 @@ export function useAgentStream(projectId?: string | null) {
             });
           } else {
             dispatch({
-              type: "add_error",
-              message: job.error || failed[0]?.error || "Video generation failed without a usable preview.",
+              type: "update_generation_progress",
+              jobId,
+              stage: "failed",
+              text:
+                job.failure_state?.user_message ||
+                job.error ||
+                failed[0]?.error ||
+                "This render could not be completed. Your source video and timeline are unchanged.",
+              complete: true,
+              failed: true,
             });
+            dispatch({ type: "set_activity", activity: "render ended safely" });
           }
           return;
         }
@@ -274,11 +325,15 @@ export function useAgentStream(projectId?: string | null) {
         }
         await new Promise((resolve) => window.setTimeout(resolve, 1500));
       }
-    } catch (error) {
+    } catch {
       if (!watch.signal.aborted) {
         dispatch({
-          type: "add_error",
-          message: `Could not read generation status: ${error instanceof Error ? error.message : String(error)}`,
+          type: "update_generation_progress",
+          jobId,
+          stage: "status_unavailable",
+          text: "Live status paused. The backend may still be rendering; reopen this project to reconnect.",
+          failed: true,
+          complete: true,
         });
       }
     } finally {
@@ -341,6 +396,7 @@ export function useAgentStream(projectId?: string | null) {
             !job.accepted &&
             (job.status === "pending" ||
               job.status === "processing" ||
+              job.status === "error" ||
               (job.status === "done" && job.variants.some((variant) => variant.url))),
         );
         if (latestJob) {
@@ -362,7 +418,8 @@ export function useAgentStream(projectId?: string | null) {
             });
           } else if (
             latestJob.status === "pending" ||
-            latestJob.status === "processing"
+            latestJob.status === "processing" ||
+            latestJob.status === "error"
           ) {
             void watchGeneration(latestJob.job_id);
           }
@@ -396,8 +453,8 @@ export function useAgentStream(projectId?: string | null) {
       const timeout = window.setTimeout(() => {
         timedOut = true;
         dispatch({
-          type: "add_error",
-          message: "The backend agent timed out after 7 minutes. The video provider may still be rendering; check the project timeline before retrying.",
+          type: "add_notice",
+          message: "This request is taking longer than expected. A queued video render keeps running in the backend and can be restored from this project.",
         });
         controller.abort();
       }, 7 * 60 * 1000);
@@ -521,8 +578,10 @@ export function useAgentStream(projectId?: string | null) {
         }
         if (!sawDone && !controller.signal.aborted) {
           dispatch({
-            type: "add_error",
-            message: "The backend stream ended before it reported completion. Nothing was applied to the timeline.",
+            type: "add_notice",
+            message: generationQueued
+              ? "The planning connection closed, but the video render is still running below."
+              : "The request connection closed before an edit was queued. Nothing was changed on the timeline.",
           });
         }
         console.log(
@@ -536,8 +595,8 @@ export function useAgentStream(projectId?: string | null) {
         );
         if (!isAbort && !timedOut) {
           dispatch({
-            type: "add_error",
-            message: err instanceof Error ? err.message : String(err),
+            type: "add_notice",
+            message: "The request could not be completed. Nothing was changed on the timeline; check the selection and try again.",
           });
         }
       } finally {
@@ -599,8 +658,8 @@ export function useAgentStream(projectId?: string | null) {
       if (!cancelled) {
         clearPendingTurn(projectId);
         dispatch({
-          type: "add_error",
-          message: "Could not restore the edit job. Please try the edit again.",
+          type: "add_notice",
+          message: "No queued edit could be restored. Nothing was changed on the timeline; you can safely try again.",
         });
       }
     };
@@ -889,10 +948,17 @@ function handleSSEEvent(
       const rawErr = (data.error as string | undefined) ?? "no variants produced";
       console.warn(`[agent sse] generation_failed job=${data.job_id}: ${rawErr}`);
       const niceErr = /rate.?limit|quota|429|RESOURCE_EXHAUSTED/i.test(rawErr)
-        ? "generation is rate-limited right now. try again in a minute or swap to the stub ai provider."
-        : `generation failed: ${rawErr}`;
-      dispatch({ type: "add_error", message: niceErr });
-      dispatch({ type: "set_activity", activity: "generation failed" });
+        ? "The video model is temporarily busy. Your source video and timeline are unchanged."
+        : "This render could not be completed. Your source video and timeline are unchanged.";
+      dispatch({
+        type: "update_generation_progress",
+        jobId: (data.job_id as string | undefined) ?? "generation",
+        stage: "failed",
+        text: niceErr,
+        complete: true,
+        failed: true,
+      });
+      dispatch({ type: "set_activity", activity: "render ended safely" });
       break;
     }
 
@@ -902,7 +968,10 @@ function handleSSEEvent(
 
     case "error":
       console.error("[agent sse] server error event", data);
-      dispatch({ type: "add_error", message: data.message as string });
+      dispatch({
+        type: "add_notice",
+        message: "The edit could not be prepared. Nothing was changed; check the selection and try again.",
+      });
       break;
 
     default: {

@@ -167,6 +167,18 @@ export type JobResp = {
     evidence?: string[];
     correction?: string;
   } | null;
+  progress_state?: {
+    stage: string;
+    message: string;
+    status: "running" | "done" | "failed";
+    updated_at: number;
+    data?: Record<string, unknown>;
+  } | null;
+  failure_state?: {
+    code: string;
+    user_message: string;
+    retryable: boolean;
+  } | null;
 };
 
 export type GenerationExecutionWindow = {

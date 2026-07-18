@@ -48,3 +48,5 @@ class JobOut(BaseModel):
     localized_compositing: list[dict[str, Any]] = Field(default_factory=list)
     local_flow_telemetry: dict[str, Any] | None = None
     retry_state: dict[str, Any] | None = None
+    progress_state: dict[str, Any] | None = None
+    failure_state: dict[str, Any] | None = None

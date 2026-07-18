@@ -65,6 +65,8 @@ from app.services.generation_quality import (
     semantic_quality_evidence,
 )
 from app.services.generation_telemetry import build_local_flow_telemetry
+from app.services.generation_failure import classify_generation_failure
+from app.services.job_progress import persist_job_progress
 from app.services.local_compositor import composite_generated_target
 from app.services.local_seam import continuity_at_selected_seams, match_local_context
 from app.services.edit_prompt import planned_edit_prompt
@@ -132,6 +134,14 @@ async def _emit(job_id: str, stage: str, msg: str, **data: Any) -> None:
     if data:
         event["data"] = data
     await job_events.publish(job_id, event)
+    if stage != "gen_poll":
+        await persist_job_progress(
+            job_id,
+            stage=stage,
+            message=msg,
+            data={key: value for key, value in data.items() if key != "url"},
+            session_factory=AsyncSessionLocal,
+        )
 
 
 async def _emit_terminal(job_id: str, stage: str, msg: str, **data: Any) -> None:
@@ -144,6 +154,64 @@ async def _emit_terminal(job_id: str, stage: str, msg: str, **data: Any) -> None
     if data:
         event["data"] = data
     await job_events.publish(job_id, event)
+    await persist_job_progress(
+        job_id,
+        stage=stage,
+        message=msg,
+        status="done" if stage == "done" else "failed",
+        data={key: value for key, value in data.items() if key != "variant_url"},
+        session_factory=AsyncSessionLocal,
+    )
+
+
+async def _record_attempt_failure(
+    job_id: str,
+    variant_id: str,
+    error: Exception | str,
+    *,
+    provider_label: str,
+) -> None:
+    failure = classify_generation_failure(error)
+    async with AsyncSessionLocal() as db:
+        job = await db.get(Job, job_id)
+        if job is not None:
+            payload = dict(job.payload or {})
+            attempts = list(payload.get("attempt_failures") or [])
+            attempts.append({**failure.metadata(), "provider": provider_label})
+            payload["attempt_failures"] = attempts
+            job.payload = payload
+        variant = await db.get(Variant, variant_id)
+        if variant is not None:
+            variant.status = "error"
+            variant.error = failure.user_message
+        await db.commit()
+    await _emit(
+        job_id,
+        "attempt_failed",
+        "This render attempt could not be used. Checking the safe recovery path…",
+        code=failure.code,
+        retryable=failure.retryable,
+    )
+
+
+async def _fail_job(job_id: str, error: Exception | str) -> None:
+    failure = classify_generation_failure(error)
+    async with AsyncSessionLocal() as db:
+        job = await db.get(Job, job_id)
+        if job is not None:
+            payload = dict(job.payload or {})
+            payload["failure_state"] = failure.metadata()
+            job.payload = payload
+            job.status = "error"
+            job.error = failure.user_message
+            await db.commit()
+    await _emit_terminal(
+        job_id,
+        "failed",
+        failure.user_message,
+        code=failure.code,
+        retryable=failure.retryable,
+    )
 
 
 async def _await_retry_permission(
@@ -290,14 +358,12 @@ async def _run_variant(
             "[gen.variant] %s FAILED job=%s variant=%s err=%s",
             provider_label.lower(), job_id, variant_id, error_message[:200],
         )
-        await _emit(
+        await _record_attempt_failure(
             job_id,
-            "gen_error",
-            f"{provider_label} generation failed: {error_message}",
-            error=error_message[:500],
+            variant_id,
+            error_message,
+            provider_label=provider_label,
         )
-        async with AsyncSessionLocal() as db:
-            await _update_variant(db, variant_id, status="error", error=error_message[:500])
         return False
 
     # stubs (and some real providers) may echo the input clip path back as
@@ -327,13 +393,12 @@ async def _run_variant(
                 variant_url = await storage.publish(conformed_path, content_type="video/mp4")
             except Exception as exc:
                 log.exception("generated clip validation/conform failed")
-                await _emit(
+                await _record_attempt_failure(
                     job_id,
-                    "gen_validation_error",
-                    f"generated clip failed technical validation: {exc}",
+                    variant_id,
+                    exc,
+                    provider_label=provider_label,
                 )
-                async with AsyncSessionLocal() as db:
-                    await _update_variant(db, variant_id, status="error", error=str(exc)[:500])
                 return False
 
         await _emit(
@@ -399,7 +464,7 @@ async def _sample_variant_frames(variant_url: str, count: int = 7) -> list[str]:
     return frames
 
 
-async def run(job_id: str) -> None:
+async def _run(job_id: str) -> None:
     async with AsyncSessionLocal() as db:
         job = await db.get(Job, job_id)
         if job is None:
@@ -407,8 +472,7 @@ async def run(job_id: str) -> None:
             return
         proj = await db.get(Project, job.project_id)
         if proj is None:
-            await _update_job(db, job_id, status="error", error="project missing")
-            await _emit_terminal(job_id, "error", "project missing")
+            await _fail_job(job_id, "project missing")
             return
 
         await _update_job(db, job_id, status="processing")
@@ -464,9 +528,7 @@ async def run(job_id: str) -> None:
             source_video_path = await storage.path_from_url(project_video_url)
     except Exception as exc:
         error = f"source video unavailable: {exc}"
-        async with AsyncSessionLocal() as db:
-            await _update_job(db, job_id, status="error", error=error[:500])
-        await _emit_terminal(job_id, "error", error)
+        await _fail_job(job_id, error)
         return
 
     bbox_w = float(bbox.get("w", 0.0))
@@ -704,15 +766,11 @@ async def run(job_id: str) -> None:
             plans = await plan_task
         except Exception as e:
             log.exception("plan_variants failed")
-            async with AsyncSessionLocal() as db:
-                await _update_job(db, job_id, status="error", error=f"plan failed: {e}")
-            await _emit_terminal(job_id, "error", f"plan failed: {e}")
+            await _fail_job(job_id, f"plan failed: {e}")
             return
 
     if not plans:
-        async with AsyncSessionLocal() as db:
-            await _update_job(db, job_id, status="error", error="no plans returned")
-        await _emit_terminal(job_id, "error", "Gemini returned no plans")
+        await _fail_job(job_id, "no edit plans returned")
         return
 
     plan = list(plans)[0]
@@ -936,11 +994,20 @@ async def run(job_id: str) -> None:
     )
 
     if not done:
-        err = variants[0].error if variants else "generation failed"
-        log.error("[gen.run] job=%s FAILED all variants — first_error=%s", job_id, err)
         async with AsyncSessionLocal() as db:
-            await _update_job(db, job_id, status="error", error=err or "generation failed")
-        await _emit_terminal(job_id, "error", err or "generation failed")
+            current_job = await db.get(Job, job_id)
+            attempt_failures = list(
+                ((current_job.payload or {}).get("attempt_failures") or [])
+                if current_job is not None
+                else []
+            )
+        err = (
+            attempt_failures[-1].get("technical_message")
+            if attempt_failures
+            else (variants[0].error if variants else "generation failed")
+        )
+        log.error("[gen.run] job=%s FAILED all variants — first_error=%s", job_id, err)
+        await _fail_job(job_id, err or "generation failed")
         return
 
     async def maybe_composite(
@@ -1493,3 +1560,14 @@ async def run(job_id: str) -> None:
         generated_seconds=generated_seconds,
         local_flow_telemetry=local_flow_telemetry,
     )
+
+
+async def run(job_id: str) -> None:
+    """Keep an unexpected worker exception from leaving a job stuck forever."""
+    try:
+        await _run(job_id)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        log.exception("generate job crashed job=%s", job_id)
+        await _fail_job(job_id, str(exc).strip() or type(exc).__name__)

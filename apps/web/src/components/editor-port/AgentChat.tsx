@@ -112,10 +112,10 @@ export function AgentChat({ projectId }: AgentChatProps) {
           }),
         );
         setAppliedVariant(key);
-      } catch (error) {
+      } catch {
         agentDispatch({
-          type: "add_error",
-          message: error instanceof Error ? error.message : "Could not apply this edit.",
+          type: "add_notice",
+          message: "This edit could not be applied. The timeline was not changed; refresh it and try again.",
         });
       } finally {
         setApplyingVariant(null);
@@ -133,10 +133,10 @@ export function AgentChat({ projectId }: AgentChatProps) {
           jobId,
           status: result.status,
         });
-      } catch (error) {
+      } catch {
         agentDispatch({
-          type: "add_error",
-          message: error instanceof Error ? error.message : "Could not update retry.",
+          type: "add_notice",
+          message: "The retry choice could not be saved. The current render state was not changed.",
         });
       }
     },
@@ -582,6 +582,7 @@ function MessageRenderer({
           <GenerationProgressCard
             entries={message.entries}
             complete={message.complete}
+            failed={message.failed}
           />
         </div>
       );
@@ -629,14 +630,20 @@ function MessageRenderer({
 function GenerationProgressCard({
   entries,
   complete,
+  failed,
 }: {
   entries: Extract<AgentMessage, { type: "generation_progress" }>["entries"];
   complete: boolean;
+  failed: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-border/70 bg-background/60 px-3 py-2.5">
+    <div className={`rounded-lg border px-3 py-2.5 ${
+      failed
+        ? "border-amber-400/30 bg-amber-400/5"
+        : "border-border/70 bg-background/60"
+    }`}>
       <div className="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-        <span>{complete ? "render complete" : "render progress"}</span>
+        <span>{failed ? "render stopped safely" : complete ? "render complete" : "render progress"}</span>
         {!complete && <span className="fiebatt-shimmer-text">working</span>}
       </div>
       <div className="space-y-1.5">
@@ -646,7 +653,7 @@ function GenerationProgressCard({
             className="flex gap-2 text-xs text-muted-foreground"
           >
             <span className="font-mono text-[10px] text-foreground/40">
-              {index === entries.length - 1 && !complete ? "●" : "✓"}
+              {index === entries.length - 1 && !complete ? "●" : failed && index === entries.length - 1 ? "•" : "✓"}
             </span>
             <span>{entry.text}</span>
           </div>

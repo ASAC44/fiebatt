@@ -52,6 +52,8 @@ def _job_out(job: Job) -> JobOut:
         localized_compositing=payload.get("localized_compositing") or [],
         local_flow_telemetry=payload.get("local_flow_telemetry"),
         retry_state=payload.get("retry_state"),
+        progress_state=payload.get("progress_state"),
+        failure_state=payload.get("failure_state"),
         variants=[
             VariantOut(
                 id=v.id,

@@ -186,14 +186,25 @@ async def conform_generated_edit(
     """Trim generated video to the edit window and restore source audio."""
     generated_meta = await probe(generated)
     source_meta = await probe(source)
-    if generated_meta["duration"] + 0.1 < duration:
+    generated_duration = float(generated_meta["duration"])
+    shortfall = duration - generated_duration
+    allowed_shortfall = min(0.5, duration * 0.05)
+    if shortfall > allowed_shortfall:
         raise ValueError(
-            f"generated clip is too short ({generated_meta['duration']:.2f}s for {duration:.2f}s edit)"
+            f"generated clip is too short ({generated_duration:.2f}s for {duration:.2f}s edit)"
         )
 
     out = Path(out)
+    # Providers commonly return a few frames less than requested. Stretch only
+    # that small drift across the clip instead of rejecting it or freezing the
+    # final frame, which would create a visible exit seam.
+    timing = (
+        f"setpts={duration / generated_duration:.8f}*PTS,"
+        if shortfall > 0.0 and generated_duration > 0.0
+        else ""
+    )
     vf = (
-        f"trim=duration={duration:.3f},setpts=PTS-STARTPTS,"
+        f"{timing}trim=duration={duration:.3f},setpts=PTS-STARTPTS,"
         f"scale={source_meta['width']}:{source_meta['height']}:force_original_aspect_ratio=decrease,"
         f"pad={source_meta['width']}:{source_meta['height']}:(ow-iw)/2:(oh-ih)/2:color=black,"
         f"fps={source_meta['fps']:.4f}"

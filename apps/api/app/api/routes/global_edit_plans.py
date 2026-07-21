@@ -366,7 +366,11 @@ async def apply_global_edit_plan(
     ).scalar_one_or_none()
     if plan is None:
         raise HTTPException(status_code=404, detail="global edit plan not found")
-    project = await db.get(Project, plan.project_id)
+    project = (
+        await db.execute(
+            select(Project).where(Project.id == plan.project_id).with_for_update()
+        )
+    ).scalar_one_or_none()
     if project is None or project.session_id != session.id:
         raise HTTPException(status_code=404, detail="global edit plan not found")
     if plan.status not in {"done", "applied"} or not plan.propagation_job_id:
@@ -451,6 +455,8 @@ async def apply_global_edit_plan(
 
     if edl is not None:
         project.timeline_edl = edl.model_dump(mode="json")
+    if plan.status != "applied":
+        project.timeline_revision = int(project.timeline_revision or 0) + 1
     plan.status = "applied"
     await db.commit()
     await db.refresh(project)

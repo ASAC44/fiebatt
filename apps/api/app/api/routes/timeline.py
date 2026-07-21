@@ -14,6 +14,7 @@ the resulting clip.
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -51,13 +52,24 @@ async def save_timeline(
     session: SessionModel = Depends(get_session),
     db: AsyncSession = Depends(get_db),
 ):
-    """Persist a full EDL snapshot. Idempotent — called on debounce whenever
-    the user's frontend state settles. Body must contain the entire EDL,
-    not a delta; this keeps the server logic trivially correct and makes
-    concurrent edits last-writer-wins (fine for single-user reels)."""
-    proj = await db.get(Project, project_id)
+    """Persist one full EDL snapshot without overwriting a newer mutation."""
+    proj = (
+        await db.execute(
+            select(Project).where(Project.id == project_id).with_for_update()
+        )
+    ).scalar_one_or_none()
     if proj is None or proj.session_id != session.id:
         raise HTTPException(status_code=404, detail="project not found")
+    if body.expected_revision != proj.timeline_revision:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "timeline_conflict",
+                "user_message": "The timeline changed while this save was waiting.",
+                "action": "Reload the latest timeline before making another edit.",
+                "revision": proj.timeline_revision,
+            },
+        )
 
     now = time.time()
     edl_payload = PersistedEDL(
@@ -66,8 +78,13 @@ async def save_timeline(
         updated_at=now,
     ).model_dump(mode="json")
     proj.timeline_edl = edl_payload
+    proj.timeline_revision = int(proj.timeline_revision or 0) + 1
     await db.commit()
 
     # nothing returned but the echo — the client keeps its own state and
     # just needs to know the save went through.
-    return TimelineSaveResp(project_id=proj.id, updated_at=now)
+    return TimelineSaveResp(
+        project_id=proj.id,
+        updated_at=now,
+        revision=proj.timeline_revision,
+    )

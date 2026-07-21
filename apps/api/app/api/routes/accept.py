@@ -54,7 +54,11 @@ async def accept(
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
 
-    proj = await db.get(Project, job.project_id)
+    proj = (
+        await db.execute(
+            select(Project).where(Project.id == job.project_id).with_for_update()
+        )
+    ).scalar_one_or_none()
     if proj is None or proj.session_id != session.id:
         raise HTTPException(status_code=404, detail="job not found")
 

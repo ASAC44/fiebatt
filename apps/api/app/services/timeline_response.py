@@ -33,6 +33,7 @@ async def build_timeline_response(
     return TimelineOut(
         project_id=project.id,
         duration=project.duration,
+        revision=project.timeline_revision,
         segments=[
             TimelineSegment(
                 start_ts=item.start_ts,

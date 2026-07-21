@@ -129,6 +129,7 @@ async def test_timeline_snapshot_can_be_saved(client, owned_selection):
         f"/api/timeline/{project_id}",
         headers={"X-Session-Id": "plan-owner"},
         json={
+            "expected_revision": 0,
             "clips": [
                 {
                     "id": "source-clip",
@@ -162,7 +163,32 @@ async def test_timeline_snapshot_can_be_saved(client, owned_selection):
         headers={"X-Session-Id": "plan-owner"},
     )
     assert saved.status_code == 200
+    assert response.json()["revision"] == 1
+    assert saved.json()["revision"] == 1
     assert saved.json()["edl"]["clips"][0]["id"] == "source-clip"
+
+    stale = await client.put(
+        f"/api/timeline/{project_id}",
+        headers={"X-Session-Id": "plan-owner"},
+        json={
+            "expected_revision": 0,
+            "clips": [
+                {
+                    "id": "stale-clip",
+                    "kind": "source",
+                    "url": "/media/source.mp4",
+                    "source_start": 0.0,
+                    "source_end": 30.0,
+                    "media_duration": 30.0,
+                    "volume": 1.0,
+                    "project_id": project_id,
+                }
+            ],
+            "sources": [],
+        },
+    )
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["code"] == "timeline_conflict"
 
 
 @pytest.mark.asyncio

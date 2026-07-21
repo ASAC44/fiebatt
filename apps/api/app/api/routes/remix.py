@@ -110,8 +110,12 @@ async def _get_owned_project(
     *,
     project_id: str,
     session_id: str,
+    for_update: bool = False,
 ) -> Project:
-    proj = await db.get(Project, project_id)
+    statement = select(Project).where(Project.id == project_id)
+    if for_update:
+        statement = statement.with_for_update()
+    proj = (await db.execute(statement)).scalar_one_or_none()
     if proj is None or proj.session_id != session_id:
         raise HTTPException(status_code=404, detail="project not found")
     return proj
@@ -311,6 +315,7 @@ async def batch_accept(
             db,
             project_id=job.project_id,
             session_id=session.id,
+            for_update=True,
         )
 
         variant = next((v for v in job.variants if v.index == item.variant_index), None)

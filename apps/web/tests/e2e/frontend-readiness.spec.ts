@@ -81,9 +81,10 @@ async function installApi(
       return json(route, { ...project, segments: [], entities: [] });
     }
     if (path === `/api/timeline/${project.project_id}`) {
-      return json(route, timeline ?? {
+      return json(route, timeline ? { revision: 0, ...(timeline as object) } : {
         project_id: project.project_id,
         duration: project.duration,
+        revision: 0,
         segments: [{
           start_ts: 0,
           end_ts: 4,

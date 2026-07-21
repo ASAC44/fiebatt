@@ -34,6 +34,8 @@ _SCHEMA_UPGRADES_POSTGRES = [
     # state across reel reopens. nullable on legacy projects so they still
     # fall through to the old build_timeline() reconstruction path.
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS timeline_edl JSONB",
+    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS timeline_revision INTEGER "
+    "NOT NULL DEFAULT 0",
     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS name VARCHAR(120) "
     "NOT NULL DEFAULT 'Untitled video'",
 ]
@@ -50,8 +52,17 @@ async def create_all() -> None:
         elif dialect == "sqlite":
             columns = await conn.execute(text("PRAGMA table_info(projects)"))
             existing = {row[1] for row in columns}
+            if "timeline_edl" not in existing:
+                await conn.execute(text(
+                    "ALTER TABLE projects ADD COLUMN timeline_edl JSON"
+                ))
             if "name" not in existing:
                 await conn.execute(text(
                     "ALTER TABLE projects ADD COLUMN name VARCHAR(120) "
                     "NOT NULL DEFAULT 'Untitled video'"
+                ))
+            if "timeline_revision" not in existing:
+                await conn.execute(text(
+                    "ALTER TABLE projects ADD COLUMN timeline_revision INTEGER "
+                    "NOT NULL DEFAULT 0"
                 ))

@@ -70,16 +70,19 @@ class TimelineSaveReq(BaseModel):
 
     clips: list[PersistedClip]
     sources: list[PersistedAsset]
+    expected_revision: int = Field(ge=0)
 
 
 class TimelineSaveResp(BaseModel):
     project_id: str
     updated_at: float
+    revision: int
 
 
 class TimelineOut(BaseModel):
     project_id: str
     duration: float
+    revision: int
     # Always populated. For EDL-aware clients this is just a fallback view;
     # for legacy clients it's still the whole timeline.
     segments: list[TimelineSegment]

@@ -30,6 +30,7 @@ import {
   pollExport,
   saveTimeline,
   upload,
+  ApiError,
   type PersistedAsset,
   type PersistedClip,
   type TimelineSegment,
@@ -37,7 +38,6 @@ import {
 } from "@/lib/api";
 import { ContinuityStatusBadge } from "@/features/continuity/ContinuityStatusBadge";
 import { useContinuityDashboard } from "@/features/continuity/useContinuityDashboard";
-import { useAgentEdlBridge } from "@/hooks/useAgentEdlBridge";
 import { EditorTopbar } from "@/components/editor-topbar";
 import { EditorGuide } from "@/components/editor-guide";
 import { isEditorGuideSeen, setEditorGuideSeen } from "@/features/onboarding/storage";
@@ -276,6 +276,7 @@ function StudioInner({
   // every tiny state change.
   const stateRef = useRef(state);
   stateRef.current = state;
+  const timelineRevisionRef = useRef(0);
 
   // The "effective" project id is the one AgentChat actually sends to the
   // backend — it falls back to whatever source the user just uploaded in
@@ -302,6 +303,7 @@ function StudioInner({
       try {
         const tl = await getTimeline(projectId);
         if (cancelled) return;
+        timelineRevisionRef.current = tl.revision;
         // re-read the latest snapshot in case duration/fps/videoUrl settled
         // after we kicked off the fetch. projectId has not changed (effect
         // is keyed on it) so the snapshot still refers to the right reel.
@@ -386,6 +388,7 @@ function StudioInner({
           ev as CustomEvent<{ timeline?: TimelineResp }>
         ).detail?.timeline;
         const tl = eventTimeline ?? await getTimeline(pid);
+        timelineRevisionRef.current = tl.revision;
 
         // Prefer the saved initialProject snapshot (from ?reopen=), but
         // fall back to constructing one from the live EDL source asset —
@@ -502,12 +505,35 @@ function StudioInner({
       try {
         const clips = clipsSnapshot.map(clipToPersisted);
         const sources = sourcesSnapshot.map(assetToPersisted);
-        const resp = await saveTimeline(projectId, clips, sources);
+        const resp = await saveTimeline(
+          projectId,
+          clips,
+          sources,
+          timelineRevisionRef.current,
+        );
+        timelineRevisionRef.current = resp.revision;
         lastSavedSigRef.current = currentSig;
         lastSavedAtRef.current = resp.updated_at;
         setSaveStatus("saved");
       } catch (err) {
         console.warn("[studio] timeline save failed:", err);
+        if (err instanceof ApiError && err.code === "timeline_conflict") {
+          try {
+            const latest = await getTimeline(projectId);
+            timelineRevisionRef.current = latest.revision;
+            if (latest.edl?.clips.length) {
+              const clips = latest.edl.clips.map(clipFromPersisted);
+              const sources = latest.edl.sources.map(assetFromPersisted);
+              lastSavedSigRef.current = edlSignature(clips, sources);
+              lastSavedAtRef.current = latest.edl.updated_at ?? Date.now() / 1000;
+              dispatch({ type: "hydrate", clips, sources });
+              setSaveStatus("saved");
+              return;
+            }
+          } catch (refreshError) {
+            console.warn("[studio] timeline conflict refresh failed:", refreshError);
+          }
+        }
         setSaveStatus("error");
       }
     }, 600);
@@ -657,17 +683,6 @@ function StudioInner({
   const hasSources = state.sources.length > 0;
   const continuityProjectId = effectiveProjectId;
   const continuity = useContinuityDashboard(continuityProjectId);
-
-  // bridge agent tool calls → EDL timeline refresh
-  useAgentEdlBridge(
-    continuityProjectId,
-    initialProject ? {
-      videoUrl: initialProject.videoUrl,
-      duration: initialProject.duration,
-      fps: initialProject.fps,
-      label: initialProject.label,
-    } : undefined,
-  );
 
   const projectLabel =
     initialProject?.label

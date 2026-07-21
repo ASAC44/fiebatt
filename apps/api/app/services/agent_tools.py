@@ -844,7 +844,11 @@ async def _accept_variant(
     if job is None:
         raise ValueError(f"job not found: {job_id}")
 
-    proj = await db.get(Project, job.project_id)
+    proj = (
+        await db.execute(
+            select(Project).where(Project.id == job.project_id).with_for_update()
+        )
+    ).scalar_one_or_none()
     if proj is None or proj.session_id != session_id:
         raise ValueError(f"job not found: {job_id}")
 

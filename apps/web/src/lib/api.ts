@@ -370,6 +370,7 @@ export type PersistedEDL = {
 export type TimelineResp = {
   project_id: string;
   duration: number;
+  revision: number;
   segments: TimelineSegment[];
   /** When present, client should use this instead of `segments` — it's the
    * exact EDL the user had on screen at their last save. Null on reels
@@ -380,6 +381,7 @@ export type TimelineResp = {
 export type TimelineSaveResp = {
   project_id: string;
   updated_at: number;
+  revision: number;
 };
 
 export type MaskResp = {
@@ -672,10 +674,11 @@ export function saveTimeline(
   project_id: string,
   clips: PersistedClip[],
   sources: PersistedAsset[],
+  expectedRevision: number,
 ): Promise<TimelineSaveResp> {
   return request<TimelineSaveResp>(`/api/timeline/${project_id}`, {
     method: "PUT",
-    body: JSON.stringify({ clips, sources }),
+    body: JSON.stringify({ clips, sources, expected_revision: expectedRevision }),
   });
 }
 

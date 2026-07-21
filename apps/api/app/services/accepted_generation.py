@@ -244,6 +244,7 @@ def update_project_edl_for_acceptance(
     variant: Variant,
     accepted_range: AcceptedGenerationRange,
 ) -> None:
+    project.timeline_revision = int(project.timeline_revision or 0) + 1
     raw = project.timeline_edl
     if not raw:
         return

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, String, Float, DateTime, ForeignKey, func
+from sqlalchemy import JSON, String, Float, DateTime, ForeignKey, Integer, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -38,6 +38,9 @@ class Project(Base):
     # Shape: { "clips": [...], "sources": [...], "updated_at": <epoch> }
     timeline_edl: Mapped[dict[str, Any] | None] = mapped_column(
         JSON, nullable=True, default=None
+    )
+    timeline_revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
     )
 
     session: Mapped["Session"] = relationship(back_populates="projects")  # noqa: F821

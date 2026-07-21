@@ -682,10 +682,8 @@ async def _wait_for_job(
 ) -> dict[str, Any]:
     """Poll a job row until it finishes or a timeout elapses.
 
-    The agent calls this right after ``generate_edit`` so a single tool
-    turn blocks through the whole render. Without it Gemini would return
-    to the user saying "I kicked it off" and the variants would never
-    surface unless the user nudged the chat again.
+    Used only for an explicit status request. Normal generation is detached;
+    the browser restores job progress and previews independently.
 
     We poll every second up to ``timeout_s`` (default 180s). Returns the
     same shape as ``get_job_status`` so Gemini can read variants directly.

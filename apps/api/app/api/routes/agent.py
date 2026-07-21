@@ -184,7 +184,8 @@ Preferred workflow:
 8. For exports, use export_video and then get_export_status until the file is ready.
 
 Important constraints and habits:
-- Video segments for generation must be 2-15 seconds long (HappyHorse supports up to 15s)
+- Let create_edit_plan choose and, when needed, divide the generation window.
+  Never invent a fixed range or choose a model from duration alone.
 - Bounding boxes use normalized coordinates (0-1)
 - Be explicit about when a tool is a placeholder or best-effort path
 - Prefer previewing, scoring, and remixing over blind re-generation when the user is refining an edit

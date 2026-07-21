@@ -6,9 +6,9 @@ Flow per submitted job:
   1. flip job to 'processing'
   2. extract source clip via ffmpeg
   3. extract a subject reference separately from full-frame boundary anchors
-  4. ask Gemini for a structured edit plan (we use plan[0])
-   5. run one generation (Wan or HappyHorse, per provider config), write the resulting Variant row
-  6. score the result with Gemini (best-effort)
+  4. use the stored structured plan (legacy jobs plan once here)
+  5. run the selected provider and write the first Variant row
+  6. review it and optionally run one evidence-driven correction
   7. flip job to 'done' (or 'error' if generation failed)
 
 Every stage also publishes a structured "thought process" event through
@@ -800,7 +800,7 @@ async def _run(job_id: str) -> None:
     await _emit(
         job_id,
         "plan_done",
-        "Gemini returned a structured edit plan",
+        "structured edit instructions are ready",
         plan=safe_plan,
         variant_count=len(list(plans)),
     )

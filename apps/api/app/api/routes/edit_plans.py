@@ -282,7 +282,7 @@ async def create_edit_plan(
     if len(planned_chunks) > 1 and selection.source_revision != project.video_url:
         raise HTTPException(
             status_code=422,
-            detail="follow-up edits must fit one 15-second render window",
+            detail="follow-up edits must fit one source-video render window",
         )
     capabilities = VIDEO_PROVIDER_CAPABILITIES[provider]
     provider_reason = (

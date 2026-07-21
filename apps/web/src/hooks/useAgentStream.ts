@@ -127,7 +127,6 @@ function generationActivity(event: JobStreamEvent, retryRendering = false): stri
     seam_match_done: "matching source and edit frames…",
     seam_match_unavailable: "could not find safe cut frames…",
     gen_retry: "improving first render…",
-    gen_provider_fallback: "trying backup video model…",
     attempt_failed: "render attempt could not be used; checking recovery…",
     gen_retry_rejected: "keeping stronger render…",
     done: "preview ready…",
@@ -176,8 +175,7 @@ export function useAgentStream(projectId?: string | null) {
         if (event.stage === "retry_pending") retryWaiting = true;
         if (
           event.stage === "retry_dispatched" ||
-          event.stage === "gen_retry" ||
-          event.stage === "gen_provider_fallback"
+          event.stage === "gen_retry"
         ) {
           retryWaiting = false;
           retryRendering = true;

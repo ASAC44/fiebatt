@@ -12,7 +12,6 @@ from app.services.generation_quality import (
     quality_payload_for_candidate,
     cancel_waiting_retry,
     semantic_quality_evidence,
-    select_fallback_provider,
 )
 
 
@@ -28,12 +27,9 @@ def test_clean_result_passes_without_extra_generation():
     decision = decide_generation_quality(
         score={"visual_coherence": 8, "prompt_adherence": 8},
         continuity=ContinuityReport(True, {}),
-        current_provider="wan",
         duration=6.0,
         attempts=1,
         generated_seconds=6.0,
-        fallback_used=False,
-        source_video_available=True,
     )
     assert decision.action == GenerationQualityAction.PASS
 
@@ -42,12 +38,9 @@ def test_unavailable_continuity_is_warning_not_generation_failure():
     decision = decide_generation_quality(
         score={"visual_coherence": 8, "prompt_adherence": 8},
         continuity=None,
-        current_provider="wan",
         duration=6.0,
         attempts=1,
         generated_seconds=6.0,
-        fallback_used=False,
-        source_video_available=True,
     )
     assert decision.action == GenerationQualityAction.PASS
 
@@ -89,12 +82,9 @@ def test_first_source_edit_failure_gets_evidence_driven_retry():
     decision = decide_generation_quality(
         score={"visual_coherence": 8, "prompt_adherence": 8},
         continuity=_failed_continuity(),
-        current_provider="wan",
         duration=6.0,
         attempts=1,
         generated_seconds=6.0,
-        fallback_used=False,
-        source_video_available=True,
     )
     assert decision.action == GenerationQualityAction.CORRECTIVE_RETRY
     assert "exit_subject_motion_jump" in corrective_prompt(decision.evidence)
@@ -104,12 +94,9 @@ def test_failed_source_edit_never_switches_provider_automatically():
     decision = decide_generation_quality(
         score={"visual_coherence": 8, "prompt_adherence": 8},
         continuity=_failed_continuity(),
-        current_provider="veo",
         duration=8.0,
         attempts=1,
         generated_seconds=8.0,
-        fallback_used=False,
-        source_video_available=True,
     )
     assert decision.action == GenerationQualityAction.CORRECTIVE_RETRY
     assert decision.next_provider is None
@@ -119,20 +106,11 @@ def test_corrective_retry_is_capped_by_generated_seconds():
     decision = decide_generation_quality(
         score={"visual_coherence": 4, "prompt_adherence": 8},
         continuity=_failed_continuity(),
-        current_provider="wan",
         duration=12.0,
         attempts=2,
         generated_seconds=24.0,
-        fallback_used=False,
-        source_video_available=True,
     )
     assert decision.action == GenerationQualityAction.HARD_FAIL
-
-
-def test_fallback_helper_remains_duration_aware_for_explicit_use():
-    assert select_fallback_provider("veo", 8.0) == "wan"
-    assert select_fallback_provider("wan", 12.0) == "happyhorse"
-    assert select_fallback_provider("happyhorse", 12.0) is None
 
 
 def test_hard_fail_acceptance_requires_both_request_and_operator_flag():

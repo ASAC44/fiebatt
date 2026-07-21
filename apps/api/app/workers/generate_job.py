@@ -942,53 +942,10 @@ async def _run(job_id: str) -> None:
     attempts = 1
     generated_seconds = generation_duration
     provider_attempts = [video_provider]
-    fallback_used = False
-    initial_ok = await dispatch(video_provider, target_variant_id=variant_id)
-
-    if generation_window.adaptive and not initial_ok:
-        async with AsyncSessionLocal() as db:
-            failed_variant = await db.get(Variant, variant_id)
-            generation_error = failed_variant.error if failed_variant is not None else "generation failed"
-        failure_decision = decide_generation_quality(
-            score=None,
-            continuity=None,
-            current_provider=video_provider,
-            duration=generation_duration,
-            attempts=attempts,
-            generated_seconds=generated_seconds,
-            fallback_used=fallback_used,
-            source_video_available=source_video_url is not None,
-            generation_error=generation_error,
-        )
-        if failure_decision.action in {
-            GenerationQualityAction.CORRECTIVE_RETRY,
-            GenerationQualityAction.PROVIDER_FALLBACK,
-        }:
-            if failure_decision.action == GenerationQualityAction.PROVIDER_FALLBACK:
-                assert failure_decision.next_provider is not None
-                video_provider = failure_decision.next_provider
-                fallback_used = True
-            attempts += 1
-            generated_seconds += generation_duration
-            provider_attempts.append(video_provider)
-            retry_variant_id = await create_attempt_variant(attempts - 1)
-            await _emit(
-                job_id,
-                (
-                    "gen_provider_fallback"
-                    if failure_decision.action == GenerationQualityAction.PROVIDER_FALLBACK
-                    else "gen_retry"
-                ),
-                f"generation failed; retrying with {_provider_label(video_provider)}",
-                attempt=attempts,
-                provider=video_provider,
-                evidence=list(failure_decision.evidence),
-            )
-            initial_ok = await dispatch(
-                video_provider,
-                corrective_prompt(failure_decision.evidence),
-                target_variant_id=retry_variant_id,
-            )
+    # Technical provider failures contain no visual feedback for a useful
+    # correction. End with a precise retryable error instead of paying for a
+    # blind second render.
+    await dispatch(video_provider, target_variant_id=variant_id)
 
     # collect outcome
     async with AsyncSessionLocal() as db:
@@ -1278,17 +1235,11 @@ async def _run(job_id: str) -> None:
         decision = decide_generation_quality(
             score=score,
             continuity=continuity_report,
-            current_provider=video_provider,
             duration=generation_duration,
             attempts=attempts,
             generated_seconds=generated_seconds,
-            fallback_used=fallback_used,
-            source_video_available=source_video_url is not None,
         )
-        while decision.action in {
-            GenerationQualityAction.CORRECTIVE_RETRY,
-            GenerationQualityAction.PROVIDER_FALLBACK,
-        }:
+        while decision.action == GenerationQualityAction.CORRECTIVE_RETRY:
             if not await _await_retry_permission(job_id, decision.evidence):
                 decision = final_candidate_quality(score, continuity_report)
                 break
@@ -1297,24 +1248,14 @@ async def _run(job_id: str) -> None:
             previous_continuity = continuity_report
             previous_provider = video_provider
             next_provider = video_provider
-            if decision.action == GenerationQualityAction.PROVIDER_FALLBACK:
-                assert decision.next_provider is not None
-                next_provider = decision.next_provider
-                fallback_used = True
             attempts += 1
             generated_seconds += generation_duration
             provider_attempts.append(next_provider)
             retry_variant_id = await create_attempt_variant(attempts - 1)
             await _emit(
                 job_id,
-                (
-                    "gen_provider_fallback"
-                    if decision.action == GenerationQualityAction.PROVIDER_FALLBACK
-                    else "gen_retry"
-                ),
-                (
-                    f"continuity checks failed; trying {_provider_label(next_provider)}"
-                ),
+                "gen_retry",
+                f"review found a specific issue; retrying {_provider_label(next_provider)} once",
                 attempt=attempts,
                 provider=next_provider,
                 evidence=list(decision.evidence),
@@ -1374,12 +1315,9 @@ async def _run(job_id: str) -> None:
             decision = decide_generation_quality(
                 score=score,
                 continuity=continuity_report,
-                current_provider=video_provider,
                 duration=generation_duration,
                 attempts=attempts,
                 generated_seconds=generated_seconds,
-                fallback_used=fallback_used,
-                source_video_available=source_video_url is not None,
                 generation_error=generation_error,
             )
         quality_state = decision.action

@@ -4,10 +4,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from app.ai.services.provider_capabilities import (
-    VIDEO_PROVIDER_CAPABILITIES,
-    validate_provider_duration,
-)
 from app.services.continuity_validator import ContinuityReport
 
 
@@ -24,7 +20,6 @@ class GenerationQualityAction(StrEnum):
     PASS = "pass"
     REVIEW_WARNING = "review_warning"
     CORRECTIVE_RETRY = "corrective_retry"
-    PROVIDER_FALLBACK = "provider_fallback"
     HARD_FAIL = "hard_fail"
 
 
@@ -117,28 +112,13 @@ def final_candidate_quality(
     return final_semantic_quality(score)
 
 
-def select_fallback_provider(current_provider: str, duration: float) -> str | None:
-    """Prefer a different source-video editor that fits the full context."""
-    order = ("wan", "happyhorse") if current_provider != "wan" else ("happyhorse",)
-    for provider in order:
-        if provider == current_provider:
-            continue
-        capabilities = VIDEO_PROVIDER_CAPABILITIES[provider]
-        if capabilities.source_video_edit and validate_provider_duration(provider, duration) is None:
-            return provider
-    return None
-
-
 def decide_generation_quality(
     *,
     score: dict | None,
     continuity: ContinuityReport | None,
-    current_provider: str,
     duration: float,
     attempts: int,
     generated_seconds: float,
-    fallback_used: bool,
-    source_video_available: bool,
     generation_error: str | None = None,
 ) -> GenerationQualityDecision:
     evidence = quality_evidence(

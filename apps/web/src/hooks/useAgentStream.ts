@@ -40,6 +40,7 @@ interface SendMessageOptions {
   // it prevents Gemini from asking "what's the project_id?" or "where is
   // the man?" when the user already has a bbox drawn and a playhead set.
   playheadTs?: number | null;
+  sourceFrameTs?: number | null;
   duration?: number | null;
   bbox?: { x: number; y: number; w: number; h: number } | null;
   selectionId?: string | null;
@@ -460,6 +461,7 @@ export function useAgentStream(projectId?: string | null) {
       projectId,
       message,
       playheadTs,
+      sourceFrameTs,
       duration,
       bbox,
       selectionId,
@@ -519,6 +521,7 @@ export function useAgentStream(projectId?: string | null) {
             conversation_id: conversationIdRef.current,
             history,
             playhead_ts: playheadTs ?? null,
+            source_frame_ts: sourceFrameTs ?? null,
             duration: duration ?? null,
             bbox: bbox ?? null,
             selection_id: selectionId ?? null,

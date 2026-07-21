@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/message";
 import { useAgentStream } from "@/hooks/useAgentStream";
 import { accept, decideGenerationRetry } from "@/lib/api";
-import { useEDL, totalDuration } from "@/stores/edl";
+import { clipAtTime, sourceTimeFor, useEDL, totalDuration } from "@/stores/edl";
 import {
   useAgent,
   type AgentMessage,
@@ -65,22 +65,18 @@ export function AgentChat({ projectId }: AgentChatProps) {
       // Snapshot the live editor state so the agent knows what "here" and
       // "now" mean. Without this the backend Gemini asks the user for
       // project_id / bbox even though the UI already has both.
+      const activeClip = clipAtTime(edlState.clips, edlState.playhead);
       void sendMessage({
         projectId,
         message: text,
         playheadTs: edlState.playhead,
+        sourceFrameTs: activeClip
+          ? sourceTimeFor(activeClip.clip, activeClip.offsetInClip)
+          : edlState.playhead,
         duration: totalDuration(edlState.clips),
         bbox: edlState.bbox ?? null,
         selectionId: edlState.mask?.selectionId ?? null,
-        targetClipId: (() => {
-          let cursor = 0;
-          for (const clip of edlState.clips) {
-            const end = cursor + (clip.sourceEnd - clip.sourceStart);
-            if (edlState.playhead <= end) return clip.id;
-            cursor = end;
-          }
-          return null;
-        })(),
+        targetClipId: activeClip?.clip.id ?? null,
       });
     },
     [projectId, sendMessage, edlState.playhead, edlState.clips, edlState.bbox, edlState.mask?.selectionId],

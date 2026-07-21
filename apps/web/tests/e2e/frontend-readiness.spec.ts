@@ -27,7 +27,7 @@ async function installApi(
     agentSse: string;
     jobSse?: string;
     current: () => unknown | null;
-    onAgentChat?: () => void;
+    onAgentChat?: (body: unknown) => void;
   },
 ) {
   await page.addInitScript(() => {
@@ -38,7 +38,7 @@ async function installApi(
     const path = new URL(request.url()).pathname;
 
     if (path === "/api/agent/chat" && jobs) {
-      jobs.onAgentChat?.();
+      jobs.onAgentChat?.(request.postDataJSON());
       return route.fulfill({
         body: jobs.agentSse,
         contentType: "text/event-stream",
@@ -239,6 +239,42 @@ test("compare opens original and complete edited timeline side by side", async (
     "src",
     "/generated.mp4",
   );
+});
+
+test("agent receives active clip media time after a trim", async ({ page }) => {
+  let requestBody: Record<string, unknown> | null = null;
+  await installApi(page, [project], {
+    project_id: project.project_id,
+    duration: 5,
+    segments: [],
+    edl: {
+      updated_at: 1,
+      sources: [],
+      clips: [{
+        id: "trimmed-source",
+        kind: "source",
+        url: "/test-video.mp4",
+        source_start: 8,
+        source_end: 13,
+        media_duration: 20,
+        volume: 1,
+        project_id: project.project_id,
+      }],
+    },
+  }, {
+    agentSse: "event: done\ndata: {}\n\n",
+    current: () => null,
+    onAgentChat: (body) => { requestBody = body as Record<string, unknown>; },
+  });
+  await page.goto(`/editor?projectId=${project.project_id}`);
+
+  await page.getByPlaceholder("describe an edit...").fill("make this car green");
+  await page.getByRole("button", { name: "send message" }).click();
+
+  await expect.poll(() => requestBody).not.toBeNull();
+  expect(requestBody?.playhead_ts).toBe(0);
+  expect(requestBody?.source_frame_ts).toBe(8);
+  expect(requestBody?.target_clip_id).toBe("trimmed-source");
 });
 
 test("generation preview returns after leaving and reopening editor", async ({ page }) => {

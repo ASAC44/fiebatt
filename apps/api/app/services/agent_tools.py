@@ -527,6 +527,8 @@ async def _create_edit_plan(
                 requested_scope=args.get("requested_scope"),
                 explicit_start_ts=args.get("explicit_start_ts"),
                 explicit_end_ts=args.get("explicit_end_ts"),
+                source_start_ts=args.get("source_start_ts"),
+                source_end_ts=args.get("source_end_ts"),
                 video_gen_provider=args.get("video_gen_provider") or "auto",
             ),
             SessionModel(id=session_id),

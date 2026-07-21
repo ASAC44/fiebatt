@@ -15,6 +15,12 @@ class EditSource:
     url: str
     duration: float
     target_clip_id: str | None = None
+    source_start: float = 0.0
+    source_end: float | None = None
+
+    @property
+    def active_end(self) -> float:
+        return self.duration if self.source_end is None else self.source_end
 
 
 def source_for_selection(project: Project, selection: SelectionArtifact) -> EditSource:
@@ -33,6 +39,8 @@ def source_for_selection(project: Project, selection: SelectionArtifact) -> Edit
                 url=clip.url,
                 duration=float(clip.media_duration),
                 target_clip_id=clip.id,
+                source_start=float(clip.source_start),
+                source_end=float(clip.source_end),
             )
     raise ValueError("selection is stale for the current timeline")
 
@@ -53,8 +61,20 @@ def source_for_timeline_clip(project: Project, target_clip_id: str | None) -> Ed
         if clip.id != target_clip_id:
             continue
         if clip.kind == "source":
-            return EditSource(url=project.video_url, duration=float(project.duration), target_clip_id=clip.id)
-        return EditSource(url=clip.url, duration=float(clip.media_duration), target_clip_id=clip.id)
+            return EditSource(
+                url=project.video_url,
+                duration=float(project.duration),
+                target_clip_id=clip.id,
+                source_start=float(clip.source_start),
+                source_end=float(clip.source_end),
+            )
+        return EditSource(
+            url=clip.url,
+            duration=float(clip.media_duration),
+            target_clip_id=clip.id,
+            source_start=float(clip.source_start),
+            source_end=float(clip.source_end),
+        )
     raise ValueError("selected timeline clip is no longer available")
 
 

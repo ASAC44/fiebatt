@@ -151,6 +151,9 @@ class AgentChatRequest(BaseModel):
     # project_id?" or "where is the man?" — the agent answers its own
     # questions from the editor state.
     playhead_ts: float | None = None
+    # Timestamp inside the active media file. This differs from playhead_ts
+    # after trims, splits, or prior applied edits.
+    source_frame_ts: float | None = None
     duration: float | None = None
     bbox: BBoxParam | None = None
     selection_id: str | None = None
@@ -268,6 +271,11 @@ def _build_context_block(body: "AgentChatRequest") -> str:
     duration = (
         f"{body.duration:.3f}s" if body.duration is not None else "unknown"
     )
+    source_frame = (
+        f"{body.source_frame_ts:.3f}s"
+        if body.source_frame_ts is not None
+        else playhead
+    )
     if body.selection_id:
         selection = body.selection_id
     elif body.bbox:
@@ -278,6 +286,7 @@ def _build_context_block(body: "AgentChatRequest") -> str:
         "\n\n## Current editor context\n"
         f"- project_id: {body.project_id}\n"
         f"- playhead_ts: {playhead}\n"
+        f"- active_source_frame_ts: {source_frame}\n"
         f"- timeline_duration: {duration}\n"
         f"- active_bbox: {_format_bbox(body.bbox)}\n"
         f"- selection_id: {selection}\n"
@@ -313,6 +322,11 @@ async def _resolve_plan_selection_id(body: "AgentChatRequest") -> str | None:
     """Resolve frontend selection state without trusting model-authored IDs."""
     placeholders = {"", "none", "null", "undefined", "pending"}
     supplied = (body.selection_id or "").strip()
+    source_frame_ts = (
+        body.source_frame_ts
+        if body.source_frame_ts is not None
+        else body.playhead_ts
+    )
 
     # SAM and chat start independently. Give the precise artifact a short
     # chance to land, then persist the user's bbox as a safe planning target.
@@ -327,7 +341,14 @@ async def _resolve_plan_selection_id(body: "AgentChatRequest") -> str | None:
                 if (
                     artifact is not None
                     and artifact.project_id == project.id
-                    and abs(artifact.frame_ts - float(body.playhead_ts or artifact.frame_ts)) <= 0.25
+                    and abs(
+                        artifact.frame_ts
+                        - float(
+                            source_frame_ts
+                            if source_frame_ts is not None
+                            else artifact.frame_ts
+                        )
+                    ) <= 0.25
                 ):
                     try:
                         source_for_selection(project, artifact)
@@ -350,7 +371,14 @@ async def _resolve_plan_selection_id(body: "AgentChatRequest") -> str | None:
                 for artifact in artifacts:
                     if (
                         _bbox_matches(artifact.bbox_json, body.bbox)
-                        and abs(artifact.frame_ts - float(body.playhead_ts or artifact.frame_ts)) <= 0.25
+                        and abs(
+                            artifact.frame_ts
+                            - float(
+                                source_frame_ts
+                                if source_frame_ts is not None
+                                else artifact.frame_ts
+                            )
+                        ) <= 0.25
                     ):
                         try:
                             source_for_selection(project, artifact)
@@ -377,8 +405,8 @@ async def _resolve_plan_selection_id(body: "AgentChatRequest") -> str | None:
             artifact = SelectionArtifact(
                 project_id=project.id,
                 frame_ts=min(
-                    max(float(body.playhead_ts or 0.0), 0.0),
-                    max(edit_source.duration - 0.001, 0.0),
+                    max(float(source_frame_ts or 0.0), edit_source.source_start),
+                    max(edit_source.active_end - 0.001, edit_source.source_start),
                 ),
                 bbox_json=bbox,
                 contours_json=[[
@@ -401,6 +429,20 @@ async def _resolve_plan_selection_id(body: "AgentChatRequest") -> str | None:
             )
             return artifact.id
     return None
+
+
+async def _apply_active_source_bounds(
+    body: "AgentChatRequest",
+    tool_args: dict[str, Any],
+) -> None:
+    """Bind planning to media visible inside the active timeline clip."""
+    async with AsyncSessionLocal() as db:
+        project = await db.get(Project, body.project_id)
+        if project is None:
+            return
+        edit_source = source_for_timeline_clip(project, body.target_clip_id)
+    tool_args["source_start_ts"] = edit_source.source_start
+    tool_args["source_end_ts"] = edit_source.active_end
 
 # ---- Gemini tool declarations ----
 
@@ -1271,6 +1313,7 @@ async def _agent_stream(
                 # previous request with the new user's attribution.
                 tool_args["project_id"] = body.project_id
             if tool_name == "create_edit_plan":
+                await _apply_active_source_bounds(body, tool_args)
                 selection_id = await _resolve_plan_selection_id(body)
                 if selection_id:
                     # Editor state is authoritative. Never trust a placeholder
@@ -1442,6 +1485,7 @@ async def _agent_stream(
                     "selection_id": selection_id,
                     "prompt": body.message,
                 }
+                await _apply_active_source_bounds(body, plan_args)
                 if body.video_gen_provider:
                     plan_args["video_gen_provider"] = body.video_gen_provider
                 _tool_calls_log.append({"id": plan_call_id, "tool": "create_edit_plan", "args": plan_args})

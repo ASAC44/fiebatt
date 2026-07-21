@@ -23,6 +23,7 @@ from app.db.init import create_all  # noqa: E402
 from app.workers.runner import JobRunner  # noqa: E402
 from app.api.routes.agent import (  # noqa: E402
     AgentChatRequest,
+    _apply_active_source_bounds,
     _build_messages,
     _resolve_plan_selection_id,
     _clean_agent_text,
@@ -35,6 +36,7 @@ from app.db.session import get_db  # noqa: E402
 from app.config.settings import get_settings  # noqa: E402
 from app.models.project import Project  # noqa: E402
 from app.models.selection import SelectionArtifact  # noqa: E402
+from app.schemas.timeline import PersistedClip, PersistedEDL  # noqa: E402
 
 
 FIXTURE_VIDEO = os.path.join(os.path.dirname(__file__), "fixtures", "test_5s.mp4")
@@ -146,6 +148,49 @@ async def test_agent_persists_bbox_target_when_sam_selection_is_unavailable(
     assert artifact.bbox_json == bbox
     assert artifact.sam_score is None
     assert artifact.contours_json
+
+
+@pytest.mark.asyncio
+async def test_agent_uses_active_media_time_and_clip_bounds(
+    client: AsyncClient,
+    db_session,
+):
+    upload = await upload_fixture_video(client)
+    project = await db_session.get(Project, upload["project_id"])
+    assert project is not None
+    project.timeline_edl = PersistedEDL(
+        clips=[
+            PersistedClip(
+                id="trimmed-source",
+                kind="source",
+                url=project.video_url,
+                source_start=1.0,
+                source_end=4.0,
+                media_duration=project.duration,
+                project_id=project.id,
+            )
+        ],
+        sources=[],
+    ).model_dump(mode="json")
+    await db_session.commit()
+
+    body = AgentChatRequest(
+        project_id=project.id,
+        message="make this bus yellow",
+        conversation_id="trimmed-source-context",
+        playhead_ts=0.5,
+        source_frame_ts=1.5,
+        target_clip_id="trimmed-source",
+        bbox={"x": 0.1, "y": 0.2, "w": 0.3, "h": 0.4},
+    )
+    tool_args: dict[str, object] = {}
+    await _apply_active_source_bounds(body, tool_args)
+    selection_id = await _resolve_plan_selection_id(body)
+
+    assert tool_args == {"source_start_ts": 1.0, "source_end_ts": 4.0}
+    artifact = await db_session.get(SelectionArtifact, selection_id)
+    assert artifact is not None
+    assert artifact.frame_ts == pytest.approx(1.5)
 
 
 def _make_mock_agent_response(

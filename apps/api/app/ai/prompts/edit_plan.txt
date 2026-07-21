@@ -15,6 +15,8 @@ Return one semantic decision and exactly one grounded variant:
     "change_type": "appearance" | "removal" | "replacement" | "motion" | "scene",
     "duration_policy": "bounded_action" | "continuous_occurrence" | "trajectory_continuation" | "all_occurrences",
     "temporal_behavior": "temporary" | "persistent_state" | "future_changing_motion",
+    "effect_extent": "surface" | "subject" | "motion_path" | "new_object_path" | "scene",
+    "expected_new_objects": ["objects that do not exist before the edit"],
     "target_description": "selected object or feature",
     "selection_match": "match" | "mismatch" | "uncertain",
     "selection_match_reason": "why the selected pixels do or do not match the request",
@@ -47,6 +49,12 @@ RULES
   use "match". Use "uncertain" when the pixels are ambiguous. Never invent a
   mismatch from a requested action or property.
 - Decide temporal meaning before any source clip is cut.
+- Treat the selected region as the semantic anchor, not automatically as a
+  rigid output mask. Use effect_extent "surface" for a property on one surface,
+  "subject" for a silhouette-changing transformation, "motion_path" when the
+  selected subject must move through space, "new_object_path" when requested
+  content must emerge beyond the selected region, and "scene" only when the
+  scene itself is explicitly being changed.
 - A state change such as "make this ball pink", "remove this logo", or "give
   this cat human-like eyes" normally means the change persists for this selected
   target's complete continuous appearance. Use scope "local" and duration_policy
@@ -87,8 +95,10 @@ RULES
   surrounding motion and perspective.
 - Use "first_frame" when preserving the source subject. Use "text_only" only when
   no source subject should remain.
-- The final prompt must say "Edit only the selected target" and "Do not regenerate
-  the scene."
+- The final prompt must anchor the change to the selected target and say "Do not
+  regenerate the scene." For surface edits, restrict the change to that surface.
+  For transformations, motion, or new objects, allow the necessary silhouette,
+  swept path, or emergence area while explicitly preserving unrelated content.
 - Do not invent transitions or timing. Padded-context timing is added separately by
   the generation worker when available.
 - Keep prompt_for_video_edit self-contained, concrete, and between 50 and 130 words.

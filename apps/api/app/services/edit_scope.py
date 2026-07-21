@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from app.schemas.edit_plan import ChangeType, EditIntent, EditScope
+from app.schemas.edit_plan import ChangeType, EditIntent, EditScope, EffectExtent
 
 
 _GLOBAL_RE = re.compile(
@@ -42,7 +42,9 @@ _EXPLICIT_CONTINUATION_RE = re.compile(
 _REMOVAL_RE = re.compile(r"\b(remove|erase|delete|make .+ disappear)\b", re.IGNORECASE)
 _REPLACEMENT_RE = re.compile(r"\b(replace|swap|turn .+ into)\b", re.IGNORECASE)
 _APPEARANCE_RE = re.compile(
-    r"\b(color|shirt|clothes?|hair|style|look|wear|red|blue|green|black|white)\b",
+    r"\b(color|paint|shirt|clothes?|hair|style|look|wear|eyes?|face|skin|"
+    r"text|logo|pattern|texture|red|blue|green|black|white|pink|yellow|purple|"
+    r"orange|brown|gr[ae]y|gold|silver)\b",
     re.IGNORECASE,
 )
 _FEW_REPETITIONS_RE = re.compile(
@@ -77,6 +79,20 @@ def _change_type(prompt: str) -> ChangeType:
         return "motion"
     if _APPEARANCE_RE.search(prompt):
         return "appearance"
+    return "scene"
+
+
+def _effect_extent(prompt: str, change_type: ChangeType) -> EffectExtent:
+    if _CREATED_EVENT_RE.search(prompt) or re.search(
+        r"\b(?:add|introduce|create|spawn)\b", prompt, re.IGNORECASE
+    ):
+        return "new_object_path"
+    if change_type == "motion":
+        return "motion_path"
+    if change_type in {"appearance", "removal"}:
+        return "surface"
+    if change_type == "replacement":
+        return "subject"
     return "scene"
 
 
@@ -136,6 +152,7 @@ def _repair_created_event_intent(prompt: str, intent: EditIntent) -> EditIntent:
         update={
             "duration_policy": "bounded_action",
             "temporal_behavior": "temporary",
+            "effect_extent": "new_object_path",
             "action_phases": phases,
             "estimated_action_seconds": max(3.0, intent.estimated_action_seconds),
             "requires_recovery_motion": True,
@@ -242,6 +259,7 @@ def plan_prompt_intent(
             change_type=change_type,
             duration_policy=duration_policy,
             temporal_behavior=temporal_behavior,
+            effect_extent=_effect_extent(prompt, change_type),
             action_phases=phases,
             estimated_action_seconds=action_seconds,
             requires_recovery_motion=recovery,

@@ -37,6 +37,8 @@ async def _gemini_interpret_edit(
             "change_type": intent.change_type,
             "duration_policy": intent.duration_policy,
             "temporal_behavior": intent.temporal_behavior,
+            "effect_extent": intent.effect_extent,
+            "expected_new_objects": intent.expected_new_objects,
             "target_description": intent.target_description or region,
             "selection_match": "match",
             "selection_match_reason": "selected region is the requested target",
@@ -55,8 +57,9 @@ async def _gemini_interpret_edit(
                 "color_grading": "original grade unless explicitly changed",
                 "region_emphasis": region,
                 "prompt_for_video_edit": (
-                    f"Edit only the selected target in {region}. {prompt}. "
-                    "Preserve all unselected content. Do not regenerate the scene."
+                    f"Use the selected target in {region} as the edit anchor. {prompt}. "
+                    "Allow only the requested effect footprint. Preserve unrelated "
+                    "content. Do not regenerate the scene."
                 ),
             }
         ],

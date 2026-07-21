@@ -78,6 +78,7 @@ def test_state_change_defaults_to_current_continuous_occurrence():
     assert result.intent.scope == "local"
     assert result.intent.duration_policy == "continuous_occurrence"
     assert result.intent.temporal_behavior == "persistent_state"
+    assert result.intent.effect_extent == "surface"
 
 
 def test_action_defaults_to_bounded_local_window():
@@ -86,6 +87,23 @@ def test_action_defaults_to_bounded_local_window():
     assert result.intent.scope == "local"
     assert result.intent.duration_policy == "bounded_action"
     assert result.intent.temporal_behavior == "temporary"
+    assert result.intent.effect_extent == "motion_path"
+
+
+def test_feature_edit_uses_surface_extent():
+    result = plan_prompt_intent("give this cat human-like eyes")
+
+    assert result.intent.change_type == "appearance"
+    assert result.intent.duration_policy == "continuous_occurrence"
+    assert result.intent.effect_extent == "surface"
+
+
+def test_object_transformation_can_change_complete_silhouette():
+    result = plan_prompt_intent("turn this banana into an apple")
+
+    assert result.intent.change_type == "replacement"
+    assert result.intent.duration_policy == "continuous_occurrence"
+    assert result.intent.effect_extent == "subject"
 
 
 def test_trajectory_change_covers_the_current_occurrence():
@@ -105,6 +123,7 @@ def test_created_event_defaults_to_bounded_local_window():
     assert result.intent.temporal_behavior == "temporary"
     assert result.intent.requires_recovery_motion is True
     assert result.intent.estimated_action_seconds == 4.0
+    assert result.intent.effect_extent == "new_object_path"
     assert result.estimate.analysis_mode == "lazy_local"
 
 

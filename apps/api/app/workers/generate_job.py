@@ -873,7 +873,20 @@ async def _run(job_id: str) -> None:
 
     def prompt_for_provider(provider: str, correction: str = "") -> str:
         base = (
-            protected_context_prompt(generation_prompt, generation_window)
+            protected_context_prompt(
+                generation_prompt,
+                generation_window,
+                temporal_behavior=(
+                    planned_intent.temporal_behavior
+                    if planned_intent is not None
+                    else "temporary"
+                ),
+                effect_extent=(
+                    planned_intent.effect_extent
+                    if planned_intent is not None
+                    else "subject"
+                ),
+            )
             if provider in {"wan", "happyhorse"} and source_video_url is not None
             else generation_prompt
         )

@@ -129,3 +129,67 @@ def test_full_clip_edit_is_not_suppressed_by_zero_length_handles():
     )
 
     assert protected_context_prompt("Make the person jump.", window) == "Make the person jump."
+
+
+def test_persistent_context_forbids_early_reversion():
+    window = resolve_generation_window(
+        0.5,
+        4.0,
+        payload={
+            "adaptive_context_enabled": True,
+            "planned_context": _planned_context(),
+        },
+        project_duration=10.0,
+    )
+
+    rendered = protected_context_prompt(
+        "Make the car green.",
+        window,
+        temporal_behavior="persistent_state",
+        effect_extent="surface",
+    )
+
+    assert "Do not revert it to the old state" in rendered
+    assert "requested surface" in rendered
+
+
+def test_motion_context_does_not_force_subject_back_to_old_path():
+    window = resolve_generation_window(
+        0.5,
+        4.0,
+        payload={
+            "adaptive_context_enabled": True,
+            "planned_context": _planned_context(),
+        },
+        project_duration=10.0,
+    )
+
+    rendered = protected_context_prompt(
+        "Make the person run.",
+        window,
+        temporal_behavior="future_changing_motion",
+        effect_extent="motion_path",
+    )
+
+    assert "Do not snap the subject back" in rendered
+    assert "may move through the space required" in rendered
+
+
+def test_new_object_context_allows_emergence_beyond_selection():
+    window = resolve_generation_window(
+        0.5,
+        4.0,
+        payload={
+            "adaptive_context_enabled": True,
+            "planned_context": _planned_context(),
+        },
+        project_duration=10.0,
+    )
+
+    rendered = protected_context_prompt(
+        "Make a balloon come out of the window.",
+        window,
+        effect_extent="new_object_path",
+    )
+
+    assert "emerge from the selected anchor" in rendered

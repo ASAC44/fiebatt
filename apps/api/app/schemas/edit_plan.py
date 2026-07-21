@@ -26,6 +26,13 @@ TemporalBehavior = Literal[
     "persistent_state",
     "future_changing_motion",
 ]
+EffectExtent = Literal[
+    "surface",
+    "subject",
+    "motion_path",
+    "new_object_path",
+    "scene",
+]
 
 
 class GroundedEditInstruction(BaseModel):
@@ -43,6 +50,8 @@ class SemanticEditDecision(BaseModel):
     change_type: ChangeType
     duration_policy: DurationPolicy
     temporal_behavior: TemporalBehavior
+    effect_extent: EffectExtent = "subject"
+    expected_new_objects: list[str] = Field(default_factory=list)
     target_description: str | None = None
     selection_match: Literal["match", "mismatch", "uncertain"] = "match"
     selection_match_reason: str | None = None
@@ -90,6 +99,8 @@ class SemanticEditPlan(BaseModel):
             change_type=decision.change_type,
             duration_policy=decision.duration_policy,
             temporal_behavior=decision.temporal_behavior,
+            effect_extent=decision.effect_extent,
+            expected_new_objects=decision.expected_new_objects,
             target_description=decision.target_description,
             action_phases=decision.action_phases,
             estimated_action_seconds=decision.estimated_action_seconds,
@@ -106,6 +117,8 @@ class EditIntent(BaseModel):
     change_type: ChangeType
     duration_policy: DurationPolicy = "bounded_action"
     temporal_behavior: TemporalBehavior = "temporary"
+    effect_extent: EffectExtent = "subject"
+    expected_new_objects: list[str] = Field(default_factory=list)
     target_description: str | None = None
     action_phases: list[str] = Field(default_factory=list)
     estimated_action_seconds: float = Field(default=3.0, gt=0.0)

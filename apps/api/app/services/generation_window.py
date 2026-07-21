@@ -99,10 +99,53 @@ def resolve_generation_window(
     )
 
 
-def protected_context_prompt(prompt: str, window: GenerationWindow) -> str:
+def protected_context_prompt(
+    prompt: str,
+    window: GenerationWindow,
+    *,
+    temporal_behavior: str = "temporary",
+    effect_extent: str = "subject",
+) -> str:
     """Describe editable time and continuity handles without suppressing the edit."""
     if not window.adaptive or (window.pre_handle < 0.05 and window.post_handle < 0.05):
         return prompt
+    if temporal_behavior == "persistent_state":
+        ending_contract = (
+            "Keep the requested state continuous through every frame where the "
+            "selected target remains visible. Do not revert it to the old state "
+            "before the target leaves the occurrence."
+        )
+    elif temporal_behavior == "future_changing_motion":
+        ending_contract = (
+            "Continue the new motion naturally. Do not snap the subject back to "
+            "its old pose, position, or trajectory merely to match the source. "
+            "Use the outgoing handle to preserve camera and surrounding motion."
+        )
+    else:
+        ending_contract = (
+            "After completing the temporary action, recover pose and velocity "
+            "naturally toward the outgoing source motion."
+        )
+
+    effect_contract = {
+        "surface": (
+            "Keep the visible change on the requested surface and preserve nearby "
+            "parts of the subject."
+        ),
+        "motion_path": (
+            "The selected subject may move through the space required by the "
+            "action; preserve unrelated subjects and the scene around that path."
+        ),
+        "new_object_path": (
+            "Allow the requested new object to emerge from the selected anchor "
+            "and move through the necessary nearby space; preserve unrelated scene content."
+        ),
+        "scene": "Change the scene only as explicitly requested.",
+    }.get(
+        effect_extent,
+        "Allow the selected subject's required silhouette change while preserving unrelated content.",
+    )
+
     return (
         "SOURCE-CONTINUITY EDIT: The requested change must be clearly completed "
         "inside seconds "
@@ -111,8 +154,8 @@ def protected_context_prompt(prompt: str, window: GenerationWindow) -> str:
         f"seconds and final {window.post_handle:.3f} seconds as continuity reference "
         "handles. Preserve their subjects, colours, lighting, camera, background, "
         "and direction of motion as closely as possible. Start from the incoming "
-        "pose and velocity, perform the requested change clearly and completely, "
-        "then recover pose and velocity naturally toward the outgoing source motion. "
+        "pose and velocity, then perform the requested change clearly and completely. "
+        f"{ending_contract} {effect_contract} "
         "The handles guide a continuous entrance and exit; they must not prevent or "
         "weaken the requested edit. Do not use a "
         "cut, fade, dissolve, freeze, or sudden appearance or disappearance.\n\n"

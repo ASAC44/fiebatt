@@ -25,8 +25,13 @@ export function Preview() {
   const stageRef = useRef<HTMLDivElement>(null);
   const currentClipIdRef = useRef<string | null>(null);
   const transitioningRef = useRef(false);
+  const sourceLoadingRef = useRef(false);
+  const sourceLoadIdRef = useRef(0);
+  const desiredSourceTimeRef = useRef(0);
+  const playingRef = useRef(false);
   const rafRef = useRef<number | null>(null);
   const [videoSize, setVideoSize] = useState({ width: 1920, height: 1080 });
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
 
   const hit = clipAtTime(state.clips, state.playhead);
   const activeClip = hit?.clip ?? null;
@@ -35,6 +40,11 @@ export function Preview() {
     : null;
   const total = totalDuration(state.clips);
   const frameTs = hit ? sourceTimeFor(hit.clip, hit.offsetInClip) : null;
+
+  useEffect(() => {
+    desiredSourceTimeRef.current = frameTs ?? 0;
+    playingRef.current = state.playing;
+  }, [frameTs, state.playing]);
 
   // Drawing a bounding box kicks off Gemini identification and SAM mask
   // refinement independently. This has to live here (not inside the Inspector's AiTab)
@@ -152,65 +162,96 @@ export function Preview() {
     }
   }, [activeClip?.url, nextClip?.id, nextClip?.url]);
 
-  // mirror active clip into <video>
+  // Load a new timeline source without tying its event handlers to playhead
+  // updates. The playhead changes every animation frame; source loading does
+  // not, and must be allowed to finish before the freeze frame is removed.
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !activeClip) return;
 
-    const want = sourceTimeFor(activeClip, hit!.offsetInClip);
+    const want = desiredSourceTimeRef.current;
     const clipChanged = currentClipIdRef.current !== activeClip.id;
+    const sourceChanged = v.getAttribute("src") !== activeClip.url;
+    if (!clipChanged && !sourceChanged) return;
 
-    if (clipChanged) {
-      transitioningRef.current = false;
-      currentClipIdRef.current = activeClip.id;
-      // Timeline operations can create adjacent clips backed by the same
-      // file. Keep the decoded media alive and only seek; reassigning the
-      // same URL would create a visible stop for no reason.
-      const currentUrl = v.getAttribute("src");
-      if (currentUrl === activeClip.url) {
-        v.volume = activeClip.volume;
-        if (Math.abs(v.currentTime - want) > 0.04) v.currentTime = want;
-        if (state.playing && v.paused) void v.play().catch(() => {});
+    transitioningRef.current = false;
+    currentClipIdRef.current = activeClip.id;
+    setPlaybackError(null);
+    v.volume = activeClip.volume;
+
+    // Adjacent timeline clips can reference the same file. Preserve the
+    // decoded buffer and seek instead of rebuilding the media element.
+    if (v.getAttribute("src") === activeClip.url) {
+      sourceLoadingRef.current = false;
+      if (Math.abs(v.currentTime - want) > 0.04) v.currentTime = want;
+      if (playingRef.current && v.paused) void v.play().catch(() => {});
+      return;
+    }
+
+    const loadId = ++sourceLoadIdRef.current;
+    const isCurrentLoad = () => sourceLoadIdRef.current === loadId;
+    sourceLoadingRef.current = true;
+    captureFreeze();
+    v.pause();
+
+    const revealDecodedFrame = () => {
+      if (!isCurrentLoad() || v.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+      const target = desiredSourceTimeRef.current;
+      if (Math.abs(v.currentTime - target) > 0.08) {
+        v.currentTime = target;
         return;
       }
-      // Capture last frame before src swap — shown as a freeze overlay to
-      // prevent the black-flash flicker during browser decode.
-      captureFreeze();
-      // pause before source swap to prevent audio bleed
-      const wasPlaying = !v.paused;
-      v.pause();
+      sourceLoadingRef.current = false;
+      setPlaybackError(null);
+      releaseFreeze();
+      if (playingRef.current) void v.play().catch(() => {});
+    };
+    const seekToLatestTarget = () => {
+      if (!isCurrentLoad()) return;
       v.volume = activeClip.volume;
-      v.src = activeClip.url;
+      const target = Math.min(
+        desiredSourceTimeRef.current,
+        Math.max(0, Number.isFinite(v.duration) ? v.duration - 0.001 : desiredSourceTimeRef.current),
+      );
+      if (Math.abs(v.currentTime - target) <= 0.02) revealDecodedFrame();
+      else v.currentTime = target;
+    };
+    const keepLastGoodFrame = () => {
+      if (!isCurrentLoad()) return;
+      sourceLoadingRef.current = false;
+      v.pause();
+      playingRef.current = false;
+      setPlaybackError("This timeline clip could not be loaded.");
+      dispatch({ type: "set_playing", playing: false });
+    };
 
-      // Wait for both metadata (to know duration) and seeked (first frame
-      // decoded at the target position) before releasing the freeze overlay.
-      const onLoaded = () => {
-        v.currentTime = want;
-        v.volume = activeClip.volume;
-      };
-      const onSeeked = () => {
-        // First frame of new clip is decoded — drop the freeze canvas.
-        releaseFreeze();
-        if (wasPlaying || state.playing) v.play().catch(() => {});
-      };
-      v.addEventListener("loadedmetadata", onLoaded, { once: true });
-      v.addEventListener("seeked", onSeeked, { once: true });
-      // Do not drop the freeze canvas merely because playhead state updates
-      // while the replacement clip is decoding. That was exposing a black,
-      // glitchy frame at every edited/source boundary.
-      const fallbackRelease = window.setTimeout(releaseFreeze, 1500);
-      return () => {
-        v.removeEventListener("loadedmetadata", onLoaded);
-        v.removeEventListener("seeked", onSeeked);
-        window.clearTimeout(fallbackRelease);
-      };
-    }
+    v.addEventListener("loadedmetadata", seekToLatestTarget);
+    v.addEventListener("loadeddata", revealDecodedFrame);
+    v.addEventListener("seeked", revealDecodedFrame);
+    v.addEventListener("error", keepLastGoodFrame);
+    v.src = activeClip.url;
+    v.load();
 
+    return () => {
+      v.removeEventListener("loadedmetadata", seekToLatestTarget);
+      v.removeEventListener("loadeddata", revealDecodedFrame);
+      v.removeEventListener("seeked", revealDecodedFrame);
+      v.removeEventListener("error", keepLastGoodFrame);
+    };
+  }, [activeClip?.id, activeClip?.url, captureFreeze, releaseFreeze]);
+
+  // Synchronize seeks only after the current source has decoded. This effect
+  // may run every frame without cancelling the source-load listeners above.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !activeClip || sourceLoadingRef.current) return;
+    if (v.getAttribute("src") !== activeClip.url) return;
     v.volume = activeClip.volume;
-    if (Math.abs(v.currentTime - want) > 0.15) {
+    const want = desiredSourceTimeRef.current;
+    if (!state.playing && Math.abs(v.currentTime - want) > 0.04) {
       v.currentTime = want;
     }
-  }, [activeClip?.id, activeClip?.url, activeClip?.volume, hit?.offsetInClip, state.playing, activeClip, captureFreeze, releaseFreeze]);
+  }, [activeClip, hit?.offsetInClip, state.playing]);
 
   useEffect(() => {
     if (!activeClip) {
@@ -361,6 +402,11 @@ export function Preview() {
                 maxHeight: "100%",
               }}
             />
+            {playbackError && (
+              <div className="absolute inset-0 z-20 grid place-items-center bg-black/75 px-6 text-center text-xs text-white">
+                {playbackError} The rest of the timeline is unchanged.
+              </div>
+            )}
             <BoundingBox
               videoWidth={videoSize.width}
               videoHeight={videoSize.height}

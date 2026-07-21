@@ -29,6 +29,7 @@ class JobOut(BaseModel):
     error: str | None = None
     created_at: datetime | None = None
     accepted: bool = False
+    recommended_variant_id: str | None = None
     variants: list[VariantOut] = []
     # authoritative edit window used when accepting a generated replacement.
     start_ts: float | None = None

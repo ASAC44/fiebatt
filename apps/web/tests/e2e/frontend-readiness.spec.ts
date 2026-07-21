@@ -30,6 +30,9 @@ async function installApi(
     onAgentChat?: () => void;
   },
 ) {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("fiebatt.editor.guide.seen", "1");
+  });
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -389,6 +392,75 @@ test("corrective retry keeps one stable corrected-pass status", async ({ page })
 
   await expect(page.getByText("reviewing the corrected pass…")).toBeVisible();
   await expect(page.getByText(/reviewing first pass/i)).toHaveCount(0);
+});
+
+test("retry keeps the first preview mounted and compare uses the chosen pass", async ({ page }) => {
+  let reads = 0;
+  const currentJob = () => {
+    reads += 1;
+    const correctedReady = reads >= 3;
+    return {
+      job_id: "job-navigation",
+      kind: "generate",
+      status: correctedReady ? "done" : "processing",
+      error: null,
+      created_at: new Date().toISOString(),
+      accepted: false,
+      start_ts: 0,
+      end_ts: 3,
+      recommended_variant_id: correctedReady ? "corrected-pass" : null,
+      selected_seams: correctedReady ? {
+        passed: true,
+        media_start: 0,
+        media_end: 3,
+        timeline_start: 0,
+        timeline_end: 3,
+      } : null,
+      variants: [
+        {
+          id: "first-pass",
+          index: 0,
+          status: "done",
+          url: "/first-pass.mp4",
+          description: "first pass",
+          quality_state: "review_warning",
+          quality_evidence: ["action incomplete"],
+          error: null,
+        },
+        ...(correctedReady ? [{
+          id: "corrected-pass",
+          index: 1,
+          status: "done",
+          url: "/corrected-pass.mp4",
+          description: "corrected pass",
+          quality_state: "pass",
+          quality_evidence: [],
+          error: null,
+        }] : []),
+      ],
+    };
+  };
+
+  await installApi(page, [project], undefined, {
+    agentSse: "event: done\ndata: {}\n\n",
+    current: currentJob,
+  });
+  await page.goto(`/editor?projectId=${project.project_id}`);
+
+  const firstVideo = page.locator('video[src="/first-pass.mp4"]');
+  await expect(firstVideo).toHaveCount(1);
+  await firstVideo.evaluate((element) => element.setAttribute("data-stable-player", "yes"));
+
+  await expect(
+    page.locator(".variant-preview__attempt").getByText("Corrected pass", { exact: true }),
+  ).toBeVisible({ timeout: 10_000 });
+  await expect(firstVideo).toHaveAttribute("data-stable-player", "yes");
+
+  await page.getByRole("button", { name: "Compare" }).click();
+  await expect(page.getByLabel("Edited timeline preview")).toHaveAttribute(
+    "src",
+    "/corrected-pass.mp4",
+  );
 });
 
 test("prompt card separates user request from refined prompt", async ({ page }) => {

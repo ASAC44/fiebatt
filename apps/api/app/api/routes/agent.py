@@ -1387,6 +1387,7 @@ async def _agent_stream(
                         yield sse_event("variant_ready", {
                             "job_id": result.get("job_id", ""),
                             "variants": ready,
+                            "recommended_variant_id": result.get("recommended_variant_id"),
                         })
 
                 messages.append({

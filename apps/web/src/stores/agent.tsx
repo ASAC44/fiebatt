@@ -103,6 +103,7 @@ export type AgentMessage =
       type: "variant_preview";
       jobId: string;
       variants: VariantPreview[];
+      recommendedVariantId?: string | null;
       timelineStart?: number | null;
       timelineEnd?: number | null;
       mediaStart?: number | null;
@@ -188,6 +189,7 @@ export type AgentAction =
       type: "add_variant_preview";
       jobId: string;
       variants: VariantPreview[];
+      recommendedVariantId?: string | null;
       timelineStart?: number | null;
       timelineEnd?: number | null;
       mediaStart?: number | null;
@@ -407,27 +409,33 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
       return { ...state, messages: msgs };
     }
 
-    case "add_variant_preview":
+    case "add_variant_preview": {
+      const existing = state.messages.find(
+        (message) =>
+          message.type === "variant_preview" && message.jobId === action.jobId,
+      );
+      const preview = {
+        type: "variant_preview" as const,
+        jobId: action.jobId,
+        variants: action.variants,
+        recommendedVariantId: action.recommendedVariantId,
+        timelineStart: action.timelineStart,
+        timelineEnd: action.timelineEnd,
+        mediaStart: action.mediaStart,
+        mediaEnd: action.mediaEnd,
+        ts: existing?.ts ?? now,
+      };
       return {
         ...state,
-        messages: [
-          ...state.messages.filter(
-            (message) =>
-              message.type !== "variant_preview" ||
-              message.jobId !== action.jobId,
-          ),
-          {
-            type: "variant_preview",
-            jobId: action.jobId,
-            variants: action.variants,
-            timelineStart: action.timelineStart,
-            timelineEnd: action.timelineEnd,
-            mediaStart: action.mediaStart,
-            mediaEnd: action.mediaEnd,
-            ts: now,
-          },
-        ],
+        messages: existing
+          ? state.messages.map((message) =>
+              message.type === "variant_preview" && message.jobId === action.jobId
+                ? preview
+                : message,
+            )
+          : [...state.messages, preview],
       };
+    }
 
     case "prompt_plan_started": {
       // Replace any existing plan card for this job (edge case: a retry

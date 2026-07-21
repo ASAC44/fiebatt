@@ -341,6 +341,7 @@ export function AgentChat({ projectId }: AgentChatProps) {
           min-width: 0;
         }
         .variant-preview__thumb {
+          position: relative;
           aspect-ratio: 16 / 9;
           border-radius: 8px;
           background: var(--panel-2);
@@ -360,6 +361,18 @@ export function AgentChat({ projectId }: AgentChatProps) {
         .variant-preview__placeholder {
           font-size: 13px;
           color: var(--ink-ghost);
+        }
+        .variant-preview__media-state {
+          position: absolute;
+          inset: 0;
+          display: grid;
+          place-items: center;
+          padding: 12px;
+          background: var(--panel-2);
+          color: var(--ink-ghost);
+          font-size: 12px;
+          text-align: center;
+          pointer-events: none;
         }
         .variant-preview__desc {
           font-size: 13px;
@@ -782,6 +795,31 @@ function SuggestionCard({
 
 // ─── variant preview ──────────────────────────────────────────────────
 
+function VariantVideo({ url }: { url: string }) {
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+
+  return (
+    <>
+      <video
+        src={url}
+        muted
+        loop
+        playsInline
+        preload="auto"
+        onLoadedData={() => setState("ready")}
+        onError={() => setState("error")}
+        onMouseEnter={(event) => void event.currentTarget.play().catch(() => {})}
+        onMouseLeave={(event) => event.currentTarget.pause()}
+      />
+      {state !== "ready" && (
+        <span className="variant-preview__media-state">
+          {state === "error" ? "Preview media is temporarily unavailable." : "Loading preview…"}
+        </span>
+      )}
+    </>
+  );
+}
+
 function VariantPreviewCard({
   jobId,
   variants,
@@ -818,17 +856,7 @@ function VariantPreviewCard({
               </span>
               <div className="variant-preview__thumb">
                 {v.url ? (
-                  <video
-                    src={v.url}
-                    muted
-                    loop
-                    playsInline
-                    onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.pause();
-                      e.currentTarget.currentTime = 0;
-                    }}
-                  />
+                  <VariantVideo key={v.url} url={v.url} />
                 ) : (
                   <span className="variant-preview__placeholder">loading...</span>
                 )}

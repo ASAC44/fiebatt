@@ -22,11 +22,17 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
     Math.min(state.playhead, comparisonDuration || state.playhead),
   );
   const [playing, setPlaying] = useState(false);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [singleView, setSingleView] = useState<"original" | "edited">("original");
   const [sideBySide, setSideBySide] = useState(true);
   const originalRef = useRef<HTMLVideoElement>(null);
   const editedRef = useRef<HTMLVideoElement>(null);
+  const editedFreezeRef = useRef<HTMLCanvasElement>(null);
   const editedClipIdRef = useRef<string | null>(null);
+  const editedLoadIdRef = useRef(0);
+  const editedLoadingRef = useRef(false);
+  const desiredEditedTimeRef = useRef(0);
+  const playingRef = useRef(false);
   const rafRef = useRef<number | null>(null);
   const lastTickRef = useRef<number | null>(null);
 
@@ -70,6 +76,28 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
   const showOriginal = sideBySide || singleView === "original";
   const showEdited = sideBySide || singleView === "edited";
 
+  useEffect(() => {
+    playingRef.current = playing;
+  }, [playing]);
+
+  const captureEditedFrame = useCallback(() => {
+    const video = editedRef.current;
+    const canvas = editedFreezeRef.current;
+    if (!video || !canvas || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+    canvas.width = video.videoWidth || 1920;
+    canvas.height = video.videoHeight || 1080;
+    canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.style.transition = "none";
+    canvas.style.opacity = "1";
+  }, []);
+
+  const revealEditedFrame = useCallback(() => {
+    const canvas = editedFreezeRef.current;
+    if (!canvas) return;
+    canvas.style.transition = "opacity 0.1s ease-out";
+    canvas.style.opacity = "0";
+  }, []);
+
   const syncVideos = useCallback((targetPlayhead: number, force = false) => {
     const originalVideo = originalRef.current;
     const editedVideo = editedRef.current;
@@ -86,22 +114,77 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
     if (editedVideo) {
       if (clip && hit) {
         const wantedTime = sourceTimeFor(clip, hit.offsetInClip);
-        if (editedClipIdRef.current !== clip.id) {
+        desiredEditedTimeRef.current = wantedTime;
+        if (
+          editedClipIdRef.current !== clip.id ||
+          editedVideo.getAttribute("src") !== clip.url
+        ) {
+          const loadId = ++editedLoadIdRef.current;
           editedClipIdRef.current = clip.id;
+          editedLoadingRef.current = true;
+          setPlaybackError(null);
+          captureEditedFrame();
+          originalVideo?.pause();
+          editedVideo.pause();
+
+          const isCurrentLoad = () => editedLoadIdRef.current === loadId;
+          const finishWhenDecoded = () => {
+            if (!isCurrentLoad() || editedVideo.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+            const target = desiredEditedTimeRef.current;
+            if (Math.abs(editedVideo.currentTime - target) > 0.08) {
+              editedVideo.currentTime = target;
+              return;
+            }
+            editedLoadingRef.current = false;
+            setPlaybackError(null);
+            revealEditedFrame();
+            if (playingRef.current) {
+              void Promise.allSettled([
+                originalVideo?.play() ?? Promise.resolve(),
+                editedVideo.play(),
+              ]);
+            }
+          };
           const seekWhenReady = () => {
-            editedVideo.currentTime = wantedTime;
+            if (!isCurrentLoad()) return;
+            const target = Math.min(
+              desiredEditedTimeRef.current,
+              Math.max(
+                0,
+                Number.isFinite(editedVideo.duration)
+                  ? editedVideo.duration - 0.001
+                  : desiredEditedTimeRef.current,
+              ),
+            );
+            if (Math.abs(editedVideo.currentTime - target) <= 0.02) finishWhenDecoded();
+            else editedVideo.currentTime = target;
+          };
+          const stopOnError = () => {
+            if (!isCurrentLoad()) return;
+            editedLoadingRef.current = false;
+            playingRef.current = false;
+            originalVideo?.pause();
+            editedVideo.pause();
+            setPlaying(false);
+            setPlaybackError("This comparison clip could not be loaded.");
           };
           editedVideo.addEventListener("loadedmetadata", seekWhenReady, { once: true });
+          editedVideo.addEventListener("loadeddata", finishWhenDecoded, { once: true });
+          editedVideo.addEventListener("seeked", finishWhenDecoded, { once: true });
+          editedVideo.addEventListener("error", stopOnError, { once: true });
           editedVideo.src = clip.url;
           editedVideo.load();
-        } else if (force || Math.abs(editedVideo.currentTime - wantedTime) > 0.12) {
+        } else if (
+          !editedLoadingRef.current &&
+          (force || Math.abs(editedVideo.currentTime - wantedTime) > 0.12)
+        ) {
           editedVideo.currentTime = wantedTime;
         }
       } else {
         editedVideo.pause();
       }
     }
-  }, [editedHitAt, original]);
+  }, [captureEditedFrame, editedHitAt, original, revealEditedFrame]);
 
   useEffect(() => {
     syncVideos(playhead);
@@ -112,7 +195,7 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
     const editedVideo = editedRef.current;
     if (!originalVideo || !editedVideo) return;
 
-    if (playing) {
+    if (playing && !editedLoadingRef.current) {
       originalVideo.play().catch(() => {});
       editedVideo.play().catch(() => {});
     } else {
@@ -127,6 +210,7 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
     if (!originalVideo || !editedVideo) return;
 
     if (playing) {
+      playingRef.current = false;
       setPlaying(false);
       originalVideo.pause();
       editedVideo.pause();
@@ -135,6 +219,7 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
 
     const restart = comparisonDuration > 0 && playhead >= comparisonDuration - 0.05;
     const nextPlayhead = restart ? 0 : playhead;
+    playingRef.current = true;
     lastTickRef.current = null;
     setPlayhead(nextPlayhead);
     syncVideos(nextPlayhead, true);
@@ -158,6 +243,10 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
       }
       const delta = (now - lastTickRef.current) / 1000;
       lastTickRef.current = now;
+      if (editedLoadingRef.current) {
+        rafRef.current = requestAnimationFrame(tick);
+        return;
+      }
       setPlayhead((current) => {
         const next = Math.min(comparisonDuration, current + delta);
         if (next >= comparisonDuration) {
@@ -236,18 +325,32 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
             src={original.url}
             muted
             playsInline
+            preload="auto"
             aria-label="Original video"
             className="h-full w-full bg-black object-contain"
           />
         </ComparePane>
         <ComparePane label="Edited timeline" clip={activeClip} hidden={!showEdited}>
-          <video
-            ref={editedRef}
-            muted
-            playsInline
-            aria-label="Edited timeline preview"
-            className="h-full w-full bg-black object-contain"
-          />
+          <div className="relative h-full w-full bg-black">
+            <video
+              ref={editedRef}
+              muted
+              playsInline
+              preload="auto"
+              aria-label="Edited timeline preview"
+              className="h-full w-full bg-black object-contain"
+            />
+            <canvas
+              ref={editedFreezeRef}
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 h-full w-full bg-black object-contain opacity-0"
+            />
+            {playbackError && (
+              <div className="absolute inset-0 z-20 grid place-items-center bg-black/75 px-6 text-center text-xs text-white">
+                {playbackError} Close Compare and retry when the media is available.
+              </div>
+            )}
+          </div>
         </ComparePane>
       </main>
 
@@ -318,7 +421,10 @@ function findLatestPreview(messages: AgentMessage[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.type !== "variant_preview") continue;
-    const variant = message.variants.find((item) => item.url);
+    const variant =
+      message.variants.find(
+        (item) => item.id === message.recommendedVariantId && item.url,
+      ) ?? message.variants.find((item) => item.url);
     if (!variant?.url) continue;
 
     const suggestion = messages.findLast(

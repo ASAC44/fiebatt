@@ -136,6 +136,7 @@ export type JobResp = {
   error: string | null;
   created_at?: string | null;
   accepted?: boolean;
+  recommended_variant_id?: string | null;
   /** authoritative edit window accepted by the backend */
   start_ts: number | null;
   end_ts: number | null;

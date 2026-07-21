@@ -1471,6 +1471,7 @@ async def _run(job_id: str) -> None:
                     "selected_provider": video_provider,
                     "selected_model": _provider_model(video_provider, final_edit_mode),
                     "selected_edit_mode": final_edit_mode,
+                    "recommended_variant_id": done[0].id,
                 }
             )
             retry_state = dict(current_payload.get("retry_state") or {})

@@ -262,13 +262,16 @@ export function useAgentStream(projectId?: string | null) {
         }
         const nextPreviewSignature = ready
           .map((variant) => `${variant.id}:${variant.url}`)
-          .join("|");
+          .join("|") +
+          `|recommended:${job.recommended_variant_id ?? ""}` +
+          `|seams:${JSON.stringify(job.selected_seams ?? null)}`;
         if (ready.length > 0 && nextPreviewSignature !== previewSignature) {
           previewSignature = nextPreviewSignature;
           dispatch({
             type: "add_variant_preview",
             jobId,
             variants: ready,
+            recommendedVariantId: job.recommended_variant_id,
             timelineStart: job.selected_seams?.timeline_start ?? job.execution_window?.core_start ?? job.start_ts,
             timelineEnd: job.selected_seams?.timeline_end ?? job.execution_window?.core_end ?? job.end_ts,
             mediaStart: job.selected_seams?.media_start ?? job.execution_window?.edit_start_offset ?? 0,
@@ -283,20 +286,6 @@ export function useAgentStream(projectId?: string | null) {
         if (job.status === "done" || job.status === "error") {
           if (projectId) clearPendingTurn(projectId);
           if (ready.length > 0) {
-            dispatch({
-              type: "add_variant_preview",
-              jobId,
-              variants: ready,
-              timelineStart: job.selected_seams?.timeline_start ?? job.execution_window?.core_start ?? job.start_ts,
-              timelineEnd: job.selected_seams?.timeline_end ?? job.execution_window?.core_end ?? job.end_ts,
-              mediaStart: job.selected_seams?.media_start ?? job.execution_window?.edit_start_offset ?? 0,
-              mediaEnd:
-                job.selected_seams?.media_end ??
-                job.execution_window?.edit_end_offset ??
-                (job.start_ts != null && job.end_ts != null
-                  ? job.end_ts - job.start_ts
-                  : null),
-            });
             dispatch({ type: "set_activity", activity: "preview ready — choose a variant" });
             dispatch({
               type: "update_generation_progress",
@@ -433,11 +422,18 @@ export function useAgentStream(projectId?: string | null) {
               type: "add_variant_preview",
               jobId: latestJob.job_id,
               variants: ready,
+              recommendedVariantId: latestJob.recommended_variant_id,
               timelineStart:
+                latestJob.selected_seams?.timeline_start ??
                 latestJob.execution_window?.core_start ?? latestJob.start_ts,
-              timelineEnd: latestJob.execution_window?.core_end ?? latestJob.end_ts,
-              mediaStart: latestJob.execution_window?.edit_start_offset ?? 0,
+              timelineEnd:
+                latestJob.selected_seams?.timeline_end ??
+                latestJob.execution_window?.core_end ?? latestJob.end_ts,
+              mediaStart:
+                latestJob.selected_seams?.media_start ??
+                latestJob.execution_window?.edit_start_offset ?? 0,
               mediaEnd:
+                latestJob.selected_seams?.media_end ??
                 latestJob.execution_window?.edit_end_offset ??
                 (latestJob.start_ts != null && latestJob.end_ts != null
                   ? latestJob.end_ts - latestJob.start_ts
@@ -934,6 +930,7 @@ function handleSSEEvent(
         type: "add_variant_preview",
         jobId: data.job_id as string,
         variants,
+        recommendedVariantId: (data.recommended_variant_id as string | undefined) ?? null,
         timelineStart: (data.start_ts as number | undefined) ?? null,
         timelineEnd: (data.end_ts as number | undefined) ?? null,
         mediaStart: (data.media_start_ts as number | undefined) ?? null,

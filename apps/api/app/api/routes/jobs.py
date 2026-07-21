@@ -36,6 +36,7 @@ def _job_out(job: Job) -> JobOut:
         error=job.error,
         created_at=job.created_at,
         accepted=bool(payload.get("latest_accepted_segment_id")),
+        recommended_variant_id=payload.get("recommended_variant_id"),
         start_ts=job.start_ts,
         end_ts=job.end_ts,
         provider=payload.get("selected_provider"),

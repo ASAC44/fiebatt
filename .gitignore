@@ -30,3 +30,5 @@ apps/api/vision-worker/checkpoints/
 # personal notes (not tracked)
 iris.md
 .npm-cache/
+apps/web/test-results/
+apps/web/playwright-report/

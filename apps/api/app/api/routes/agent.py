@@ -28,13 +28,14 @@ from google.genai import types as _genai_types
 from app.config.settings import get_settings
 from app.db.session import AsyncSessionLocal
 from app.deps import get_runner, get_session
-from app.models.conversation import Conversation, ChatMessage
+from app.models.conversation import ChatMessage
 from app.models.project import Project
 from app.models.selection import SelectionArtifact
 from app.services.edit_source import source_for_selection, source_for_timeline_clip
 from app.models.session import Session as SessionModel
 from app.services.agent_tools import execute_tool
 from app.services.agent_failure import agent_failure_payload
+from app.services.conversation_store import get_or_create_conversation
 from app.services.generation_failure import classify_generation_failure
 from app.services import job_events
 
@@ -1404,21 +1405,12 @@ async def _agent_stream(
     # overflow M reached" timeout. Instead, each DB touch opens a fresh
     # short-lived session from AsyncSessionLocal.
     async with AsyncSessionLocal() as db:
-        convo = (
-            await db.execute(
-                select(Conversation).where(Conversation.id == body.conversation_id)
-            )
-        ).scalar_one_or_none()
-
-        if convo is None:
-            convo = Conversation(
-                id=body.conversation_id,
-                project_id=body.project_id,
-                session_id=session_id,
-            )
-            db.add(convo)
-            await db.commit()
-            await db.refresh(convo)
+        convo = await get_or_create_conversation(
+            db,
+            conversation_id=body.conversation_id,
+            project_id=body.project_id,
+            session_id=session_id,
+        )
 
         # persist the user message
         user_msg = ChatMessage(

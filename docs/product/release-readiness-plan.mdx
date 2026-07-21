@@ -1,0 +1,432 @@
+---
+title: "End-to-end release plan"
+description: "The ordered plan for reliable local edits, portrait media, precise errors, durable timelines, and production verification."
+---
+
+# End-to-end release plan
+
+This is the release contract for fiebatt. It replaces reactive fixes with one
+measured pipeline. A change is not considered complete merely because unit
+tests pass; the deterministic suites and the fixed paid-provider evaluation
+must both pass.
+
+## Audit result
+
+The application has a sound base, but it is not ready to call complete yet.
+
+What is already working:
+
+- the current backend suite passes
+- the web lint, production build, and browser suite pass
+- generation jobs survive page navigation and restore their previews
+- the first and corrected candidates remain available during review
+- Apply writes an accepted candidate into the EDL
+- Compare can render original and edited timelines
+- export preserves source audio in the supported path
+- semantic range planning, playhead-outward tracking, and the 30-second cap exist
+- selected edits use one structured semantic plan
+- automatic source edits stay on Wan and long windows split into Wan chunks
+- retries are capped at one visible same-provider correction
+- frame-selected seams must beat the nominal cut
+- portrait and rotation metadata pass synthetic probe and browser geometry tests
+- timeline saves use monotonic revisions and reject stale writes
+- one frontend owner hydrates timeline mutations
+- planning, queueing, provider, and Apply failures keep actionable product states
+
+What those tests do not prove:
+
+- real provider instruction adherence
+- subtle unrelated-pixel changes in real generative output
+- human-perceived seams and multi-chunk quality on real footage
+- model behavior across the fixed paid-provider evaluation set
+
+## Known-good local-edit baseline
+
+The strong local result from July 17 came from a small, direct path:
+
+```text
+selected target
+  -> grounded instruction
+  -> short local source clip
+  -> Wan 2.7 source-video edit
+  -> one generated preview
+  -> timeline replacement
+```
+
+The key generation contract from that path still exists. It was not replaced
+by a fundamentally different Wan prompt. Most instability arrived later in
+the surrounding layers: expanded windows, 10–15 second provider routing,
+chunk assembly, automatic review and retry, frame-selected seams, and preview
+source swapping.
+
+Do not revert the whole application. Preserve the newer correct source-range,
+job-recovery, audio, and timeline work, while restoring the July 17 path as a
+named and tested short-local lane.
+
+## Final pipeline
+
+```text
+user request + playhead + current applied timeline + selection
+  -> deterministic edit-command gate
+  -> one semantic planning call
+  -> target validation
+  -> temporal occurrence resolution
+  -> effect-aware generation scope
+  -> provider/window plan
+  -> first render shown immediately
+  -> structural + semantic + seam review
+  -> optional visible corrective render
+  -> candidate selection
+  -> atomic Apply to versioned timeline
+  -> Compare and export from the same authoritative EDL
+```
+
+Every stage writes durable state. Refreshing, navigating away, reconnecting,
+or reopening the project must only change what the browser displays; it must
+not restart or cancel paid work.
+
+## 1. Make selected edits deterministic
+
+A clear edit command with an active selection must not first ask a general
+tool-calling agent to rediscover the workflow. That currently creates two
+Qwen decisions and can fail or rate-limit before the real edit planner runs.
+
+Use this route:
+
+1. Resolve the active clip and selection from trusted editor context.
+2. Call the structured edit planner once.
+3. In that same response, decide target, temporary/persistent behavior,
+   expected new objects, tracking parent, refined instruction, and range rule.
+4. Validate and queue generation directly.
+
+Keep the general agent only for conversation, inspection, timeline commands,
+and requests that are not unambiguous selected edits.
+
+Repair harmless planner output such as a zero duration or reversed bounds from
+known project facts. Reject only contradictions that cannot be repaired safely.
+
+## 2. Resolve time from meaning and evidence
+
+Search from the playhead outward. Never use a random fixed window.
+
+- temporary action: cover the action plus entry and exit context
+- persistent appearance: cover the selected target's local continuous
+  occurrence
+- motion that changes the future: continue until a natural rejoin or target
+  disappearance
+- requested new object: start at the event and continue while its effect is
+  relevant
+- explicit user range: honor it if valid
+
+Distinguish `tracked`, `uncertain`, `lost`, and `absent`. Require several
+confident absent frames before ending an occurrence. Re-identify after short
+occlusions. For a tiny detail, track a stable parent for identity but keep the
+detail as the editable surface.
+
+Uncertainty may expand analysis toward the shot boundary, up to 30 seconds. It
+must not automatically authorize more frames or pixels for editing.
+
+## 3. Keep an explicit short-local quality lane
+
+For a single continuous occurrence whose complete context fits Wan's supported
+window:
+
+- use Wan 2.7 source-video editing
+- use the current timeline clip as source, including earlier applied edits
+- keep the July 17 grounded prompt contract
+- send the exact local context and subject reference
+- produce one first pass before any review or correction
+- never switch provider invisibly
+
+This lane is the baseline for `make this bus yellow`, short appearance edits,
+and short actions. New seam, retry, or compositing logic may replace its output
+only after it demonstrably improves the fixed evaluation set.
+
+Do not route 10–15 second edits to HappyHorse merely because the duration
+fits. Choose that provider only after a paid A/B gate proves equal or better
+instruction adherence and continuity. Otherwise split Wan work at stable,
+tracked boundaries or stop with a precise product-limit message.
+
+## 4. Treat the selection as an anchor, not a rigid mask
+
+A correct full-occurrence window does not mean the full frame should change,
+but the selected box is not always the complete effect area either.
+
+The current Hugging Face SAM endpoint produces a still mask. It is useful for
+identifying and grounding the selected subject. It is not a universal edit
+boundary:
+
+- a colour or text change may stay on one surface
+- a person jumping needs the subject's swept motion area
+- a banana becoming an apple may change its complete silhouette
+- a new balloon must appear outside the selected window
+
+Passing one rigid mask to every edit would clip legitimate motion and newly
+generated content. The normal Wan source-video request also does not consume
+the bbox as a hard edit mask.
+
+For the current release, use the selection as a semantic anchor. The single
+planner response must describe:
+
+- the exact selected subject
+- what property, object, or action may change
+- whether the effect stays on the subject, changes its shape, moves through
+  space, or creates a new object
+- which nearby objects and scene properties must remain stable
+- the expected temporal behavior and natural window
+
+Use that contract to build a concise grounded Wan prompt and to review the
+result. Compare source and generated frames for broad scene replacement,
+unrequested camera changes, and obvious changes to named protected objects.
+These checks are warnings or measured safety blocks; they must not reject the
+legitimate footprint of a jump, transformation, or requested new object.
+
+Full tracked compositing is postponed until it is effect-aware. Before enabling
+it, the tracked-local-editing design must support:
+
+1. Expose SAM2 video tracking with capability discovery.
+2. Track a stable identity anchor and a separate editable target.
+3. Recover temporary tracking loss and re-identify the same instance.
+4. Track generated target motion and newly created objects separately.
+5. Build a bounded per-frame allowed-change envelope.
+6. Composite generated pixels only inside approved masks.
+7. Reject mask escape, identity switches, scene replacement, and cuts.
+
+This is not required for the current release. Until that later gate passes,
+keep the Wan short-local lane as the measured default and do not claim
+pixel-exact containment. Do not silently expand a weak mask to a rectangle or
+the full frame.
+
+## 5. Make generation review visible and bounded
+
+The first provider result appears immediately and remains playable. Review then
+runs beside it; review never makes the preview disappear.
+
+Allow at most one corrective render. It must:
+
+- use the same provider and exact same window
+- cite concrete failure evidence
+- announce itself before dispatch
+- provide Stop retry during the grace period
+- remain a separate candidate
+- never erase the first pass
+- never trigger a third render
+
+Technical recovery such as downloading, conforming, tracking, compositing, or
+validation retries must reuse the existing render and must not spend another
+generation call.
+
+Attempt ranking is advisory. Do not hide a candidate based only on an LLM
+score. Block Apply only for measured media corruption, spatial escape, or an
+unsafe seam. A validator outage is a warning, not proof that a good clip is bad.
+
+## 6. Make seams conservative
+
+Keep original source handles on both sides of a local core. Compare full frame,
+protected background, target motion, and camera motion inside those handles.
+
+Frame-selected cuts may be used only when:
+
+- both timestamps are inside the generated media
+- entry is before exit
+- the chosen range still contains the complete requested effect
+- measured cost is safely better than the nominal core cut
+- no duplicate, freeze, reversal, or internal scene cut is introduced
+
+Otherwise use the known-good nominal core range. Never add opacity fades as the
+default repair, and never add a separate transition generation by default.
+
+For multi-chunk work, all chunks and overlaps must validate before Apply. A
+partial failure may show recoverable previews, but it must not mutate the
+timeline. Add golden tests that count expected outer and internal seams.
+
+## 7. Use one media geometry everywhere
+
+Normalize uploaded media into a canonical display orientation. Read rotation
+and display-matrix metadata during probe; either autorotate once at ingestion
+or propagate normalized display dimensions consistently through extraction,
+generation, conforming, Apply, Compare, and export.
+
+Create one shared `contain` geometry helper/component for:
+
+- main preview video
+- frozen-frame canvas
+- bounding-box and mask overlays
+- generated candidate previews
+- Compare original and edited panes
+- reveal and inspector media
+
+The video and every canvas overlay must use the same fitted rectangle. A freeze
+canvas must not stretch a portrait bitmap across a landscape stage. Preserve
+letterboxing; never crop merely to fill the editor canvas.
+
+Verify 16:9, 9:16, square, and 90/270-degree metadata videos on desktop and
+mobile, including play, seek, source swap, retry, Compare, Apply, and export.
+
+## 8. Replace generic failures with structured errors
+
+Every backend failure crossing an API, SSE, or job boundary uses one schema:
+
+```json
+{
+  "code": "provider_rate_limited",
+  "stage": "planning",
+  "user_message": "The planning model is busy. Your video was not changed.",
+  "action": "retry",
+  "retryable": true,
+  "request_id": "..."
+}
+```
+
+Classify at least:
+
+- stale or mismatched selection
+- planner rate limit, quota, timeout, malformed response, and unavailable key
+- unsupported or excessive window
+- provider submission, timeout, quota, invalid duration, and short output
+- download, decode, conform, audio, tracking, compositing, and seam failure
+- Apply conflict or unsafe candidate
+- timeline save conflict
+- Compare media failure
+- export failure
+- reconnect with backend work still running
+
+The UI displays the exact stage, what happened, whether anything changed, and
+the next safe action. Keep provider internals in server logs and an optional
+diagnostic panel keyed by request/job ID. Never map every SSE error to “check
+the selection.” Preserve the structured error through polling, reconnect, and
+conversation history.
+
+## 9. Make timeline mutation authoritative and atomic
+
+Apply, autosave, refresh, Compare, follow-up edit, and export must all use one
+authoritative EDL revision.
+
+1. Add a monotonically increasing timeline revision.
+2. Apply in one transaction against the expected revision.
+3. Return the new EDL and revision.
+4. Reject stale autosaves instead of letting last-writer-wins restore old clips.
+5. Use one frontend owner for timeline hydration and mutation; remove duplicate
+   refresh bridges.
+6. Make a follow-up selection point to the active clip's media coordinates and
+   source bounds, not reel coordinates in the original upload.
+7. Render Compare and export from the same accepted revision.
+
+Session, conversation creation, signup, and anonymous-to-user migration must
+also be concurrency-safe. Use database conflict handling and reload the winner
+instead of read-then-insert races.
+
+## 10. Keep progress truthful and stable
+
+Persist one state machine rather than deriving competing labels from polling
+and SSE independently:
+
+```text
+planning -> tracking -> preparing -> rendering_first -> first_ready
+-> reviewing_first -> retry_waiting -> rendering_retry -> retry_ready
+-> validating -> ready | blocked | failed
+```
+
+Only forward transitions are allowed. Heartbeats may update detail without
+changing the stage. Reconnect restores the latest persisted state and candidate
+URLs. The yellow status must not oscillate between `reviewing first draft` and
+`Wan working`, and video elements must retain the old decoded frame until the
+new source is ready.
+
+## Ordered implementation
+
+### Work 1 — Preserve the reliable baseline
+
+1. Commit the existing session-race and active-source-bound fixes.
+2. Add a deterministic selected-edit fast path with one semantic planning call.
+3. Name and test the short Wan local lane.
+4. Remove hidden duration-only HappyHorse routing and provider fallback.
+5. Add structured job stages and error envelopes.
+
+### Work 2 — Media and timeline integrity
+
+1. Add rotation-aware probe and canonical orientation.
+2. Add shared aspect-fit geometry for videos, canvases, and overlays.
+3. Add versioned, atomic EDL mutation and one frontend timeline owner.
+4. Prove sequential edits, Compare, Apply, audio, and export use the same EDL.
+
+### Work 3 — Generation and seam safety
+
+1. Keep first-pass media mounted through review and retry.
+2. Reduce retry logic to one explicit same-provider correction.
+3. Gate frame-selected seams against the nominal core.
+4. Make multi-chunk assembly atomic and fully validated.
+5. Add precise Apply-blocking evidence and recovery actions.
+
+### Later work — Effect-aware spatial containment
+
+After the main pipeline is stable, evaluate the tracked-local-editing plan as a
+separate project: SAM2 video endpoint, anchor and target masks,
+re-identification, swept motion regions, generated-object tracking, approved
+masks, protected compositing, and escape validation. Do not put a simple rigid
+mask in the current generation path.
+
+### Work 5 — Release verification
+
+Run all deterministic checks first. Then run the small fixed paid-provider set
+once and record artifacts. Fix causes, not thresholds, and repeat only failing
+cases.
+
+## Verification matrix
+
+Deterministic tests must cover:
+
+- all temporal classes and occurrence boundaries
+- temporary occlusion and same-class re-identification
+- provider duration boundaries and chunk splits
+- generated clips shorter or longer than requested
+- seam timestamps at exact media boundaries
+- session, conversation, signup, Apply, and autosave concurrency
+- refresh and navigation during every persisted stage
+- first preview retained through retry
+- portrait, square, rotated portrait, and landscape geometry
+- detection of broad scene replacement and unrequested camera changes
+- source audio synchronization
+- sequential edits using the current timeline
+- Compare and export from the accepted revision
+- every structured error code and CTA
+
+The paid evaluation set requires a small committed fixture pack with known
+source clips and exact selections. Synthetic clips can prove geometry, timing,
+audio, seams, persistence, and recovery without provider calls. Human footage
+is still required to evaluate model quality. Do not spend paid calls until the
+fixture sources, prompts, playheads, boxes, and expected temporal behavior are
+fixed and reviewable.
+
+The paid evaluation set is:
+
+1. Make this car green.
+2. Make this bus yellow.
+3. Change her T-shirt text to Hello World.
+4. Make this person jump.
+5. Open this window and make a balloon come out.
+6. Temporary occlusion and reappearance.
+7. Two sequential edits followed by Compare, Apply, and export.
+8. One portrait phone video with rotation metadata.
+
+For each case record target correctness, temporal coverage, unrelated change,
+entry and exit seam scores, provider and model, render count, duration, Apply
+result, audio, refresh recovery, and human judgment.
+
+## Ship gate
+
+Ship only when:
+
+- all deterministic suites pass from a clean checkout
+- the fixed paid set passes the agreed quality thresholds
+- broad unrelated scene changes are detected and shown before Apply
+- no hidden provider switch or unbounded retry is possible
+- portrait media is contained throughout preview, Compare, and export
+- every failure is specific and recoverable
+- refresh and navigation never lose or restart work
+- sequential edits never revert earlier accepted work
+- Apply, Compare, and export use one versioned EDL
+
+No test suite can prove that a generative model will be perfect on every input.
+This gate makes failures bounded, visible, recoverable, and incapable of
+silently damaging the user's timeline.

@@ -32,6 +32,7 @@
         "pages": [
           "product/editor-workflow",
           "product/continuity",
+          "product/release-readiness-plan",
           "product/generation-quality-plan",
           "product/tracked-local-editing-plan",
           "product/library-and-projects"

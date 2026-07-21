@@ -166,6 +166,7 @@ async def generate(
             "planned_intent": plan.intent_json if plan else None,
             "adaptive_context_enabled": use_plan_range,
             "target_clip_id": body.target_clip_id,
+            "timeline_revision": int(proj.timeline_revision or 0),
             "source_revision": plan.source_revision if plan else proj.video_url,
             "plan_scope": plan.scope if plan else "legacy",
             "analysis_duration_ms": (

@@ -22,6 +22,7 @@ from app.schemas.accept import AcceptRequest, AcceptResponse
 from app.services.entity_discovery import enqueue_entity_discovery
 from app.services.accepted_generation import (
     accepted_generation_range,
+    rebase_accepted_range_for_project,
     record_accepted_range,
     update_project_edl_for_acceptance,
 )
@@ -79,6 +80,17 @@ async def accept(
     if job.start_ts is None or job.end_ts is None:
         raise HTTPException(status_code=422, detail="job has no segment range")
     accepted_range = accepted_generation_range(job, variant=variant)
+    try:
+        accepted_range = rebase_accepted_range_for_project(job, proj, accepted_range)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "stale_generation",
+                "user_message": str(exc),
+                "action": "Create a new preview from the current timeline.",
+            },
+        ) from exc
 
     # deactivate any existing generated segments that overlap this range.
     # the newest accept wins on overlap. we don't delete rows so we keep

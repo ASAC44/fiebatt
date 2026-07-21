@@ -1,7 +1,7 @@
 """Authoritative ranges and EDL mutation for accepted generated media."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import time
 
 from app.models.job import Job, Variant
@@ -107,6 +107,40 @@ def resolve_committed_timeline_range(
             return timeline_start, timeline_start + (source_end - source_start)
         cursor += duration
     return source_start, source_end
+
+
+def rebase_accepted_range_for_project(
+    job: Job,
+    project: Project,
+    accepted_range: AcceptedGenerationRange,
+) -> AcceptedGenerationRange:
+    """Move an accepted core with its target clip or reject a stale preview."""
+    payload = dict(job.payload or {})
+    generated_revision = payload.get("timeline_revision")
+    current_revision = int(project.timeline_revision or 0)
+    if generated_revision is None or int(generated_revision) == current_revision:
+        return accepted_range
+
+    target_clip_id = payload.get("target_clip_id")
+    if not target_clip_id:
+        raise ValueError(
+            "The timeline changed after this preview was generated. Generate a new preview from the current timeline."
+        )
+    old_committed = payload.get("committed_timeline_range")
+    old_core = old_committed if isinstance(old_committed, dict) else {}
+    old_core_start = float(old_core.get("start", job.start_ts or 0.0))
+    old_core_end = float(old_core.get("end", job.end_ts or old_core_start))
+    new_core_start, new_core_end = resolve_committed_timeline_range(
+        project.timeline_edl,
+        target_clip_id=str(target_clip_id),
+        source_start=accepted_range.requested_start,
+        source_end=accepted_range.requested_end,
+    )
+    return replace(
+        accepted_range,
+        committed_start=new_core_start + accepted_range.committed_start - old_core_start,
+        committed_end=new_core_end + accepted_range.committed_end - old_core_end,
+    )
 
 
 def record_accepted_range(

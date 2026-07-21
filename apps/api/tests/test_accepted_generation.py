@@ -3,10 +3,12 @@ from __future__ import annotations
 import pytest
 
 from app.models.job import Job, Variant
+from app.models.project import Project
 from app.schemas.timeline import PersistedAsset, PersistedClip, PersistedEDL
 from app.services.accepted_generation import (
     accepted_generation_range,
     record_accepted_range,
+    rebase_accepted_range_for_project,
     resolve_committed_timeline_range,
     splice_accepted_clip_into_edl,
     splice_generated_clip_into_edl,
@@ -177,6 +179,86 @@ def test_source_range_maps_through_reordered_target_clip_to_timeline_range():
         source_start=6.0,
         source_end=8.0,
     ) == (1.0, 3.0)
+
+
+def test_stale_preview_rebases_with_its_unchanged_target_clip():
+    job = _job()
+    job.start_ts = 6.0
+    job.end_ts = 8.0
+    job.payload.update({
+        "execution_window": {
+            "core_start": 6.0,
+            "core_end": 8.0,
+            "context_start": 5.0,
+            "context_end": 9.0,
+        },
+        "timeline_revision": 1,
+        "target_clip_id": "target",
+        "committed_timeline_range": {"start": 1.0, "end": 3.0},
+        "selected_seams": {
+            "passed": True,
+            "media_start": 0.75,
+            "media_end": 3.25,
+            "timeline_start": 5.75,
+            "timeline_end": 8.25,
+        },
+    })
+    project = Project(
+        id="project-1",
+        session_id="session-1",
+        video_path="source.mp4",
+        video_url="source.mp4",
+        duration=12,
+        fps=24,
+        timeline_revision=2,
+        timeline_edl=PersistedEDL(
+            clips=[
+                PersistedClip(
+                    id="intro",
+                    kind="source",
+                    url="source.mp4",
+                    source_start=0,
+                    source_end=2,
+                    media_duration=12,
+                ),
+                PersistedClip(
+                    id="target",
+                    kind="source",
+                    url="source.mp4",
+                    source_start=5,
+                    source_end=9,
+                    media_duration=12,
+                ),
+            ],
+            sources=[],
+        ).model_dump(mode="json"),
+    )
+
+    accepted = accepted_generation_range(job)
+    rebased = rebase_accepted_range_for_project(job, project, accepted)
+
+    assert (rebased.committed_start, rebased.committed_end) == pytest.approx((2.75, 5.25))
+
+
+def test_stale_preview_without_target_clip_is_rejected():
+    job = _job()
+    job.payload["timeline_revision"] = 1
+    project = Project(
+        id="project-1",
+        session_id="session-1",
+        video_path="source.mp4",
+        video_url="source.mp4",
+        duration=12,
+        fps=24,
+        timeline_revision=2,
+    )
+
+    with pytest.raises(ValueError, match="timeline changed"):
+        rebase_accepted_range_for_project(
+            job,
+            project,
+            accepted_generation_range(job),
+        )
 
 
 def test_generic_generated_splice_uses_exact_occurrence_media_range():

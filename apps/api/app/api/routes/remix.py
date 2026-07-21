@@ -18,6 +18,7 @@ from app.models.session import Session as SessionModel
 from app.schemas.common import BBox
 from app.services.accepted_generation import (
     accepted_generation_range,
+    rebase_accepted_range_for_project,
     record_accepted_range,
     update_project_edl_for_acceptance,
 )
@@ -131,7 +132,11 @@ async def _accept_variant_for_job(
 ) -> tuple[str, str | None]:
     if job.start_ts is None or job.end_ts is None:
         raise HTTPException(status_code=422, detail="job has no segment range")
-    accepted_range = accepted_generation_range(job, variant=variant)
+    accepted_range = rebase_accepted_range_for_project(
+        job,
+        proj,
+        accepted_generation_range(job, variant=variant),
+    )
 
     overlapping = (
         await db.execute(

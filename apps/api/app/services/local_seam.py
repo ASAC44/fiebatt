@@ -19,6 +19,7 @@ from app.services.seam_matching import (
 
 
 LOCAL_SEAM_SAMPLES = 9
+MIN_SEAM_IMPROVEMENT = 0.02
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +30,8 @@ class LocalSeamSelection:
     context_duration: float
     max_score: float = MAX_SEAM_SCORE
     target_weighting: str = "selection_bbox"
+    entry_strategy: str = "nominal"
+    exit_strategy: str = "nominal"
 
     @property
     def passed(self) -> bool:
@@ -87,7 +90,30 @@ class LocalSeamSelection:
             "timeline_end": self.timeline_end,
             "issues": list(self.issues),
             "target_weighting": self.target_weighting,
+            "entry_strategy": self.entry_strategy,
+            "exit_strategy": self.exit_strategy,
         }
+
+
+def _conservative_choice(
+    best: SeamChoice | None,
+    nominal: SeamChoice | None,
+    *,
+    max_score: float = MAX_SEAM_SCORE,
+) -> tuple[SeamChoice | None, str]:
+    """Move a cut only when frame matching proves the move is safer."""
+    if nominal is None:
+        return best, "matched" if best is not None else "unavailable"
+    if best is None or best.timestamp == nominal.timestamp:
+        return nominal, "nominal"
+    crosses_safety_threshold = nominal.score > max_score >= best.score
+    materially_better = (
+        best.score <= max_score
+        and nominal.score - best.score >= MIN_SEAM_IMPROVEMENT
+    )
+    if crosses_safety_threshold or materially_better:
+        return best, "matched"
+    return nominal, "nominal"
 
 
 def _tracked_bbox_resolver(
@@ -126,12 +152,14 @@ def select_local_seams(
     bbox: dict[str, float],
     window: GenerationWindow,
     tracked_frames: list[dict] | None = None,
+    nominal_entry_sample: SeamFrames | None = None,
+    nominal_exit_sample: SeamFrames | None = None,
 ) -> LocalSeamSelection:
     bbox_for_timestamp = _tracked_bbox_resolver(
         tracked_frames or [],
         context_start=window.context_start,
     )
-    entry = (
+    best_entry = (
         rank_best_seam(
             entry_samples,
             bbox=bbox,
@@ -141,7 +169,7 @@ def select_local_seams(
         if entry_samples
         else None
     )
-    exit = (
+    best_exit = (
         rank_best_seam(
             exit_samples,
             bbox=bbox,
@@ -150,12 +178,34 @@ def select_local_seams(
         if exit_samples
         else None
     )
+    nominal_entry = (
+        rank_best_seam(
+            [nominal_entry_sample],
+            bbox=bbox,
+            bbox_for_timestamp=bbox_for_timestamp,
+        )
+        if nominal_entry_sample is not None
+        else None
+    )
+    nominal_exit = (
+        rank_best_seam(
+            [nominal_exit_sample],
+            bbox=bbox,
+            bbox_for_timestamp=bbox_for_timestamp,
+        )
+        if nominal_exit_sample is not None
+        else None
+    )
+    entry, entry_strategy = _conservative_choice(best_entry, nominal_entry)
+    exit, exit_strategy = _conservative_choice(best_exit, nominal_exit)
     return LocalSeamSelection(
         entry=entry,
         exit=exit,
         context_start=window.context_start,
         context_duration=window.context_duration,
         target_weighting=("tracked_bbox" if bbox_for_timestamp is not None else "selection_bbox"),
+        entry_strategy=entry_strategy,
+        exit_strategy=exit_strategy,
     )
 
 
@@ -178,6 +228,21 @@ def _read(capture: cv2.VideoCapture, timestamp: float) -> np.ndarray:
     return frame
 
 
+def _seam_sample(
+    left: cv2.VideoCapture,
+    right: cv2.VideoCapture,
+    timestamp: float,
+    step: float,
+) -> SeamFrames:
+    return SeamFrames(
+        timestamp=timestamp,
+        left_before=_read(left, timestamp - step),
+        left_at=_read(left, timestamp),
+        right_at=_read(right, timestamp),
+        right_after=_read(right, timestamp + step),
+    )
+
+
 def _match_local_context_sync(
     source_path: Path,
     generated_path: Path,
@@ -196,30 +261,37 @@ def _match_local_context_sync(
         if fps <= 0:
             raise ValueError("seam matching requires a valid frame rate")
         step = max(1.0 / fps, 0.04)
+        generated_frames = int(generated.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        generated_last_timestamp = (
+            max(0.0, (generated_frames - 1) / fps)
+            if generated_frames > 0
+            else window.context_duration
+        )
+        readable_end = min(window.context_duration, generated_last_timestamp)
         entry_samples = [
-            SeamFrames(
-                timestamp=timestamp,
-                left_before=_read(source, timestamp - step),
-                left_at=_read(source, timestamp),
-                right_at=_read(generated, timestamp),
-                right_after=_read(generated, timestamp + step),
+            _seam_sample(source, generated, timestamp, step)
+            for timestamp in _candidate_times(
+                0.0, min(window.edit_start_offset, readable_end), fps
             )
-            for timestamp in _candidate_times(0.0, window.edit_start_offset, fps)
         ]
         exit_samples = [
-            SeamFrames(
-                timestamp=timestamp,
-                left_before=_read(generated, timestamp - step),
-                left_at=_read(generated, timestamp),
-                right_at=_read(source, timestamp),
-                right_after=_read(source, timestamp + step),
-            )
+            _seam_sample(generated, source, timestamp, step)
             for timestamp in _candidate_times(
                 window.edit_end_offset,
-                window.context_duration,
+                readable_end,
                 fps,
             )
         ]
+        nominal_entry_sample = (
+            _seam_sample(source, generated, window.edit_start_offset, step)
+            if step <= window.edit_start_offset <= readable_end - step
+            else None
+        )
+        nominal_exit_sample = (
+            _seam_sample(generated, source, window.edit_end_offset, step)
+            if step <= window.edit_end_offset <= readable_end - step
+            else None
+        )
     finally:
         source.release()
         generated.release()
@@ -229,6 +301,8 @@ def _match_local_context_sync(
         bbox=bbox,
         window=window,
         tracked_frames=tracked_frames,
+        nominal_entry_sample=nominal_entry_sample,
+        nominal_exit_sample=nominal_exit_sample,
     )
 
 

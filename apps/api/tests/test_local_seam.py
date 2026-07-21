@@ -107,6 +107,33 @@ def test_local_seams_report_unsafe_boundaries_without_blending():
     assert "entry_frame_match_score" in selection.issues[0]
 
 
+def test_frame_matching_keeps_nominal_cut_for_tiny_improvement():
+    selection = select_local_seams(
+        entry_samples=[_sample(0.75, 30, 29)],
+        exit_samples=[],
+        nominal_entry_sample=_sample(1.0, 30, 31),
+        bbox=BBOX,
+        window=WINDOW,
+    )
+
+    assert selection.media_start == pytest.approx(1.0)
+    assert selection.entry_strategy == "nominal"
+
+
+def test_frame_matching_moves_unsafe_nominal_cut_to_safe_candidate():
+    selection = select_local_seams(
+        entry_samples=[_sample(0.75, 30, 30)],
+        exit_samples=[],
+        nominal_entry_sample=_sample(1.0, 0, 255),
+        bbox=BBOX,
+        window=WINDOW,
+    )
+
+    assert selection.media_start == pytest.approx(0.75)
+    assert selection.entry_strategy == "matched"
+    assert selection.passed is True
+
+
 def test_selected_seams_replace_nominal_handle_failures_but_keep_media_failures():
     selection = select_local_seams(
         entry_samples=[_sample(0.5, 30, 30)],

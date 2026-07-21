@@ -53,12 +53,9 @@ def test_planned_local_flow_preserves_handles_and_commits_only_core():
     quality = decide_generation_quality(
         score={"visual_coherence": 9, "prompt_adherence": 9},
         continuity=continuity,
-        current_provider="wan",
         duration=window.context_duration,
         attempts=1,
         generated_seconds=window.context_duration,
-        fallback_used=False,
-        source_video_available=True,
     )
     job = Job(
         start_ts=core.start_ts,

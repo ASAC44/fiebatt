@@ -343,6 +343,7 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
             <canvas
               ref={editedFreezeRef}
               aria-hidden="true"
+              data-testid="compare-freeze-frame"
               className="pointer-events-none absolute top-1/2 left-1/2 h-auto w-auto max-h-full max-w-full -translate-x-1/2 -translate-y-1/2 bg-black opacity-0"
             />
             {playbackError && (

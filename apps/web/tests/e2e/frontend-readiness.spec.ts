@@ -242,6 +242,32 @@ test("compare opens original and complete edited timeline side by side", async (
   );
 });
 
+test("portrait freeze frames stay contained in preview and compare", async ({ page }) => {
+  await installApi(page, [{ ...project, width: 720, height: 1280 }]);
+  await page.goto(`/editor?projectId=${project.project_id}`);
+
+  const previewFreeze = page.getByTestId("preview-freeze-frame");
+  await previewFreeze.evaluate((canvas: HTMLCanvasElement) => {
+    canvas.width = 720;
+    canvas.height = 1280;
+    canvas.style.opacity = "1";
+  });
+  const previewBox = await previewFreeze.boundingBox();
+  expect(previewBox).not.toBeNull();
+  expect(previewBox!.width / previewBox!.height).toBeCloseTo(720 / 1280, 2);
+
+  await page.getByRole("button", { name: "Compare" }).click();
+  const compareFreeze = page.getByTestId("compare-freeze-frame");
+  await compareFreeze.evaluate((canvas: HTMLCanvasElement) => {
+    canvas.width = 720;
+    canvas.height = 1280;
+    canvas.style.opacity = "1";
+  });
+  const compareBox = await compareFreeze.boundingBox();
+  expect(compareBox).not.toBeNull();
+  expect(compareBox!.width / compareBox!.height).toBeCloseTo(720 / 1280, 2);
+});
+
 test("agent receives active clip media time after a trim", async ({ page }) => {
   let requestBody: Record<string, unknown> | null = null;
   await installApi(page, [project], {
@@ -416,6 +442,9 @@ test("corrective retry keeps one stable corrected-pass status", async ({ page })
     `data: ${JSON.stringify({ stage: "gen_poll", msg: "Wan still rendering", ts: 2 })}`,
     "",
     `data: ${JSON.stringify({ stage: "score_start", msg: "reviewing result", ts: 3 })}`,
+    "",
+    // A delayed poll event must not move the UI backwards to rendering.
+    `data: ${JSON.stringify({ stage: "gen_poll", msg: "stale rendering heartbeat", ts: 4 })}`,
     "",
     "",
   ].join("\n");

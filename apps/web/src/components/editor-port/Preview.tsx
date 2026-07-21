@@ -398,6 +398,7 @@ export function Preview() {
             <canvas
               ref={canvasRef}
               aria-hidden="true"
+              data-testid="preview-freeze-frame"
               className="pointer-events-none absolute top-1/2 left-1/2 block h-auto w-auto max-h-full max-w-full -translate-x-1/2 -translate-y-1/2 bg-black opacity-0"
             />
             {playbackError && (

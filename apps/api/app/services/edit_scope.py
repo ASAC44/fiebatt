@@ -45,6 +45,11 @@ _APPEARANCE_RE = re.compile(
     r"\b(color|shirt|clothes?|hair|style|look|wear|red|blue|green|black|white)\b",
     re.IGNORECASE,
 )
+_FEW_REPETITIONS_RE = re.compile(
+    r"\b(a few times?|several times?|three times?|3 times?|repeatedly)\b",
+    re.IGNORECASE,
+)
+_TWO_REPETITIONS_RE = re.compile(r"\b(twice|two times?|2 times?)\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +143,33 @@ def _repair_created_event_intent(prompt: str, intent: EditIntent) -> EditIntent:
     )
 
 
+def _repair_bounded_motion_duration(prompt: str, intent: EditIntent) -> EditIntent:
+    """Reserve enough editable time for a complete temporary action.
+
+    Semantic planners often describe only the visible action duration (for
+    example, a two-second jump). The generation core must also contain the
+    preparation and recovery frames; otherwise the protected exit handle takes
+    time away from the requested movement and source editors tend to no-op.
+    """
+    if (
+        intent.scope != "local"
+        or intent.change_type != "motion"
+        or intent.duration_policy != "bounded_action"
+    ):
+        return intent
+
+    _, motion_floor, _ = _motion_contract(prompt)
+    if _FEW_REPETITIONS_RE.search(prompt):
+        motion_floor = max(motion_floor, 5.5)
+    elif _TWO_REPETITIONS_RE.search(prompt):
+        motion_floor = max(motion_floor, 4.5)
+
+    safe_duration = max(intent.estimated_action_seconds, motion_floor)
+    if safe_duration <= intent.estimated_action_seconds + 1e-6:
+        return intent
+    return intent.model_copy(update={"estimated_action_seconds": safe_duration})
+
+
 def plan_prompt_intent(
     prompt: str,
     *,
@@ -148,12 +180,16 @@ def plan_prompt_intent(
 ) -> ScopeGateResult:
     """Cheap scope gate; a supplied structured interpretation is never recomputed."""
     if structured_intent is not None:
-        intent = _repair_created_event_intent(prompt, structured_intent)
-        reason = (
-            "bounded created-event safety fallback"
-            if intent is not structured_intent
-            else "reused structured intent"
-        )
+        created_repaired = _repair_created_event_intent(prompt, structured_intent)
+        intent = _repair_bounded_motion_duration(prompt, created_repaired)
+        if created_repaired is not structured_intent:
+            reason = "bounded created-event safety fallback"
+        else:
+            reason = (
+                "bounded motion duration safety fallback"
+                if intent is not created_repaired
+                else "reused structured intent"
+            )
     else:
         if requested_scope is not None:
             scope = requested_scope
@@ -211,6 +247,7 @@ def plan_prompt_intent(
             requires_recovery_motion=recovery,
             preservation_requirements=preservation,
         )
+        intent = _repair_bounded_motion_duration(prompt, intent)
 
     global_search = intent.scope == "all_occurrences"
     continuous_local = intent.scope == "local" and intent.temporal_behavior in {

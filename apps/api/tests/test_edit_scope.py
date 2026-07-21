@@ -37,6 +37,35 @@ def test_structured_intent_is_reused_without_reclassification():
     assert result.estimate.analysis_mode == "lazy_local"
 
 
+def test_structured_jump_duration_reserves_preparation_and_recovery():
+    intent = EditIntent(
+        raw_prompt="make the car jump for two seconds",
+        scope="local",
+        change_type="motion",
+        duration_policy="bounded_action",
+        estimated_action_seconds=2.0,
+    )
+
+    result = plan_prompt_intent(intent.raw_prompt, structured_intent=intent)
+
+    assert result.intent.estimated_action_seconds == 3.5
+    assert result.reason == "bounded motion duration safety fallback"
+
+
+def test_repeated_jump_reserves_time_for_each_repetition():
+    intent = EditIntent(
+        raw_prompt="make the man jump up and down a few times",
+        scope="local",
+        change_type="motion",
+        duration_policy="bounded_action",
+        estimated_action_seconds=2.5,
+    )
+
+    result = plan_prompt_intent(intent.raw_prompt, structured_intent=intent)
+
+    assert result.intent.estimated_action_seconds == 5.5
+
+
 def test_local_accept_does_not_imply_global_discovery():
     assert should_discover_occurrences(scope="local", explicitly_requested=False) is False
     assert should_discover_occurrences(scope="local", explicitly_requested=True) is True
@@ -95,6 +124,22 @@ def test_created_event_repairs_overbroad_structured_intent():
     assert result.intent.temporal_behavior == "temporary"
     assert result.intent.requires_recovery_motion is True
     assert result.reason == "bounded created-event safety fallback"
+
+
+def test_created_event_repair_also_reserves_complete_action_time():
+    intent = EditIntent(
+        raw_prompt="open this window and make a balloon come out",
+        scope="local",
+        change_type="motion",
+        duration_policy="trajectory_continuation",
+        temporal_behavior="future_changing_motion",
+        estimated_action_seconds=2.0,
+    )
+
+    result = plan_prompt_intent(intent.raw_prompt, structured_intent=intent)
+
+    assert result.intent.duration_policy == "bounded_action"
+    assert result.intent.estimated_action_seconds == 4.0
 
 
 def test_explicit_created_event_continuation_stays_continuous():

@@ -97,7 +97,35 @@ def test_protected_context_prompt_names_edit_offsets_and_handles():
     assert "0.500 through 4.000" in rendered
     assert "first 0.500 seconds" in rendered
     assert "final 2.000 seconds" in rendered
-    assert "locked source handles" in rendered
-    assert "identical to the source" in rendered
+    assert "continuity reference handles" in rendered
+    assert "must not prevent or weaken the requested edit" in rendered
     assert "Do not use a cut, fade, dissolve" in rendered
     assert rendered.endswith("Make the person jump.")
+
+
+def test_full_clip_edit_is_not_suppressed_by_zero_length_handles():
+    core = EditCore(start_ts=0.0, end_ts=3.0)
+    resolution = LocalRangeResolution(
+        edit_core=core,
+        generation_context=GenerationContext(
+            start_ts=0.0,
+            end_ts=3.0,
+            edit_core=core,
+        ),
+        occurrence_start=0.0,
+        occurrence_end=3.0,
+        analysis_start=0.0,
+        analysis_end=3.0,
+        confidence=1.0,
+    )
+    window = resolve_generation_window(
+        0.0,
+        3.0,
+        payload={
+            "adaptive_context_enabled": True,
+            "planned_context": resolution.model_dump(mode="json"),
+        },
+        project_duration=3.0,
+    )
+
+    assert protected_context_prompt("Make the person jump.", window) == "Make the person jump."

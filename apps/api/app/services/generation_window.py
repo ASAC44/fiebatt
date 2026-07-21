@@ -100,20 +100,21 @@ def resolve_generation_window(
 
 
 def protected_context_prompt(prompt: str, window: GenerationWindow) -> str:
-    """Tell source-video editors exactly which padded seconds may change."""
-    if not window.adaptive:
+    """Describe editable time and continuity handles without suppressing the edit."""
+    if not window.adaptive or (window.pre_handle < 0.05 and window.post_handle < 0.05):
         return prompt
     return (
-        "LOCKED SOURCE-CONTINUITY CONTRACT: Modify only seconds "
+        "SOURCE-CONTINUITY EDIT: The requested change must be clearly completed "
+        "inside seconds "
         f"{window.edit_start_offset:.3f} through {window.edit_end_offset:.3f} "
-        f"relative to the supplied clip. The first {window.pre_handle:.3f} seconds "
-        f"and final {window.post_handle:.3f} seconds are locked source handles. "
-        "Keep their visual and temporal content identical to the source: the same "
-        "objects, colours, lighting, pose, camera, background, and motion. Do not "
-        "change, restyle, regenerate, freeze, or replace any handle frame. Inside "
-        "the editable interval, begin from the source pose and velocity, perform "
-        "the requested change continuously frame by frame, and leave in a state "
-        "that can continue naturally into the final locked handle. Do not use a "
+        f"relative to the supplied clip. Use the first {window.pre_handle:.3f} "
+        f"seconds and final {window.post_handle:.3f} seconds as continuity reference "
+        "handles. Preserve their subjects, colours, lighting, camera, background, "
+        "and direction of motion as closely as possible. Start from the incoming "
+        "pose and velocity, perform the requested change clearly and completely, "
+        "then recover pose and velocity naturally toward the outgoing source motion. "
+        "The handles guide a continuous entrance and exit; they must not prevent or "
+        "weaken the requested edit. Do not use a "
         "cut, fade, dissolve, freeze, or sudden appearance or disappearance.\n\n"
         + prompt
     )

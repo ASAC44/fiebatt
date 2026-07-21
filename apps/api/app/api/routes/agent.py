@@ -69,12 +69,6 @@ _NON_GENERATING_EDIT_REQUEST = re.compile(
     r"apply|undo|revert|rename)\b",
     re.IGNORECASE,
 )
-_RESELECTION_REQUEST = re.compile(
-    r"\b(?:move the playhead|draw (?:a |the )?bounding box|reposition|current selection|select(?:ion)? .*?(?:not|isn't|is not)|need you to)\b",
-    re.I,
-)
-
-
 @dataclass(slots=True)
 class _ParsedFunction:
     name: str
@@ -1147,6 +1141,222 @@ def _build_messages(
     return messages
 
 
+async def _persist_agent_message(
+    conversation_id: str,
+    *,
+    text_parts: list[str],
+    tool_calls: list[dict[str, Any]],
+) -> None:
+    content: dict[str, Any] = {}
+    combined_text = "".join(text_parts)
+    if combined_text:
+        content["text"] = combined_text
+    if tool_calls:
+        content["tool_calls"] = tool_calls
+    if not content:
+        return
+    async with AsyncSessionLocal() as db:
+        db.add(
+            ChatMessage(
+                conversation_id=conversation_id,
+                role="agent",
+                content=content,
+            )
+        )
+        await db.commit()
+
+
+async def _stream_selected_edit(
+    *,
+    body: AgentChatRequest,
+    session_id: str,
+    runner: Any,
+    conversation_id: str,
+    request_id: str,
+) -> AsyncGenerator[str, None]:
+    """Run one authoritative plan and queue one render for a clear selection."""
+    tool_calls: list[dict[str, Any]] = []
+    selection_id = await _resolve_plan_selection_id(body)
+    if not selection_id:
+        yield sse_event(
+            "error",
+            {
+                "code": "selection_unavailable",
+                "stage": "selection",
+                "message": "The selected subject could not be prepared. Draw the selection again and retry.",
+                "retryable": True,
+                "request_id": request_id,
+            },
+        )
+        yield sse_event("done", {})
+        return
+
+    plan_call_id = f"plan-{uuid.uuid4().hex[:12]}"
+    plan_args: dict[str, Any] = {
+        "project_id": body.project_id,
+        "selection_id": selection_id,
+        "prompt": body.message,
+    }
+    try:
+        await _apply_active_source_bounds(body, plan_args)
+    except ValueError as exc:
+        yield sse_event(
+            "error",
+            {
+                "code": "active_clip_unavailable",
+                "stage": "selection",
+                "message": str(exc),
+                "retryable": True,
+                "request_id": request_id,
+            },
+        )
+        yield sse_event("done", {})
+        return
+    if body.video_gen_provider:
+        plan_args["video_gen_provider"] = body.video_gen_provider
+    tool_calls.append({"id": plan_call_id, "tool": "create_edit_plan", "args": plan_args})
+    yield sse_event(
+        "tool_call_start",
+        {"id": plan_call_id, "tool": "create_edit_plan", "args": plan_args},
+    )
+
+    try:
+        async with AsyncSessionLocal() as tool_db:
+            plan_result = await execute_tool(
+                tool_name="create_edit_plan",
+                args=plan_args,
+                db=tool_db,
+                session_id=session_id,
+                runner=runner,
+            )
+    except Exception as exc:
+        log.exception("[agent.chat] req=%s selected edit planning failed", request_id)
+        result = {"error": str(exc)}
+        yield sse_event(
+            "tool_call_end",
+            {
+                "id": plan_call_id,
+                "tool": "create_edit_plan",
+                "result": result,
+                "status": "error",
+            },
+        )
+        yield sse_event(
+            "error",
+            {
+                "code": "edit_planning_failed",
+                "stage": "planning",
+                "message": str(exc),
+                "retryable": True,
+                "request_id": request_id,
+            },
+        )
+        await _persist_agent_message(
+            conversation_id,
+            text_parts=[],
+            tool_calls=tool_calls,
+        )
+        yield sse_event("done", {})
+        return
+
+    yield sse_event(
+        "tool_call_end",
+        {
+            "id": plan_call_id,
+            "tool": "create_edit_plan",
+            "result": plan_result,
+            "status": "done",
+        },
+    )
+
+    generate_call_id = f"generate-{uuid.uuid4().hex[:12]}"
+    generate_args: dict[str, Any] = {
+        "project_id": body.project_id,
+        "plan_id": str(plan_result["plan_id"]),
+        "user_prompt": body.message,
+    }
+    if body.target_clip_id:
+        generate_args["target_clip_id"] = body.target_clip_id
+    tool_calls.append(
+        {"id": generate_call_id, "tool": "generate_edit", "args": generate_args}
+    )
+    yield sse_event(
+        "tool_call_start",
+        {"id": generate_call_id, "tool": "generate_edit", "args": generate_args},
+    )
+
+    try:
+        async with AsyncSessionLocal() as tool_db:
+            generation_result = await execute_tool(
+                tool_name="generate_edit",
+                args=generate_args,
+                db=tool_db,
+                session_id=session_id,
+                runner=runner,
+            )
+    except Exception as exc:
+        log.exception("[agent.chat] req=%s selected edit queueing failed", request_id)
+        result = {"error": str(exc)}
+        yield sse_event(
+            "tool_call_end",
+            {
+                "id": generate_call_id,
+                "tool": "generate_edit",
+                "result": result,
+                "status": "error",
+            },
+        )
+        yield sse_event(
+            "error",
+            {
+                "code": "generation_queue_failed",
+                "stage": "queueing",
+                "message": str(exc),
+                "retryable": True,
+                "request_id": request_id,
+            },
+        )
+        await _persist_agent_message(
+            conversation_id,
+            text_parts=[],
+            tool_calls=tool_calls,
+        )
+        yield sse_event("done", {})
+        return
+
+    yield sse_event(
+        "tool_call_end",
+        {
+            "id": generate_call_id,
+            "tool": "generate_edit",
+            "result": generation_result,
+            "status": "done",
+        },
+    )
+    job_id = str(generation_result["job_id"])
+    core = plan_result.get("edit_core") or {}
+    yield sse_event(
+        "suggestion",
+        {
+            "edit": {
+                "job_id": job_id,
+                "start_ts": core.get("start_ts"),
+                "end_ts": core.get("end_ts"),
+                "bbox_hint": body.bbox.model_dump() if body.bbox else None,
+                "suggestion": body.message,
+            }
+        },
+    )
+    async for event in _bridge_plan_events(job_id, timeout_s=25.0):
+        yield event
+    await _persist_agent_message(
+        conversation_id,
+        text_parts=[],
+        tool_calls=tool_calls,
+    )
+    yield sse_event("done", {})
+
+
 # ---- streaming agent loop ----
 
 
@@ -1221,6 +1431,21 @@ async def _agent_stream(
     # collect agent text for persistence after stream completes
     _agent_text_parts: list[str] = []
     _tool_calls_log: list[dict[str, Any]] = []
+
+    # A clear command aimed at the active selection already contains enough
+    # intent and editor context. Send it directly to the structured semantic
+    # planner instead of spending a separate general-agent call deciding which
+    # tools to invoke.
+    if _requires_selected_generation(body):
+        async for event in _stream_selected_edit(
+            body=body,
+            session_id=session_id,
+            runner=runner,
+            conversation_id=convo_id,
+            request_id=req_id,
+        ):
+            yield event
+        return
 
     client = AsyncOpenAI(
         api_key=api_key,
@@ -1460,137 +1685,13 @@ async def _agent_stream(
         if generation_started:
             break
 
-    # A selected imperative edit is a command, not an open-ended question.
-    # Qwen can inspect frames then answer in prose without ever emitting the
-    # required tool call. Finish the deterministic plan → generate path here
-    # so the editor never reports a successful chat turn with no render.
-    model_requested_reselection = bool(_RESELECTION_REQUEST.search("".join(_agent_text_parts)))
-    if not generation_started and _requires_selected_generation(body) and not model_requested_reselection:
-        log.warning(
-            "[agent.chat] req=%s model stopped before generation; enforcing selected edit pipeline",
-            req_id,
-        )
-        selection_id = await _resolve_plan_selection_id(body)
-        if not selection_id:
-            yield sse_event(
-                "error",
-                {"message": "Could not prepare the selected subject. Draw the selection again and retry."},
-            )
-        else:
-            plan_result: dict[str, Any] | None = None
-            if active_plan_id is None:
-                plan_call_id = f"enforced-plan-{uuid.uuid4().hex[:12]}"
-                plan_args = {
-                    "project_id": body.project_id,
-                    "selection_id": selection_id,
-                    "prompt": body.message,
-                }
-                await _apply_active_source_bounds(body, plan_args)
-                if body.video_gen_provider:
-                    plan_args["video_gen_provider"] = body.video_gen_provider
-                _tool_calls_log.append({"id": plan_call_id, "tool": "create_edit_plan", "args": plan_args})
-                yield sse_event("tool_call_start", {
-                    "id": plan_call_id,
-                    "tool": "create_edit_plan",
-                    "args": plan_args,
-                })
-                try:
-                    async with AsyncSessionLocal() as tool_db:
-                        plan_result = await execute_tool(
-                            tool_name="create_edit_plan",
-                            args=plan_args,
-                            db=tool_db,
-                            session_id=session_id,
-                            runner=runner,
-                        )
-                    active_plan_id = str(plan_result["plan_id"])
-                    yield sse_event("tool_call_end", {
-                        "id": plan_call_id,
-                        "tool": "create_edit_plan",
-                        "result": plan_result,
-                        "status": "done",
-                    })
-                except Exception as exc:
-                    log.exception("enforced edit plan failed")
-                    yield sse_event("tool_call_end", {
-                        "id": plan_call_id,
-                        "tool": "create_edit_plan",
-                        "result": {"error": str(exc)},
-                        "status": "error",
-                    })
-
-            if active_plan_id is not None:
-                generate_call_id = f"enforced-generate-{uuid.uuid4().hex[:12]}"
-                generate_args = {
-                    "project_id": body.project_id,
-                    "plan_id": active_plan_id,
-                    "user_prompt": body.message,
-                }
-                if body.target_clip_id:
-                    generate_args["target_clip_id"] = body.target_clip_id
-                if body.video_gen_provider:
-                    generate_args["video_gen_provider"] = body.video_gen_provider
-                _tool_calls_log.append({"id": generate_call_id, "tool": "generate_edit", "args": generate_args})
-                yield sse_event("tool_call_start", {
-                    "id": generate_call_id,
-                    "tool": "generate_edit",
-                    "args": generate_args,
-                })
-                try:
-                    async with AsyncSessionLocal() as tool_db:
-                        generation_result = await execute_tool(
-                            tool_name="generate_edit",
-                            args=generate_args,
-                            db=tool_db,
-                            session_id=session_id,
-                            runner=runner,
-                        )
-                    yield sse_event("tool_call_end", {
-                        "id": generate_call_id,
-                        "tool": "generate_edit",
-                        "result": generation_result,
-                        "status": "done",
-                    })
-                    job_id = str(generation_result["job_id"])
-                    core = (plan_result or {}).get("edit_core") or {}
-                    yield sse_event("suggestion", {
-                        "edit": {
-                            "job_id": job_id,
-                            "start_ts": core.get("start_ts"),
-                            "end_ts": core.get("end_ts"),
-                            "bbox_hint": body.bbox.model_dump(),
-                            "suggestion": body.message,
-                        },
-                    })
-                    async for evt in _bridge_plan_events(job_id, timeout_s=25.0):
-                        yield evt
-                    generation_started = True
-                except Exception as exc:
-                    log.exception("enforced generation failed")
-                    yield sse_event("tool_call_end", {
-                        "id": generate_call_id,
-                        "tool": "generate_edit",
-                        "result": {"error": str(exc)},
-                        "status": "error",
-                    })
-
     # ── persist agent response ──
     try:
-        agent_content: dict[str, Any] = {}
-        combined_text = "".join(_agent_text_parts)
-        if combined_text:
-            agent_content["text"] = combined_text
-        if _tool_calls_log:
-            agent_content["tool_calls"] = _tool_calls_log
-        if agent_content:
-            async with AsyncSessionLocal() as db:
-                agent_msg = ChatMessage(
-                    conversation_id=convo_id,
-                    role="agent",
-                    content=agent_content,
-                )
-                db.add(agent_msg)
-                await db.commit()
+        await _persist_agent_message(
+            convo_id,
+            text_parts=_agent_text_parts,
+            tool_calls=_tool_calls_log,
+        )
     except Exception:
         log.exception("failed to persist agent response")
 

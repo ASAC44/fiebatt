@@ -838,11 +838,11 @@ async def test_agent_chat_with_function_call(client: AsyncClient, live_agent_set
 
 
 @pytest.mark.asyncio
-async def test_selected_edit_is_generated_when_model_stops_after_inspection(
+async def test_selected_edit_uses_direct_plan_without_general_agent_call(
     client: AsyncClient,
     live_agent_settings,
 ):
-    """A clear selected edit must not silently end as a prose-only chat turn."""
+    """A clear selected edit goes through exactly one semantic planning path."""
     mock_client = _mock_agent_client(
         _make_mock_agent_response("I inspected the selected person."),
     )
@@ -886,6 +886,7 @@ async def test_selected_edit_is_generated_when_model_stops_after_inspection(
         if event["event"] == "tool_call_start"
     ]
     assert started_tools == ["create_edit_plan", "generate_edit"]
+    assert mock_client.chat.completions.create.await_count == 0
     suggestion = next(event for event in events if event["event"] == "suggestion")
     assert suggestion["data"]["edit"]["job_id"] == "job-1"
 

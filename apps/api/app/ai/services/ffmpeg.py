@@ -305,7 +305,7 @@ def get_video_info(video_path: str) -> dict:
             "ffprobe",
             "-v", "error",
             "-select_streams", "v:0",
-            "-show_entries", "stream=width,height,r_frame_rate,duration",
+            "-show_entries", "stream=width,height,r_frame_rate,duration:stream_tags=rotate:stream_side_data=rotation",
             "-show_entries", "format=duration",
             "-of", "json",
             video_path,
@@ -328,9 +328,30 @@ def get_video_info(video_path: str) -> dict:
 
     duration = float(stream.get("duration", 0) or fmt.get("duration", 0))
 
+    raw_rotation = next(
+        (
+            side_data.get("rotation")
+            for side_data in stream.get("side_data_list", [])
+            if "rotation" in side_data
+        ),
+        stream.get("tags", {}).get("rotate", 0),
+    )
+    try:
+        rotation = int(round(float(raw_rotation or 0))) % 360
+    except (TypeError, ValueError):
+        rotation = 0
+    encoded_width = int(stream.get("width", 0))
+    encoded_height = int(stream.get("height", 0))
+    width, height = (
+        (encoded_height, encoded_width)
+        if rotation % 180
+        else (encoded_width, encoded_height)
+    )
+
     return {
         "duration": duration,
         "fps": fps,
-        "width": int(stream.get("width", 0)),
-        "height": int(stream.get("height", 0)),
+        "width": width,
+        "height": height,
+        "rotation": rotation,
     }

@@ -29,7 +29,7 @@ async def _run(cmd: list[str]) -> tuple[bytes, bytes]:
 
 
 async def probe(path: str | Path) -> dict:
-    """Return {duration, fps, width, height} for a video file."""
+    """Return display-oriented metadata for a video file."""
     cmd = [
         "ffprobe",
         "-v", "error",
@@ -52,16 +52,41 @@ async def probe(path: str | Path) -> dict:
     has_audio = any(s.get("codec_type") == "audio" for s in data.get("streams", []))
 
     fps = _parse_fps(video_stream.get("avg_frame_rate") or video_stream.get("r_frame_rate") or "0/1")
-    width = int(video_stream.get("width") or 0)
-    height = int(video_stream.get("height") or 0)
+    encoded_width = int(video_stream.get("width") or 0)
+    encoded_height = int(video_stream.get("height") or 0)
+    rotation = _stream_rotation(video_stream)
+    width, height = _display_dimensions(encoded_width, encoded_height, rotation)
 
     return {
         "duration": duration,
         "fps": fps,
         "width": width,
         "height": height,
+        "encoded_width": encoded_width,
+        "encoded_height": encoded_height,
+        "rotation": rotation,
         "has_audio": has_audio,
     }
+
+
+def _stream_rotation(stream: dict) -> int:
+    raw: object | None = None
+    for side_data in stream.get("side_data_list") or []:
+        if "rotation" in side_data:
+            raw = side_data.get("rotation")
+            break
+    if raw is None:
+        raw = (stream.get("tags") or {}).get("rotate")
+    try:
+        return int(round(float(raw or 0))) % 360
+    except (TypeError, ValueError):
+        return 0
+
+
+def _display_dimensions(width: int, height: int, rotation: int) -> tuple[int, int]:
+    if rotation % 180:
+        return height, width
+    return width, height
 
 
 def _parse_fps(rate: str) -> float:

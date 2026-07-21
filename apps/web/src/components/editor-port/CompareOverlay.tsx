@@ -343,7 +343,7 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
             <canvas
               ref={editedFreezeRef}
               aria-hidden="true"
-              className="pointer-events-none absolute inset-0 h-full w-full bg-black object-contain opacity-0"
+              className="pointer-events-none absolute top-1/2 left-1/2 h-auto w-auto max-h-full max-w-full -translate-x-1/2 -translate-y-1/2 bg-black opacity-0"
             />
             {playbackError && (
               <div className="absolute inset-0 z-20 grid place-items-center bg-black/75 px-6 text-center text-xs text-white">

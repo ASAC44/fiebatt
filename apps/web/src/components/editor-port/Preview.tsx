@@ -397,10 +397,8 @@ export function Preview() {
                 sets it to 1 directly via the ref, releaseFreeze fades it back. */}
             <canvas
               ref={canvasRef}
-              className="pointer-events-none absolute inset-0 block h-full w-full max-w-full bg-black object-contain opacity-0"
-              style={{
-                maxHeight: "100%",
-              }}
+              aria-hidden="true"
+              className="pointer-events-none absolute top-1/2 left-1/2 block h-auto w-auto max-h-full max-w-full -translate-x-1/2 -translate-y-1/2 bg-black opacity-0"
             />
             {playbackError && (
               <div className="absolute inset-0 z-20 grid place-items-center bg-black/75 px-6 text-center text-xs text-white">

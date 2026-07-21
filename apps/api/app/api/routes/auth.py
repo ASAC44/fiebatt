@@ -10,9 +10,9 @@ from app.auth.jwt import (
     normalize_email,
     verify_password,
 )
+from app.deps import _ensure_session_row
 from app.db.session import get_db
 from app.config.settings import get_settings
-from app.models.session import Session as SessionModel
 from app.models.user import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -76,7 +76,12 @@ async def signup(body: AuthRequest, response: Response, db: AsyncSession = Depen
     db.add(user)
     await db.flush()
 
-    db.add(SessionModel(id=f"user:{user.id}", user_id=user.id, email=user.email))
+    await _ensure_session_row(
+        db,
+        sid=f"user:{user.id}",
+        user_id=user.id,
+        email=user.email,
+    )
     await db.commit()
     await db.refresh(user)
     return _response_for(user, response)
@@ -91,10 +96,13 @@ async def login(body: AuthRequest, response: Response, db: AsyncSession = Depend
     if user is None or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="invalid email or password")
 
-    session = await db.get(SessionModel, f"user:{user.id}")
-    if session is None:
-        db.add(SessionModel(id=f"user:{user.id}", user_id=user.id, email=user.email))
-        await db.commit()
+    await _ensure_session_row(
+        db,
+        sid=f"user:{user.id}",
+        user_id=user.id,
+        email=user.email,
+    )
+    await db.commit()
     return _response_for(user, response)
 
 

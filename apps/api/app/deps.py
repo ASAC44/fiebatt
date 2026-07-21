@@ -3,7 +3,9 @@ import uuid
 from typing import Annotated, Optional
 
 from fastapi import Depends, Header, Request
-from sqlalchemy import update
+from sqlalchemy import delete, select, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt import extract_bearer, verify_access_token
@@ -13,6 +15,38 @@ from app.models.project import Project
 from app.models.session import Session as SessionModel
 
 log = logging.getLogger("fiebatt.deps")
+
+
+def _session_insert_statement(dialect: str, values: dict):
+    """Build the atomic session upsert used by every authentication path."""
+    if dialect == "postgresql":
+        return postgresql_insert(SessionModel).values(**values).on_conflict_do_nothing(
+            index_elements=[SessionModel.id]
+        )
+    if dialect == "sqlite":
+        return sqlite_insert(SessionModel).values(**values).on_conflict_do_nothing(
+            index_elements=[SessionModel.id]
+        )
+    raise RuntimeError(f"unsupported session database dialect: {dialect}")
+
+
+async def _ensure_session_row(
+    db: AsyncSession,
+    *,
+    sid: str,
+    user_id: str | None = None,
+    email: str | None = None,
+) -> SessionModel:
+    """Create a session idempotently, even under concurrent first requests."""
+    values = {"id": sid, "user_id": user_id, "email": email}
+    dialect = db.get_bind().dialect.name
+    await db.execute(_session_insert_statement(dialect, values))
+    row = (
+        await db.execute(select(SessionModel).where(SessionModel.id == sid))
+    ).scalar_one_or_none()
+    if row is None:
+        raise RuntimeError("session row was not visible after idempotent creation")
+    return row
 
 
 async def _migrate_anon_session(
@@ -33,8 +67,18 @@ async def _migrate_anon_session(
     """
     if not anon_sid or anon_sid == user_sid:
         return
-    anon = await db.get(SessionModel, anon_sid)
-    if anon is None or anon.user_id is not None:
+    anon_user_id = (
+        await db.execute(
+            select(SessionModel.user_id).where(SessionModel.id == anon_sid)
+        )
+    ).scalar_one_or_none()
+    if anon_user_id is not None:
+        return
+
+    anon_exists = (
+        await db.execute(select(SessionModel.id).where(SessionModel.id == anon_sid))
+    ).scalar_one_or_none()
+    if anon_exists is None:
         return
 
     result = await db.execute(
@@ -43,8 +87,15 @@ async def _migrate_anon_session(
         .values(session_id=user_sid)
     )
     moved = result.rowcount or 0
-    # drop the now-empty anon session row so it doesn't accumulate
-    await db.delete(anon)
+    # Delete by predicate instead of deleting a previously loaded ORM object.
+    # Two login requests may migrate the same anon id concurrently; the second
+    # delete should simply affect zero rows rather than raising stale-row errors.
+    await db.execute(
+        delete(SessionModel).where(
+            SessionModel.id == anon_sid,
+            SessionModel.user_id.is_(None),
+        )
+    )
     if moved:
         log.info("migrated %d project(s) from %s to %s", moved, anon_sid, user_sid)
 
@@ -73,12 +124,13 @@ async def get_session(
 
     if user is not None:
         sid = f"user:{user.id}"
-        row = await db.get(SessionModel, sid)
-        if row is None:
-            row = SessionModel(id=sid, user_id=user.id, email=user.email)
-            db.add(row)
-            await db.flush()
-        elif row.email != user.email or row.user_id != user.id:
+        row = await _ensure_session_row(
+            db,
+            sid=sid,
+            user_id=user.id,
+            email=user.email,
+        )
+        if row.email != user.email or row.user_id != user.id:
             row.user_id = user.id
             row.email = user.email
 
@@ -90,11 +142,8 @@ async def get_session(
         return row
 
     sid = x_session_id or str(uuid.uuid4())
-    row = await db.get(SessionModel, sid)
-    if row is None:
-        row = SessionModel(id=sid)
-        db.add(row)
-        await db.commit()
+    row = await _ensure_session_row(db, sid=sid)
+    await db.commit()
     request.state.session_id = sid
     return row
 

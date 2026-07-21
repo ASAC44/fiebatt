@@ -283,13 +283,13 @@ async def test_long_local_edit_is_split_into_provider_sized_chunks(
 
     assert response.status_code == 201, response.text
     body = response.json()
-    assert body["provider"] == "happyhorse"
-    assert body["estimate"]["expected_generation_calls"] == 2
-    assert len(body["chunks"]) == 2
+    assert body["provider"] == "wan"
+    assert body["estimate"]["expected_generation_calls"] == 3
+    assert len(body["chunks"]) == 3
     assert all(
         chunk["generation_context"]["end_ts"]
         - chunk["generation_context"]["start_ts"]
-        <= 15.0
+        <= 10.0
         for chunk in body["chunks"]
     )
     assert body["chunks"][0]["edit_core"]["end_ts"] == body["chunks"][1]["edit_core"]["start_ts"]

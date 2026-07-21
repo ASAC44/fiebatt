@@ -39,7 +39,7 @@ def test_jump_then_walk_prompt_routes_to_single_source_edit():
     assert "exactly three distinct repetitions" in rewritten
     assert select_video_provider("auto", source_video=True) == "wan"
     assert select_video_provider("auto", source_video=True, duration=10.0) == "wan"
-    assert select_video_provider("auto", source_video=True, duration=12.0) == "happyhorse"
+    assert select_video_provider("auto", source_video=True, duration=12.0) == "wan"
     assert not hasattr(generate_job, "_run_happyhorse_motion_bridge")
 
 

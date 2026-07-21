@@ -34,16 +34,16 @@ def test_short_occurrence_uses_one_wan_chunk():
     assert chunks[0].context_end == pytest.approx(7.75)
 
 
-def test_medium_occurrence_uses_one_happyhorse_chunk():
+def test_medium_occurrence_stays_on_wan_and_splits():
     chunks = plan_occurrence_chunks(
         occurrence_start=4.0,
         occurrence_end=16.0,
         project_duration=20.0,
     )
 
-    assert len(chunks) == 1
-    assert chunks[0].provider == "happyhorse"
-    assert chunks[0].context_duration == pytest.approx(13.5)
+    assert len(chunks) == 2
+    assert {chunk.provider for chunk in chunks} == {"wan"}
+    _assert_valid_coverage(chunks, 4.0, 16.0)
 
 
 def test_long_occurrence_is_split_without_core_gaps_or_duplicates():
@@ -53,8 +53,8 @@ def test_long_occurrence_is_split_without_core_gaps_or_duplicates():
         project_duration=40.0,
     )
 
-    assert len(chunks) == 3
-    assert {chunk.provider for chunk in chunks} == {"happyhorse"}
+    assert len(chunks) == 4
+    assert {chunk.provider for chunk in chunks} == {"wan"}
     _assert_valid_coverage(chunks, 5.0, 35.0)
 
 
@@ -76,12 +76,12 @@ def test_split_prefers_strong_visual_evidence_near_provider_limit():
         occurrence_end=35.0,
         project_duration=40.0,
         split_evidence=[
-            SplitEvidence(18.4, "stable_motion", 1.0),
-            SplitEvidence(17.0, "shot_cut", 1.0),
+            SplitEvidence(13.4, "stable_motion", 1.0),
+            SplitEvidence(13.0, "shot_cut", 1.0),
         ],
     )
 
-    assert chunks[0].edit_end == pytest.approx(17.0)
+    assert chunks[0].edit_end == pytest.approx(13.0)
     assert chunks[0].split_reason == "shot_cut"
     _assert_valid_coverage(chunks, 5.0, 35.0)
 

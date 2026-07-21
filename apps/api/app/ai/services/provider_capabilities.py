@@ -83,9 +83,10 @@ def select_video_provider(
     # Uploaded-footage edits need temporal context. Veo is image-conditioned in
     # this adapter and is reserved for explicit generation requests.
     if source_video:
-        # Wan 2.7 video-edit accepts at most ten seconds. HappyHorse retains a
-        # source-video path for the remaining API-supported 10–15 second range.
-        return "happyhorse" if duration is not None and duration > 10.05 else "wan"
+        # Wan 2.7 is the measured local-edit baseline. A longer duration may
+        # require multiple Wan chunks, but it must not silently switch the
+        # user's edit to a different model. HappyHorse remains explicit.
+        return "wan"
     return "veo"
 
 

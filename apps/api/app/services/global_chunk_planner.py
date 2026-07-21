@@ -68,7 +68,7 @@ def split_evidence_from_track_frames(frames: Iterable[dict]) -> list[SplitEviden
     return evidence
 
 
-def _provider_for_occurrence(requested: str, total_context_seconds: float) -> str:
+def _provider_for_occurrence(requested: str, _total_context_seconds: float) -> str:
     if requested != "auto":
         capabilities = VIDEO_PROVIDER_CAPABILITIES.get(requested)
         if capabilities is None or not capabilities.source_video_edit:
@@ -76,9 +76,9 @@ def _provider_for_occurrence(requested: str, total_context_seconds: float) -> st
                 f"{requested} cannot preserve source-video motion for global edits"
             )
         return requested
-    if total_context_seconds <= VIDEO_PROVIDER_CAPABILITIES["wan"].max_total_duration + 1e-6:
-        return "wan"
-    return "happyhorse"
+    # Keep automatic local editing on the known-good Wan source-video path.
+    # The planner will divide longer occurrences at tracked stable points.
+    return "wan"
 
 
 def _split_priority(kind: str) -> float:

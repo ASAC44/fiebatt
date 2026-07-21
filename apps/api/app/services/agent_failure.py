@@ -29,22 +29,6 @@ def classify_agent_failure(error: Exception | str, *, stage: str) -> AgentFailur
     technical = str(error).strip()
     lowered = technical.lower()
 
-    if "selection" in lowered or "bounding box" in lowered:
-        return AgentFailure(
-            "selection_unavailable",
-            "selection",
-            "The selected subject is no longer available for this edit.",
-            "Pause on the subject and draw the box again.",
-            True,
-        )
-    if "target clip" in lowered or "active clip" in lowered or "source" in lowered:
-        return AgentFailure(
-            "active_clip_unavailable",
-            "selection",
-            "The active timeline clip could not be prepared.",
-            "Move the playhead onto a visible clip, then retry.",
-            True,
-        )
     if "30" in lowered and any(word in lowered for word in ("limit", "seconds", "duration")):
         return AgentFailure(
             "edit_too_long",
@@ -59,6 +43,22 @@ def classify_agent_failure(error: Exception | str, *, stage: str) -> AgentFailur
             "planning",
             "The requested edit window could not be prepared safely.",
             "Move the playhead nearer the action and try again.",
+            True,
+        )
+    if "selection" in lowered or "bounding box" in lowered:
+        return AgentFailure(
+            "selection_unavailable",
+            "selection",
+            "The selected subject is no longer available for this edit.",
+            "Pause on the subject and draw the box again.",
+            True,
+        )
+    if "target clip" in lowered or "active clip" in lowered or "source" in lowered:
+        return AgentFailure(
+            "active_clip_unavailable",
+            "selection",
+            "The active timeline clip could not be prepared.",
+            "Move the playhead onto a visible clip, then retry.",
             True,
         )
     if any(token in lowered for token in ("429", "rate limit", "quota", "exhausted")):

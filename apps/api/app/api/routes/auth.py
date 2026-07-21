@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from app.auth.jwt import (
     AuthedUser,
@@ -74,7 +75,13 @@ async def signup(body: AuthRequest, response: Response, db: AsyncSession = Depen
 
     user = User(email=email, password_hash=hash_password(body.password))
     db.add(user)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        # Another signup may have inserted the same normalized email after
+        # our read. Roll back this request and return the same stable conflict.
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="email already registered") from exc
 
     await _ensure_session_row(
         db,

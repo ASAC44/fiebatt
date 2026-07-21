@@ -34,6 +34,8 @@ from app.models.selection import SelectionArtifact
 from app.services.edit_source import source_for_selection, source_for_timeline_clip
 from app.models.session import Session as SessionModel
 from app.services.agent_tools import execute_tool
+from app.services.agent_failure import agent_failure_payload
+from app.services.generation_failure import classify_generation_failure
 from app.services import job_events
 
 log = logging.getLogger("fiebatt.agent")
@@ -1180,13 +1182,11 @@ async def _stream_selected_edit(
     if not selection_id:
         yield sse_event(
             "error",
-            {
-                "code": "selection_unavailable",
-                "stage": "selection",
-                "message": "The selected subject could not be prepared. Draw the selection again and retry.",
-                "retryable": True,
-                "request_id": request_id,
-            },
+            agent_failure_payload(
+                "selection not found",
+                stage="selection",
+                request_id=request_id,
+            ),
         )
         yield sse_event("done", {})
         return
@@ -1202,13 +1202,11 @@ async def _stream_selected_edit(
     except ValueError as exc:
         yield sse_event(
             "error",
-            {
-                "code": "active_clip_unavailable",
-                "stage": "selection",
-                "message": str(exc),
-                "retryable": True,
-                "request_id": request_id,
-            },
+            agent_failure_payload(
+                exc,
+                stage="selection",
+                request_id=request_id,
+            ),
         )
         yield sse_event("done", {})
         return
@@ -1243,13 +1241,11 @@ async def _stream_selected_edit(
         )
         yield sse_event(
             "error",
-            {
-                "code": "edit_planning_failed",
-                "stage": "planning",
-                "message": str(exc),
-                "retryable": True,
-                "request_id": request_id,
-            },
+            agent_failure_payload(
+                exc,
+                stage="planning",
+                request_id=request_id,
+            ),
         )
         await _persist_agent_message(
             conversation_id,
@@ -1308,13 +1304,11 @@ async def _stream_selected_edit(
         )
         yield sse_event(
             "error",
-            {
-                "code": "generation_queue_failed",
-                "stage": "queueing",
-                "message": str(exc),
-                "retryable": True,
-                "request_id": request_id,
-            },
+            agent_failure_payload(
+                exc,
+                stage="queueing",
+                request_id=request_id,
+            ),
         )
         await _persist_agent_message(
             conversation_id,
@@ -1389,7 +1383,14 @@ async def _agent_stream(
     api_key, base_url, model_name, provider_name = _agent_model_config(settings)
     if not api_key:
         log.error("[agent.chat] req=%s no model gateway API key configured", req_id)
-        yield sse_event("error", {"message": "No AI API key configured. Set MESH_API_KEY or DASHSCOPE_API_KEY in .env"})
+        yield sse_event(
+            "error",
+            agent_failure_payload(
+                "No AI API key configured",
+                stage="planning",
+                request_id=req_id,
+            ),
+        )
         yield sse_event("done", {})
         return
 
@@ -1494,7 +1495,14 @@ async def _agent_stream(
             text = _clean_agent_text(raw_text)
         except Exception as exc:
             log.exception("[agent.chat] req=%s %s API call failed on turn %d", req_id, provider_name, turn)
-            yield sse_event("error", {"message": f"{provider_name} API error: {exc}"})
+            yield sse_event(
+                "error",
+                agent_failure_payload(
+                    exc,
+                    stage="planning",
+                    request_id=req_id,
+                ),
+            )
             yield sse_event("done", {})
             return
 
@@ -1647,10 +1655,14 @@ async def _agent_stream(
                             if v.get("error"):
                                 raw_errors.append(str(v["error"]))
                         err_msg = raw_errors[0] if raw_errors else "no variants produced"
-                        yield sse_event("generation_failed", {
-                            "job_id": result.get("job_id", ""),
-                            "error": err_msg,
-                        })
+                        failure = classify_generation_failure(err_msg)
+                        yield sse_event(
+                            "generation_failed",
+                            {
+                                "job_id": result.get("job_id", ""),
+                                **failure.metadata(),
+                            },
+                        )
                     if ready:
                         yield sse_event("variant_ready", {
                             "job_id": result.get("job_id", ""),
@@ -1715,7 +1727,16 @@ async def _detached_agent_relay(
                 await queue.put(event)
         except Exception as exc:
             log.exception("detached agent turn failed")
-            await queue.put(sse_event("error", {"message": str(exc)}))
+            await queue.put(
+                sse_event(
+                    "error",
+                    agent_failure_payload(
+                        exc,
+                        stage="planning",
+                        request_id=uuid.uuid4().hex[:8],
+                    ),
+                )
+            )
             await queue.put(sse_event("done", {}))
         finally:
             await queue.put(None)

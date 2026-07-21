@@ -50,9 +50,13 @@ async function request<T>(
     } | null;
     const detail = payload?.detail;
     if (detail && typeof detail === "object") {
-      const message = typeof detail.message === "string"
-        ? detail.message
-        : `${res.status} ${res.statusText}`;
+      const userMessage = typeof detail.user_message === "string"
+        ? detail.user_message
+        : typeof detail.message === "string"
+          ? detail.message
+          : `${res.status} ${res.statusText}`;
+      const action = typeof detail.action === "string" ? detail.action : "";
+      const message = action ? `${userMessage} ${action}` : userMessage;
       throw new ApiError(
         res.status,
         message,

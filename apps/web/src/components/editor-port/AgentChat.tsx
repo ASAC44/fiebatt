@@ -7,7 +7,7 @@ import {
   MessageContent,
 } from "@/components/ui/message";
 import { useAgentStream } from "@/hooks/useAgentStream";
-import { accept, decideGenerationRetry } from "@/lib/api";
+import { accept, ApiError, decideGenerationRetry } from "@/lib/api";
 import { clipAtTime, sourceTimeFor, useEDL, totalDuration } from "@/stores/edl";
 import {
   useAgent,
@@ -108,10 +108,13 @@ export function AgentChat({ projectId }: AgentChatProps) {
           }),
         );
         setAppliedVariant(key);
-      } catch {
+      } catch (error) {
+        const message = error instanceof ApiError
+          ? error.message
+          : "This edit could not be applied. The timeline was not changed.";
         agentDispatch({
           type: "add_notice",
-          message: "This edit could not be applied. The timeline was not changed; refresh it and try again.",
+          message,
         });
       } finally {
         setApplyingVariant(null);

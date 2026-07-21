@@ -124,7 +124,7 @@ function generationActivity(event: JobStreamEvent, retryRendering = false): stri
     score_start: "checking visual quality and transitions…",
     continuity_validation_done: "transition check complete…",
     continuity_validation_unavailable: "finishing quality review…",
-    seam_match_done: "matching source and edit frames…",
+    seam_match_done: "transition frame match complete…",
     seam_match_unavailable: "could not find safe cut frames…",
     gen_retry: "improving first render…",
     attempt_failed: "render attempt could not be used; checking recovery…",
@@ -133,6 +133,42 @@ function generationActivity(event: JobStreamEvent, retryRendering = false): stri
   };
   if (event.stage === "gen_poll") return event.msg.replace(/\.\.\./g, "…");
   return labels[event.stage] ?? event.msg.replace(/\.\.\./g, "…");
+}
+
+function generationProgressPhase(
+  stage: string,
+  retryRendering: boolean,
+  retryWaiting: boolean,
+): number {
+  if (stage === "done" || stage === "failed") return 7;
+  if (retryRendering) {
+    if (
+      stage === "score_start" ||
+      stage === "score_done" ||
+      stage === "score_skipped" ||
+      stage.startsWith("continuity_") ||
+      stage.startsWith("seam_match_") ||
+      stage === "candidate_review_done"
+    ) return 6;
+    return 5;
+  }
+  if (retryWaiting || stage.startsWith("retry_")) return 4;
+  if (
+    stage === "score_start" ||
+    stage === "score_done" ||
+    stage === "score_skipped" ||
+    stage.startsWith("continuity_") ||
+    stage.startsWith("seam_match_") ||
+    stage === "candidate_review_done"
+  ) return 3;
+  if (stage.startsWith("gen_") || stage.startsWith("chunk_")) return 2;
+  if (
+    stage === "extract_clip" ||
+    stage === "extract_frame" ||
+    stage === "plan_start" ||
+    stage === "plan_done"
+  ) return 1;
+  return 0;
 }
 
 // ─── hook ─────────────────────────────────────────────────────────────
@@ -170,6 +206,7 @@ export function useAgentStream(projectId?: string | null) {
     let pollFailures = 0;
     let retryRendering = false;
     let retryWaiting = false;
+    let latestProgressPhase = 0;
     const eventStream = streamJobEvents(jobId, {
       onEvent: (event) => {
         if (event.stage === "retry_pending") retryWaiting = true;
@@ -180,6 +217,13 @@ export function useAgentStream(projectId?: string | null) {
           retryWaiting = false;
           retryRendering = true;
         }
+        const phase = generationProgressPhase(
+          event.stage,
+          retryRendering,
+          retryWaiting,
+        );
+        if (phase < latestProgressPhase) return;
+        latestProgressPhase = phase;
         detailedProgressAt = Date.now();
         detailedStage = event.stage;
         const text = generationActivity(event, retryRendering);
@@ -249,14 +293,22 @@ export function useAgentStream(projectId?: string | null) {
           const nextProgressSignature = JSON.stringify(job.progress_state);
           if (nextProgressSignature !== persistedProgressSignature) {
             persistedProgressSignature = nextProgressSignature;
-            dispatch({
-              type: "update_generation_progress",
-              jobId,
-              stage: job.progress_state.stage,
-              text: job.progress_state.message,
-              complete: job.progress_state.status !== "running",
-              failed: job.progress_state.status === "failed",
-            });
+            const phase = generationProgressPhase(
+              job.progress_state.stage,
+              retryRendering,
+              retryWaiting,
+            );
+            if (phase >= latestProgressPhase) {
+              latestProgressPhase = phase;
+              dispatch({
+                type: "update_generation_progress",
+                jobId,
+                stage: job.progress_state.stage,
+                text: job.progress_state.message,
+                complete: job.progress_state.status !== "running",
+                failed: job.progress_state.status === "failed",
+              });
+            }
           }
         }
         const nextPreviewSignature = ready
@@ -970,11 +1022,12 @@ function handleSSEEvent(
     }
 
     case "generation_failed": {
-      const rawErr = (data.error as string | undefined) ?? "no variants produced";
-      console.warn(`[agent sse] generation_failed job=${data.job_id}: ${rawErr}`);
-      const niceErr = /rate.?limit|quota|429|RESOURCE_EXHAUSTED/i.test(rawErr)
-        ? "The video model is temporarily busy. Your source video and timeline are unchanged."
-        : "This render could not be completed. Your source video and timeline are unchanged.";
+      const niceErr =
+        (data.user_message as string | undefined) ??
+        "This render could not be completed. Your source video and timeline are unchanged.";
+      console.warn(
+        `[agent sse] generation_failed job=${data.job_id} code=${String(data.code ?? "unknown")}`,
+      );
       dispatch({
         type: "update_generation_progress",
         jobId: (data.job_id as string | undefined) ?? "generation",
@@ -991,13 +1044,19 @@ function handleSSEEvent(
       // Stream finished — end_stream is called in the finally block
       break;
 
-    case "error":
+    case "error": {
       console.error("[agent sse] server error event", data);
+      const message =
+        (data.user_message as string | undefined) ??
+        (data.message as string | undefined) ??
+        "The edit could not be prepared, and no render was started.";
+      const action = data.action as string | undefined;
       dispatch({
         type: "add_notice",
-        message: "The edit could not be prepared. Nothing was changed; check the selection and try again.",
+        message: action ? `${message} ${action}` : message,
       });
       break;
+    }
 
     default: {
       console.warn(`[agent sse] UNHANDLED event="${event}"`, data);

@@ -476,7 +476,8 @@ async def test_agent_chat_no_api_key(client: AsyncClient, monkeypatch):
     assert "done" in event_types
 
     error_event = next(e for e in events if e["event"] == "error")
-    assert "No AI API key" in error_event["data"]["message"]
+    assert error_event["data"]["code"] == "planner_not_configured"
+    assert error_event["data"]["action"]
 
 
 @pytest.mark.asyncio
@@ -785,7 +786,9 @@ async def test_agent_chat_gateway_error(client: AsyncClient, live_agent_settings
     assert "done" in event_types
 
     error_event = next(e for e in events if e["event"] == "error")
-    assert "API rate limit exceeded" in error_event["data"]["message"]
+    assert error_event["data"]["code"] == "planner_busy"
+    assert error_event["data"]["retryable"] is True
+    assert "API rate limit exceeded" not in error_event["data"]["message"]
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,29 @@ from app.ai.services import sam
 
 
 @pytest.mark.asyncio
+async def test_disabled_sam_skips_segmentation_and_tracking(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        sam,
+        "get_settings",
+        lambda: SimpleNamespace(
+            sam_enabled=False,
+            vision_worker_url="https://tracking.example.test",
+            sam_segmentation_url="https://segment.hf.space",
+        ),
+    )
+    frame = tmp_path / "frame.jpg"
+    frame.write_bytes(b"unused")
+
+    assert await sam.is_available() is False
+    assert await sam.video_tracking_available() is False
+    with pytest.raises(sam.UnusableMaskError, match="SAM is disabled"):
+        await sam.bbox_to_mask_result(
+            str(frame),
+            {"x": 0.1, "y": 0.1, "w": 0.5, "h": 0.5},
+        )
+
+
+@pytest.mark.asyncio
 async def test_track_frames_sends_bounded_tracking_contract(tmp_path, monkeypatch):
     frames = []
     for index in range(3):

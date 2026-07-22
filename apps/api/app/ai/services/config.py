@@ -26,6 +26,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("VISION_WORKER_URL", "GPU_WORKER_URL"),
     )
     sam_segmentation_url: str = Field("", alias="SAM_SEGMENTATION_URL")
+    sam_enabled: bool = Field(True, alias="SAM_ENABLED")
     video_gen_provider: str = Field("auto", alias="VIDEO_GEN_PROVIDER")
     veo_model: str = Field("veo-3.1-fast-generate-preview", alias="VEO_MODEL")
     video_generation_timeout: int = Field(

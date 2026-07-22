@@ -10,6 +10,11 @@ from app.services.generation_failure import classify_generation_failure
         ("submit failed (HTTP 429): quota exceeded", "provider_busy", True),
         ("HTTP 503 service unavailable", "provider_unavailable", True),
         ("generated clip is too short (3.0s for 4.0s edit)", "invalid_provider_duration", True),
+        (
+            "Error validating image resolution: resolution must be at least 240x240",
+            "invalid_reference_image",
+            True,
+        ),
         ("ffprobe could not decode output", "invalid_provider_media", True),
         ("source video unavailable", "source_unavailable", False),
         ("unexpected provider response", "generation_failed", True),

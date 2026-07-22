@@ -162,6 +162,30 @@ def _image_to_base64(path: str) -> str:
     if mime is None:
         raise ValueError(f"reference image must be png/jpg/webp, got: {path}")
     data = Path(path).read_bytes()
+    # DashScope rejects reference images when either side is below 240px.
+    # Tight bbox fallbacks are often smaller, so normalize here at the final
+    # provider boundary instead of relying on every upstream crop path.
+    import cv2  # type: ignore[import-untyped]
+    import numpy as np  # type: ignore[import-untyped]
+
+    image = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+    if image is None:
+        raise ValueError(f"reference image could not be decoded: {path}")
+    height, width = image.shape[:2]
+    shortest = min(width, height)
+    if shortest < 240:
+        scale = 240 / max(1, shortest)
+        image = cv2.resize(
+            image,
+            (max(240, round(width * scale)), max(240, round(height * scale))),
+            interpolation=cv2.INTER_LANCZOS4,
+        )
+        extension = ".jpg" if mime == "image/jpeg" else f".{mime.split('/', 1)[1]}"
+        encode_args = [cv2.IMWRITE_JPEG_QUALITY, 95] if extension == ".jpg" else []
+        encoded, buffer = cv2.imencode(extension, image, encode_args)
+        if not encoded:
+            raise ValueError(f"normalized reference image could not be encoded: {path}")
+        data = buffer.tobytes()
     b64 = base64.b64encode(data).decode("ascii")
     return f"data:{mime};base64,{b64}"
 

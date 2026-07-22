@@ -52,6 +52,13 @@ def classify_generation_failure(error: Exception | str) -> GenerationFailure:
             technical,
             True,
         )
+    if "image resolution" in lowered or "resolution must be at least" in lowered:
+        return GenerationFailure(
+            "invalid_reference_image",
+            "The selected region could not be prepared for the video model. Your source video and timeline are unchanged.",
+            technical,
+            True,
+        )
     if any(token in lowered for token in ("decode", "ffmpeg", "ffprobe", "empty video")):
         return GenerationFailure(
             "invalid_provider_media",

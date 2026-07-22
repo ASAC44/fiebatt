@@ -250,10 +250,15 @@ class TestRealAdapters:
 
 def test_wan_video_edit_payload_targets_isolated_reference_and_source(tmp_path):
     """Wan edits must receive the source video and identify the isolated target."""
+    import base64
+
+    import cv2
+    import numpy as np
+
     from app.ai.services.wan import _build_video_edit_payload
 
     frame = tmp_path / "frame.png"
-    frame.write_bytes(b"not-a-real-png-but-valid-fixture-for-base64-shape")
+    assert cv2.imwrite(str(frame), np.zeros((88, 136, 3), dtype=np.uint8))
     payload = _build_video_edit_payload(
         "Make only the man jump up and down while walking.",
         "https://cdn.example.test/source.mp4",
@@ -266,6 +271,13 @@ def test_wan_video_edit_payload_targets_isolated_reference_and_source(tmp_path):
         "url": "https://cdn.example.test/source.mp4",
     }
     assert payload["input"]["media"][1]["type"] == "reference_image"
+    encoded = payload["input"]["media"][1]["url"].split(",", 1)[1]
+    normalized = cv2.imdecode(
+        np.frombuffer(base64.b64decode(encoded), dtype=np.uint8),
+        cv2.IMREAD_COLOR,
+    )
+    assert normalized is not None
+    assert min(normalized.shape[:2]) >= 240
     assert "exact isolated target subject" in payload["input"]["prompt"].lower()
     assert "every other person and object" in payload["input"]["prompt"].lower()
     assert "ghosting" in payload["input"]["negative_prompt"]

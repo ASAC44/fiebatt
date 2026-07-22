@@ -26,6 +26,11 @@ from app.ai.services.config import get_settings
 log = logging.getLogger(__name__)
 
 
+def is_enabled() -> bool:
+    """Central kill switch for segmentation and video tracking."""
+    return bool(getattr(get_settings(), "sam_enabled", True))
+
+
 def _segmentation_worker_url() -> str:
     settings = get_settings()
     return settings.sam_segmentation_url.strip() or settings.vision_worker_url
@@ -220,6 +225,8 @@ async def bbox_to_mask_result(
     bbox: dict[str, float],
 ) -> MaskResult:
     """Return reusable mask metadata without breaking the legacy path contract."""
+    if not is_enabled():
+        raise UnusableMaskError("SAM is disabled; using bbox selection")
     worker_url = _segmentation_worker_url()
 
     frame_bytes = Path(frame_path).read_bytes()
@@ -263,6 +270,8 @@ async def bbox_to_mask_result(
 
 async def is_available() -> bool:
     """Check if the vision worker is reachable."""
+    if not is_enabled():
+        return False
     try:
         worker_url = _segmentation_worker_url()
 
@@ -287,6 +296,8 @@ async def video_tracking_available() -> bool:
     Treating it as a video worker adds a slow, guaranteed-failing request to
     every edit.
     """
+    if not is_enabled():
+        return False
     try:
         worker_url = get_settings().vision_worker_url.strip()
         if not worker_url or _is_huggingface_space(worker_url):
@@ -314,6 +325,8 @@ async def track_frames(
     include_masks: bool = False,
 ) -> TrackResult:
     """Call the bounded SAM2 video tracker with cached local frames."""
+    if not is_enabled():
+        raise UnusableMaskError("SAM is disabled; video tracking unavailable")
     settings = get_settings()
     payload: dict[str, Any] = {
         "frames_b64": [base64.b64encode(Path(path).read_bytes()).decode() for path in frame_paths],

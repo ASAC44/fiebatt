@@ -75,8 +75,11 @@ def _mean_delta(left: np.ndarray, right: np.ndarray, mask: np.ndarray) -> float:
 
 
 def _motion_vector(left: np.ndarray, right: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    if left.shape != right.shape:
-        right = cv2.resize(right, (left.shape[1], left.shape[0]))
+    height, width = mask.shape
+    if left.shape[:2] != (height, width):
+        left = cv2.resize(left, (width, height))
+    if right.shape[:2] != (height, width):
+        right = cv2.resize(right, (width, height))
     flow = cv2.calcOpticalFlowFarneback(
         cv2.cvtColor(left, cv2.COLOR_BGR2GRAY),
         cv2.cvtColor(right, cv2.COLOR_BGR2GRAY),

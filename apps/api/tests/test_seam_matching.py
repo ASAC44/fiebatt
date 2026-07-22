@@ -1,3 +1,4 @@
+import cv2
 import numpy as np
 import pytest
 
@@ -43,3 +44,22 @@ def test_exit_prefers_earliest_equally_safe_frame():
 def test_unrelated_frames_are_rejected_without_a_fade():
     with pytest.raises(ValueError, match="failed seam validation"):
         select_best_seam([_sample(0.5, 0, 255)], bbox=BBOX)
+
+
+def test_motion_matching_normalizes_provider_resolution():
+    source = _frame(40)
+    generated = cv2.resize(source, (96, 64))
+    choice = select_best_seam(
+        [
+            SeamFrames(
+                timestamp=0.5,
+                left_before=source,
+                left_at=source,
+                right_at=generated,
+                right_after=generated,
+            )
+        ],
+        bbox=BBOX,
+    )
+
+    assert choice.safe

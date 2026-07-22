@@ -327,6 +327,19 @@ export function GenerationReveal({
               <div className="reveal__scores mono">
                 <ScoreBadge label="prompt match" value={activeVariant.prompt_adherence} />
                 <ScoreBadge label="visual quality" value={activeVariant.visual_coherence} />
+                <ScoreBadge label="preservation" value={activeVariant.preservation_score ?? null} />
+                <ScoreBadge
+                  label="entry transition"
+                  value={activeVariant.transition_review?.entry_applicable === false
+                    ? null
+                    : activeVariant.transition_review?.entry_continuity ?? null}
+                />
+                <ScoreBadge
+                  label="exit transition"
+                  value={activeVariant.transition_review?.exit_applicable === false
+                    ? null
+                    : activeVariant.transition_review?.exit_continuity ?? null}
+                />
               </div>
             </div>
           </div>
@@ -489,6 +502,7 @@ function GenerationOutcome({ result }: { result: JobResp }) {
   const providers = result.provider_attempts?.length
     ? result.provider_attempts.join(" → ")
     : result.provider ?? "unknown";
+  const transition = result.transition_review;
 
   return (
     <section
@@ -498,6 +512,15 @@ function GenerationOutcome({ result }: { result: JobResp }) {
       <div className="reveal__outcome-pills mono">
         <span>quality {quality.replaceAll("_", " ")}</span>
         <span>seams {validation ? (validation.passed ? "passed" : "failed") : "unavailable"}</span>
+        {result.preservation_score != null ? (
+          <span>preservation {result.preservation_score}/10</span>
+        ) : null}
+        {transition ? (
+          <span>entry {transition.entry_applicable === false ? "n/a" : `${transition.entry_continuity}/10`}</span>
+        ) : null}
+        {transition ? (
+          <span>exit {transition.exit_applicable === false ? "n/a" : `${transition.exit_continuity}/10`}</span>
+        ) : null}
         {seams?.entry ? <span>entry match {seams.entry.score.toFixed(3)}</span> : null}
         {seams?.exit ? <span>exit match {seams.exit.score.toFixed(3)}</span> : null}
         <span>{result.generation_attempts ?? 1} attempt(s)</span>
@@ -842,14 +865,26 @@ function variantLetter(index: number) {
   return String.fromCharCode(65 + index);
 }
 
-function scoreSummary(variant: Pick<Variant, "visual_coherence" | "prompt_adherence">) {
+function scoreSummary(variant: Pick<
+  Variant,
+  | "visual_coherence"
+  | "prompt_adherence"
+  | "preservation_score"
+  | "transition_review"
+>) {
   const prompt = variant.prompt_adherence != null
     ? `prompt match ${variant.prompt_adherence}/10`
     : null;
   const visual = variant.visual_coherence != null
     ? `visual quality ${variant.visual_coherence}/10`
     : null;
-  return [prompt, visual].filter(Boolean).join(" · ") || "no scores";
+  const preservation = variant.preservation_score != null
+    ? `preservation ${variant.preservation_score}/10`
+    : null;
+  const transitions = variant.transition_review
+    ? `entry ${variant.transition_review.entry_applicable === false ? "n/a" : `${variant.transition_review.entry_continuity}/10`} · exit ${variant.transition_review.exit_applicable === false ? "n/a" : `${variant.transition_review.exit_continuity}/10`}`
+    : null;
+  return [prompt, visual, preservation, transitions].filter(Boolean).join(" · ") || "no scores";
 }
 
 function describeRegion(bbox: BBox | null) {
@@ -867,17 +902,44 @@ function describeRegion(bbox: BBox | null) {
   return `${anchor} · ${wPct}×${hPct}%`;
 }
 
-/** find the variant with the highest combined score */
+/** Match the backend's correctness-first attempt ordering. */
 function getBestVariantIndex(variants: Variant[]): number {
   let bestIdx = 0;
-  let bestScore = -1;
+  let bestRank: number[] | null = null;
   for (let i = 0; i < variants.length; i++) {
     const v = variants[i];
-    const score = (v.visual_coherence ?? 0) + (v.prompt_adherence ?? 0);
-    if (score > bestScore) {
-      bestScore = score;
+    const transition = v.transition_review;
+    const visual = v.visual_coherence ?? 0;
+    const prompt = v.prompt_adherence ?? 0;
+    const preservation = v.preservation_score ?? visual;
+    const entry = transition?.entry_applicable === false
+      ? 10
+      : transition?.entry_continuity ?? 0;
+    const exit = transition?.exit_applicable === false
+      ? 10
+      : transition?.exit_continuity ?? 0;
+    const rank = [
+      Number(prompt >= 6 && visual >= 5 && preservation >= 6),
+      Number(v.continuity_validation?.passed === true),
+      Number(transition != null && entry >= 7 && exit >= 7),
+      Math.min(visual, prompt),
+      Math.min(entry, exit),
+      prompt,
+      Math.min(visual, preservation),
+    ];
+    if (bestRank == null || outranks(rank, bestRank)) {
+      bestRank = rank;
       bestIdx = i;
     }
   }
-  return bestScore > 0 ? bestIdx : -1;
+  return bestRank?.some((value) => value > 0) ? bestIdx : -1;
+}
+
+function outranks(candidate: number[], current: number[]): boolean {
+  for (let index = 0; index < candidate.length; index++) {
+    if (candidate[index] !== current[index]) {
+      return candidate[index] > current[index];
+    }
+  }
+  return false;
 }

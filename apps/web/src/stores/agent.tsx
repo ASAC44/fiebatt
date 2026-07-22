@@ -52,6 +52,14 @@ export interface VariantPreview {
   description: string | null;
   visual_coherence: number | null;
   prompt_adherence: number | null;
+  preservation_score?: number | null;
+  transition_review?: {
+    entry_continuity: number;
+    exit_continuity: number;
+    entry_applicable?: boolean;
+    exit_applicable?: boolean;
+    evidence: string[];
+  } | null;
   attempt_label?: string | null;
   quality_state?: string | null;
   quality_evidence?: string[];

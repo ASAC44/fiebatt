@@ -124,6 +124,8 @@ export type Variant = {
   description: string | null;
   visual_coherence: number | null;
   prompt_adherence: number | null;
+  preservation_score?: number | null;
+  transition_review?: TransitionReview | null;
   error: string | null;
   attempt_label?: string | null;
   quality_state?: string | null;
@@ -161,6 +163,8 @@ export type JobResp = {
   } | null;
   generation_quality_state?: string | null;
   generation_quality_evidence?: string[];
+  preservation_score?: number | null;
+  transition_review?: TransitionReview | null;
   generation_attempts?: number | null;
   generated_seconds?: number | null;
   provider_attempts?: string[];
@@ -184,6 +188,14 @@ export type JobResp = {
     user_message: string;
     retryable: boolean;
   } | null;
+};
+
+export type TransitionReview = {
+  entry_continuity: number;
+  exit_continuity: number;
+  entry_applicable?: boolean;
+  exit_applicable?: boolean;
+  evidence: string[];
 };
 
 export type GenerationExecutionWindow = {

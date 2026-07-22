@@ -339,7 +339,13 @@ test("generation preview returns after leaving and reopening editor", async ({ p
           url: "/generated-navigation.mp4",
           description: "finished while away",
           visual_coherence: 8,
-          prompt_adherence: 8,
+          prompt_adherence: 10,
+          preservation_score: 9,
+          transition_review: {
+            entry_continuity: 4,
+            exit_continuity: 9,
+            evidence: ["entry pose jumps"],
+          },
           quality_state: "pass",
           quality_evidence: [],
           continuity_validation: {
@@ -386,6 +392,9 @@ test("generation preview returns after leaving and reopening editor", async ({ p
   await page.goto(`/editor?projectId=${project.project_id}`);
 
   await expect(page.getByText("finished while away")).toBeVisible();
+  await expect(page.getByText(
+    "Prompt match 10/10 · Visual quality 8/10 · Preservation 9/10 · Entry 4/10 · Exit 9/10",
+  )).toBeVisible();
   await expect(page.getByRole("button", { name: "apply" })).toBeVisible();
 });
 

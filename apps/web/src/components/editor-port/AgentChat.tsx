@@ -910,14 +910,36 @@ function VariantPreviewCard({
 }
 
 function variantScoreText(
-  variant: Pick<VariantPreview, "prompt_adherence" | "visual_coherence">,
+  variant: Pick<
+    VariantPreview,
+    | "prompt_adherence"
+    | "visual_coherence"
+    | "preservation_score"
+    | "transition_review"
+  >,
 ) {
   const prompt = variant.prompt_adherence;
   const visual = variant.visual_coherence;
-  if (prompt == null && visual == null) return "";
+  const preservation = variant.preservation_score;
+  const entry = variant.transition_review?.entry_applicable === false
+    ? "n/a"
+    : variant.transition_review?.entry_continuity;
+  const exit = variant.transition_review?.exit_applicable === false
+    ? "n/a"
+    : variant.transition_review?.exit_continuity;
+  if (
+    prompt == null &&
+    visual == null &&
+    preservation == null &&
+    entry == null &&
+    exit == null
+  ) return "";
   return [
     prompt != null ? `Prompt match ${prompt}/10` : null,
     visual != null ? `Visual quality ${visual}/10` : null,
+    preservation != null ? `Preservation ${preservation}/10` : null,
+    entry != null ? `Entry ${entry}${entry === "n/a" ? "" : "/10"}` : null,
+    exit != null ? `Exit ${exit}${exit === "n/a" ? "" : "/10"}` : null,
   ].filter(Boolean).join(" · ");
 }
 

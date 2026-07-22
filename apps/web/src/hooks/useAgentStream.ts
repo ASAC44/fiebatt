@@ -110,6 +110,7 @@ function generationActivity(event: JobStreamEvent, retryRendering = false): stri
       event.stage === "score_start" ||
       event.stage.startsWith("continuity_") ||
       event.stage.startsWith("seam_match_") ||
+      event.stage.startsWith("transition_review_") ||
       event.stage === "candidate_review_done"
     ) {
       return "reviewing the corrected pass…";
@@ -132,6 +133,9 @@ function generationActivity(event: JobStreamEvent, retryRendering = false): stri
     continuity_validation_unavailable: "finishing quality review…",
     seam_match_done: "transition frame match complete…",
     seam_match_unavailable: "could not find safe cut frames…",
+    transition_review_started: "reviewing the assembled entry and exit…",
+    transition_review_done: "assembled transition review complete…",
+    transition_review_unavailable: "assembled transition review unavailable…",
     gen_retry: "improving first render…",
     attempt_failed: "render attempt could not be used; checking recovery…",
     gen_retry_rejected: "keeping stronger render…",
@@ -154,6 +158,7 @@ function generationProgressPhase(
       stage === "score_skipped" ||
       stage.startsWith("continuity_") ||
       stage.startsWith("seam_match_") ||
+      stage.startsWith("transition_review_") ||
       stage === "candidate_review_done"
     ) return 6;
     return 5;
@@ -165,6 +170,7 @@ function generationProgressPhase(
     stage === "score_skipped" ||
     stage.startsWith("continuity_") ||
     stage.startsWith("seam_match_") ||
+    stage.startsWith("transition_review_") ||
     stage === "candidate_review_done"
   ) return 3;
   if (stage.startsWith("gen_") || stage.startsWith("chunk_")) return 2;
@@ -326,6 +332,8 @@ export function useAgentStream(projectId?: string | null) {
             quality: variant.quality_state,
             evidence: variant.quality_evidence,
             seams: variant.selected_seams,
+            preservation: variant.preservation_score,
+            transition: variant.transition_review,
           }))
           .join("|") +
           `|recommended:${job.recommended_variant_id ?? ""}` +

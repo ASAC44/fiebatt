@@ -161,9 +161,19 @@ def _clean_mask_for_bbox(
     area_ratio = area / bbox_area
     if confidence is not None and confidence < 0.35:
         raise UnusableMaskError(f"SAM confidence too low ({confidence:.3f})")
-    if bbox_coverage < 0.02:
+    # A loose box is safer than pretending a tiny speck is the selected
+    # subject. Production SAM failures have returned dozens of fragments with
+    # the largest covering only ~3% of the prompt box.
+    if bbox_coverage < 0.08:
         raise UnusableMaskError(
             f"SAM mask covers too little of selection ({bbox_coverage:.3f})"
+        )
+    center_x = min(width - 1, max(0, (left + right) // 2))
+    center_y = min(height - 1, max(0, (top + bottom) // 2))
+    contains_box_center = bool(labels[center_y, center_x] == selected_label)
+    if not contains_box_center and bbox_coverage < 0.15:
+        raise UnusableMaskError(
+            "SAM mask is both off-center and too small for the selected box"
         )
     if inside_fraction < 0.08:
         raise UnusableMaskError(
@@ -178,15 +188,13 @@ def _clean_mask_for_bbox(
     if not cv2.imwrite(mask_path, cleaned):
         raise UnusableMaskError("cleaned SAM mask could not be written")
 
-    center_x = min(width - 1, max(0, (left + right) // 2))
-    center_y = min(height - 1, max(0, (top + bottom) // 2))
     metrics: dict[str, float | int | bool] = {
         "components_returned": max(0, component_count - 1),
         "components_removed": max(0, component_count - 2),
         "bbox_coverage": round(bbox_coverage, 4),
         "inside_fraction": round(inside_fraction, 4),
         "mask_to_bbox_area": round(area_ratio, 4),
-        "contains_box_center": bool(labels[center_y, center_x] == selected_label),
+        "contains_box_center": contains_box_center,
     }
     log.info("SAM mask accepted after geometry gate: %s", metrics)
     return metrics

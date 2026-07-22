@@ -86,3 +86,27 @@ def test_mask_geometry_gate_rejects_unrelated_component(tmp_path):
             {"x": 0.1, "y": 0.1, "w": 0.3, "h": 0.3},
             confidence=0.9,
         )
+
+
+def test_mask_geometry_gate_rejects_live_fragment_pattern(tmp_path):
+    frame_path = tmp_path / "frame.png"
+    mask_path = tmp_path / "mask.png"
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    mask = np.zeros((100, 100), dtype=np.uint8)
+    # Largest component covers roughly 3% of the 40x40 prompt box and misses
+    # its center. Eighteen extra specks reproduce the production failure.
+    mask[22:29, 22:29] = 255
+    for index in range(18):
+        x = 60 + (index % 6) * 5
+        y = 5 + (index // 6) * 5
+        mask[y:y + 2, x:x + 2] = 255
+    assert cv2.imwrite(str(frame_path), frame)
+    assert cv2.imwrite(str(mask_path), mask)
+
+    with pytest.raises(sam.UnusableMaskError, match="covers too little"):
+        sam._clean_mask_for_bbox(
+            str(frame_path),
+            str(mask_path),
+            {"x": 0.2, "y": 0.2, "w": 0.4, "h": 0.4},
+            confidence=0.9,
+        )

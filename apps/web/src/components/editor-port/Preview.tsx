@@ -93,12 +93,16 @@ export function Preview() {
     getMask(projectId, frameTs, bbox, activeClip?.id, controller.signal)
       .then((resp) => {
         if (cancelled) return;
+        const preciseMask = resp.score != null;
         dispatch({
           type: "set_mask",
           mask: resp.contour.length
             ? {
-                contour: resp.contour,
-                contours: resp.contours,
+                // A null score means backend deliberately used bbox fallback.
+                // Keep its selection artifact for planning, but do not draw a
+                // fake solid SAM outline over the honest dashed user box.
+                contour: preciseMask ? resp.contour : [],
+                contours: preciseMask ? resp.contours : [],
                 selectionId: resp.selection_id,
                 seedTs: frameTs,
                 maskUrl: resp.mask_url,

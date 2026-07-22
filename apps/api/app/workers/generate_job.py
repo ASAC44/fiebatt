@@ -219,12 +219,13 @@ async def _await_retry_permission(
     job_id: str,
     evidence: tuple[str, ...],
     *,
+    correction: str | None = None,
     grace_seconds: float = RETRY_GRACE_SECONDS,
     poll_seconds: float = 0.5,
 ) -> bool:
     """Persist the grace window and return only when a retry may be dispatched."""
     retry_at = time.time() + grace_seconds
-    correction = corrective_prompt(evidence)
+    correction = correction or corrective_prompt(evidence)
     retry_state = {
         "status": "waiting",
         "retry_at": retry_at,
@@ -471,6 +472,150 @@ async def _sample_video_frames(video_path: Path, count: int = 7) -> list[str]:
 async def _sample_variant_frames(variant_url: str, count: int = 7) -> list[str]:
     variant_path = await storage.path_from_url(variant_url)
     return await _sample_video_frames(variant_path, count=count)
+
+
+async def _extract_frame_sequence(
+    video_path: Path,
+    timestamps: list[float],
+) -> list[str]:
+    paths: list[str] = []
+    for timestamp in timestamps:
+        frame_path, _ = storage.new_path("keyframes", "jpg")
+        await ffmpeg.extract_frame(
+            video_path,
+            max(0.0, timestamp),
+            frame_path,
+        )
+        paths.append(str(frame_path))
+    return paths
+
+
+async def _assembled_transition_frames(
+    *,
+    source_path: Path,
+    generated_path: Path,
+    seams: dict,
+    frame_count: int = 3,
+) -> dict[str, list[str]]:
+    """Extract consecutive frames exactly as the final hard cuts will play."""
+    source_meta, generated_meta = await asyncio.gather(
+        ffmpeg.probe(source_path),
+        ffmpeg.probe(generated_path),
+    )
+    fps = min(
+        value
+        for value in (
+            float(source_meta.get("fps") or 0.0),
+            float(generated_meta.get("fps") or 0.0),
+        )
+        if value > 0.0
+    )
+    step = 1.0 / fps
+    entry = seams.get("entry")
+    exit_boundary = seams.get("exit")
+
+    def before(center: float) -> list[float]:
+        return [center - step * offset for offset in range(frame_count, 0, -1)]
+
+    def after(center: float) -> list[float]:
+        return [center + step * offset for offset in range(frame_count)]
+
+    frames: dict[str, list[str]] = {
+        "entry_before_paths": [],
+        "entry_after_paths": [],
+        "exit_before_paths": [],
+        "exit_after_paths": [],
+    }
+    tasks: list[tuple[str, asyncio.Task[list[str]]]] = []
+    if isinstance(entry, dict):
+        entry_ts = float(entry["media_timestamp"])
+        tasks.extend(
+            (
+                (
+                    "entry_before_paths",
+                    asyncio.create_task(
+                        _extract_frame_sequence(source_path, before(entry_ts))
+                    ),
+                ),
+                (
+                    "entry_after_paths",
+                    asyncio.create_task(
+                        _extract_frame_sequence(generated_path, after(entry_ts))
+                    ),
+                ),
+            )
+        )
+    if isinstance(exit_boundary, dict):
+        exit_ts = float(exit_boundary["media_timestamp"])
+        tasks.extend(
+            (
+                (
+                    "exit_before_paths",
+                    asyncio.create_task(
+                        _extract_frame_sequence(generated_path, before(exit_ts))
+                    ),
+                ),
+                (
+                    "exit_after_paths",
+                    asyncio.create_task(
+                        _extract_frame_sequence(source_path, after(exit_ts))
+                    ),
+                ),
+            )
+        )
+    if tasks:
+        results = await asyncio.gather(*(task for _, task in tasks))
+        for (key, _), paths in zip(tasks, results, strict=True):
+            frames[key] = paths
+    return frames
+
+
+async def _score_assembled_transitions_safe(
+    frames: dict[str, list[str]],
+) -> dict | None:
+    applicable = {
+        "entry": bool(
+            frames.get("entry_before_paths") and frames.get("entry_after_paths")
+        ),
+        "exit": bool(
+            frames.get("exit_before_paths") and frames.get("exit_after_paths")
+        ),
+    }
+    if not any(applicable.values()):
+        return {
+            "entry_continuity": 10,
+            "exit_continuity": 10,
+            "entry_applicable": False,
+            "exit_applicable": False,
+            "evidence": [],
+        }
+    try:
+        review = await ai.gemini.score_seams(**frames)
+    except Exception:
+        log.exception("assembled transition review failed")
+        return None
+    if not isinstance(review, dict):
+        return None
+    output = dict(review)
+    for boundary in ("entry", "exit"):
+        key = f"{boundary}_continuity"
+        output[f"{boundary}_applicable"] = applicable[boundary]
+        if not applicable[boundary]:
+            output[key] = 10
+            continue
+        try:
+            score = int(output[key])
+        except (TypeError, ValueError):
+            return None
+        if not 1 <= score <= 10:
+            return None
+        output[key] = score
+    output["evidence"] = [
+        str(item)[:240]
+        for item in output.get("evidence", [])[:4]
+        if str(item).strip()
+    ]
+    return output
 
 
 async def _run(job_id: str) -> None:
@@ -1151,7 +1296,6 @@ async def _run(job_id: str) -> None:
         )
 
     validation_by_url: dict[str, tuple[ContinuityReport, dict | None]] = {}
-
     async def validate_continuity(variant: Variant) -> ContinuityReport | None:
         if not variant.url:
             return None
@@ -1214,13 +1358,69 @@ async def _run(job_id: str) -> None:
         )
         return report
 
+    async def review_assembled_transitions(variant: Variant) -> dict | None:
+        if not generation_window.adaptive or not variant.url:
+            return None
+        validation = validation_by_url.get(variant.url)
+        seams = validation[1] if validation is not None else None
+        if not isinstance(seams, dict):
+            await _emit(
+                job_id,
+                "transition_review_unavailable",
+                "final cut frames were unavailable for transition review",
+            )
+            return None
+        await _emit(
+            job_id,
+            "transition_review_started",
+            "reviewing the actual assembled entry and exit frames",
+        )
+        try:
+            generated_path = await storage.path_from_url(variant.url)
+            frames = await _assembled_transition_frames(
+                source_path=clip_path,
+                generated_path=generated_path,
+                seams=seams,
+            )
+            review = await _score_assembled_transitions_safe(frames)
+        except Exception as exc:
+            log.exception("could not prepare assembled transition review")
+            await _emit(
+                job_id,
+                "transition_review_unavailable",
+                f"couldn't review final cut frames: {exc}",
+            )
+            review = None
+        if review is not None:
+            await _emit(
+                job_id,
+                "transition_review_done",
+                "actual assembled entry and exit reviewed",
+                **review,
+            )
+        return review
+
+    async def review_candidate(
+        variant: Variant,
+    ) -> tuple[dict | None, ContinuityReport | None, dict | None]:
+        semantic_task = asyncio.create_task(score_variant(variant))
+        continuity = await validate_continuity(variant)
+        transition = await review_assembled_transitions(variant)
+        semantic = await semantic_task
+        return semantic, continuity, transition
+
     async def persist_candidate_review(
         variant: Variant,
         candidate_score: dict | None,
         candidate_continuity: ContinuityReport | None,
+        candidate_transition: dict | None,
     ) -> None:
         decision = (
-            final_candidate_quality(candidate_score, candidate_continuity)
+            final_candidate_quality(
+                candidate_score,
+                candidate_continuity,
+                candidate_transition,
+            )
             if generation_window.adaptive
             else final_semantic_quality(candidate_score)
         )
@@ -1236,6 +1436,10 @@ async def _run(job_id: str) -> None:
             ),
             "selected_seams": seams,
             "semantic_score": candidate_score,
+            "preservation_score": (
+                (candidate_score or {}).get("preservation")
+            ),
+            "transition_review": candidate_transition,
         }
         async with AsyncSessionLocal() as db:
             current_job = await db.get(Job, job_id)
@@ -1270,11 +1474,10 @@ async def _run(job_id: str) -> None:
         "score_start",
         "sampling generated video for quality and continuity scoring",
     )
-    score, continuity_report = await asyncio.gather(
-        score_variant(done[0]),
-        validate_continuity(done[0]),
+    score, continuity_report, transition_review = await review_candidate(done[0])
+    await persist_candidate_review(
+        done[0], score, continuity_report, transition_review
     )
-    await persist_candidate_review(done[0], score, continuity_report)
 
     quality_state = GenerationQualityAction.PASS
     quality_evidence: list[str] = []
@@ -1282,17 +1485,32 @@ async def _run(job_id: str) -> None:
         decision = decide_generation_quality(
             score=score,
             continuity=continuity_report,
+            transition=transition_review,
             duration=generation_duration,
             attempts=attempts,
             generated_seconds=generated_seconds,
         )
         while decision.action == GenerationQualityAction.CORRECTIVE_RETRY:
-            if not await _await_retry_permission(job_id, decision.evidence):
-                decision = final_candidate_quality(score, continuity_report)
+            retry_correction = corrective_prompt(
+                decision.evidence,
+                pre_handle=generation_window.pre_handle,
+                post_handle=generation_window.post_handle,
+            )
+            if not await _await_retry_permission(
+                job_id,
+                decision.evidence,
+                correction=retry_correction,
+            ):
+                decision = final_candidate_quality(
+                    score,
+                    continuity_report,
+                    transition_review,
+                )
                 break
             previous_variant = done[0]
             previous_score = score
             previous_continuity = continuity_report
+            previous_transition = transition_review
             previous_provider = video_provider
             next_provider = video_provider
             attempts += 1
@@ -1310,7 +1528,7 @@ async def _run(job_id: str) -> None:
             )
             succeeded = await dispatch(
                 next_provider,
-                corrective_prompt(decision.evidence),
+                retry_correction,
                 target_variant_id=retry_variant_id,
             )
             video_provider = next_provider
@@ -1327,23 +1545,34 @@ async def _run(job_id: str) -> None:
                     done = [previous_variant]
             if succeeded:
                 done = [await maybe_composite(done[0], video_provider)]
-                candidate_score, candidate_continuity = await asyncio.gather(
-                    score_variant(done[0]),
-                    validate_continuity(done[0]),
-                )
+                (
+                    candidate_score,
+                    candidate_continuity,
+                    candidate_transition,
+                ) = await review_candidate(done[0])
                 await persist_candidate_review(
-                    done[0], candidate_score, candidate_continuity
+                    done[0],
+                    candidate_score,
+                    candidate_continuity,
+                    candidate_transition,
                 )
                 if attempt_quality_rank(
                     candidate_score,
                     candidate_continuity,
-                ) > attempt_quality_rank(previous_score, previous_continuity):
+                    candidate_transition,
+                ) > attempt_quality_rank(
+                    previous_score,
+                    previous_continuity,
+                    previous_transition,
+                ):
                     score = candidate_score
                     continuity_report = candidate_continuity
+                    transition_review = candidate_transition
                 else:
                     done = [previous_variant]
                     score = previous_score
                     continuity_report = previous_continuity
+                    transition_review = previous_transition
                     video_provider = previous_provider
                     await _emit(
                         job_id,
@@ -1362,6 +1591,7 @@ async def _run(job_id: str) -> None:
             decision = decide_generation_quality(
                 score=score,
                 continuity=continuity_report,
+                transition=transition_review,
                 duration=generation_duration,
                 attempts=attempts,
                 generated_seconds=generated_seconds,
@@ -1381,6 +1611,7 @@ async def _run(job_id: str) -> None:
             previous_variant = done[0]
             previous_score = score
             previous_continuity = continuity_report
+            previous_transition = transition_review
             attempts += int(needs_retry)
             if not needs_retry:
                 final_quality = final_semantic_quality(score)
@@ -1409,19 +1640,29 @@ async def _run(job_id: str) -> None:
                     retried = await db.get(Variant, retry_variant_id)
                 if retried is not None and succeeded and retried.status == "done":
                     done = [retried]
-                    candidate_score, candidate_continuity = await asyncio.gather(
-                        score_variant(retried),
-                        validate_continuity(retried),
-                    )
+                    (
+                        candidate_score,
+                        candidate_continuity,
+                        candidate_transition,
+                    ) = await review_candidate(retried)
                     await persist_candidate_review(
-                        retried, candidate_score, candidate_continuity
+                        retried,
+                        candidate_score,
+                        candidate_continuity,
+                        candidate_transition,
                     )
                     if attempt_quality_rank(
                         candidate_score,
                         candidate_continuity,
-                    ) > attempt_quality_rank(previous_score, previous_continuity):
+                        candidate_transition,
+                    ) > attempt_quality_rank(
+                        previous_score,
+                        previous_continuity,
+                        previous_transition,
+                    ):
                         score = candidate_score
                         continuity_report = candidate_continuity
+                        transition_review = candidate_transition
                     else:
                         done = [previous_variant]
                         score = previous_score
@@ -1465,6 +1706,8 @@ async def _run(job_id: str) -> None:
                 {
                     "generation_quality_state": quality_state.value,
                     "generation_quality_evidence": quality_evidence,
+                    "preservation_score": (score or {}).get("preservation"),
+                    "transition_review": transition_review,
                     "generation_attempts": attempts,
                     "generated_seconds": generated_seconds,
                     "provider_attempts": provider_attempts,

@@ -206,6 +206,9 @@ else:
         result.setdefault("attributes", {})
         return result
 
+    async def _score_seams(**kwargs) -> dict:
+        return await _gemini_real.score_seams(**kwargs)
+
     async def _find_entity_in_keyframes(entity: dict, keyframes: list[str]) -> list[dict]:
         description = entity.get("description", "")
         out: list[dict] = []
@@ -231,6 +234,7 @@ else:
         interpret_edit=_interpret_edit,
         plan_variants=_plan_variants,
         score_variant=_score_variant,
+        score_seams=_score_seams,
         identify_entity=_identify_entity,
         find_entity_in_keyframes=_find_entity_in_keyframes,
     )

@@ -12,6 +12,8 @@ from app.services.generation_window import GenerationWindow
 from app.services.continuity_validator import ContinuityIssue, ContinuityReport
 from app.services.seam_matching import (
     MAX_SEAM_SCORE,
+    MAX_TARGET_FRAME_DELTA,
+    MAX_TARGET_MOTION_DELTA,
     SeamChoice,
     SeamFrames,
     rank_best_seam,
@@ -35,10 +37,7 @@ class LocalSeamSelection:
 
     @property
     def passed(self) -> bool:
-        return all(
-            choice is None or choice.score <= self.max_score
-            for choice in (self.entry, self.exit)
-        )
+        return all(choice is None or choice.safe for choice in (self.entry, self.exit))
 
     @property
     def media_start(self) -> float:
@@ -60,10 +59,24 @@ class LocalSeamSelection:
     def issues(self) -> tuple[str, ...]:
         output = []
         for boundary, choice in (("entry", self.entry), ("exit", self.exit)):
-            if choice is not None and choice.score > self.max_score:
+            if choice is None:
+                continue
+            if choice.score > self.max_score:
                 output.append(
                     f"{boundary}_frame_match_score at {boundary}: "
                     f"measured {choice.score:.3f}, limit {self.max_score:.3f}"
+                )
+            if choice.target_frame_delta > MAX_TARGET_FRAME_DELTA:
+                output.append(
+                    f"{boundary}_target_frame_delta at {boundary}: "
+                    f"measured {choice.target_frame_delta:.3f}, "
+                    f"limit {MAX_TARGET_FRAME_DELTA:.3f}"
+                )
+            if choice.target_motion_delta > MAX_TARGET_MOTION_DELTA:
+                output.append(
+                    f"{boundary}_target_motion_delta at {boundary}: "
+                    f"measured {choice.target_motion_delta:.3f}, "
+                    f"limit {MAX_TARGET_MOTION_DELTA:.3f}"
                 )
         return tuple(output)
 
@@ -76,7 +89,9 @@ class LocalSeamSelection:
                 "source_timestamp": self.context_start + choice.timestamp,
                 "score": choice.score,
                 "samples": choice.samples,
-                "safe": choice.score <= self.max_score,
+                "target_frame_delta": choice.target_frame_delta,
+                "target_motion_delta": choice.target_motion_delta,
+                "safe": choice.safe,
             }
 
         return {
@@ -98,21 +113,25 @@ class LocalSeamSelection:
 def _conservative_choice(
     best: SeamChoice | None,
     nominal: SeamChoice | None,
-    *,
-    max_score: float = MAX_SEAM_SCORE,
 ) -> tuple[SeamChoice | None, str]:
     """Move a cut only when frame matching proves the move is safer."""
     if nominal is None:
         return best, "matched" if best is not None else "unavailable"
     if best is None or best.timestamp == nominal.timestamp:
         return nominal, "nominal"
-    crosses_safety_threshold = nominal.score > max_score >= best.score
+    crosses_safety_threshold = not nominal.safe and best.safe
     materially_better = (
-        best.score <= max_score
+        best.safe
         and nominal.score - best.score >= MIN_SEAM_IMPROVEMENT
     )
     if crosses_safety_threshold or materially_better:
         return best, "matched"
+    if not nominal.safe and (
+        len(best.safety_failures), best.score
+    ) < (
+        len(nominal.safety_failures), nominal.score
+    ):
+        return best, "matched_unsafe"
     return nominal, "nominal"
 
 
@@ -340,15 +359,25 @@ def continuity_at_selected_seams(
             continue
         code = f"{boundary}_frame_match_score"
         metrics[code] = choice.score
-        if choice.score > selection.max_score:
-            issues.append(
-                ContinuityIssue(
-                    code,
-                    choice.score,
-                    selection.max_score,
-                    boundary,
+        checks = (
+            (code, choice.score, selection.max_score),
+            (
+                f"{boundary}_target_frame_delta",
+                choice.target_frame_delta,
+                MAX_TARGET_FRAME_DELTA,
+            ),
+            (
+                f"{boundary}_target_motion_delta",
+                choice.target_motion_delta,
+                MAX_TARGET_MOTION_DELTA,
+            ),
+        )
+        for issue_code, value, threshold in checks:
+            metrics[issue_code] = value
+            if value > threshold:
+                issues.append(
+                    ContinuityIssue(issue_code, value, threshold, boundary)
                 )
-            )
     return ContinuityReport(
         passed=not issues,
         metrics=metrics,

@@ -28,6 +28,7 @@ class VariantResult(TypedDict):
 class QualityScore(TypedDict):
     visual_coherence: int
     prompt_adherence: int
+    preservation: int
     evidence: NotRequired[list[str]]
 
 

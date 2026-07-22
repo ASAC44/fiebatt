@@ -116,8 +116,8 @@ def test_local_seams_report_unsafe_boundaries_without_blending():
     )
 
     assert selection.passed is False
-    assert len(selection.issues) == 2
-    assert "entry_frame_match_score" in selection.issues[0]
+    assert any("entry_frame_match_score" in issue for issue in selection.issues)
+    assert any("exit_frame_match_score" in issue for issue in selection.issues)
 
 
 def test_frame_matching_keeps_nominal_cut_for_tiny_improvement():

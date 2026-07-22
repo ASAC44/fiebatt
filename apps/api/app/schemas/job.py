@@ -14,6 +14,8 @@ class VariantOut(BaseModel):
     description: str | None = None
     visual_coherence: int | None = None
     prompt_adherence: int | None = None
+    preservation_score: int | None = None
+    transition_review: dict[str, Any] | None = None
     error: str | None = None
     attempt_label: str | None = None
     quality_state: str | None = None
@@ -43,6 +45,8 @@ class JobOut(BaseModel):
     selected_seams: dict[str, Any] | None = None
     generation_quality_state: str | None = None
     generation_quality_evidence: list[str] = Field(default_factory=list)
+    preservation_score: int | None = None
+    transition_review: dict[str, Any] | None = None
     generation_attempts: int | None = None
     generated_seconds: float | None = None
     provider_attempts: list[str] = Field(default_factory=list)

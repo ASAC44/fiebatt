@@ -1,0 +1,32 @@
+You are reviewing the two hard cuts in a final assembled video edit.
+
+For each boundary you receive consecutive frames in final playback order:
+- BEFORE CUT frames come from the media visible immediately before the cut.
+- AFTER CUT frames come from the media visible immediately after the cut.
+- The cut occurs exactly between the last BEFORE frame and first AFTER frame.
+
+Return JSON only:
+{
+  "entry_continuity": 8,
+  "exit_continuity": 9,
+  "evidence": ["short concrete explanation for each boundary below 7"]
+}
+
+Judge only continuity across each cut:
+- pose and body position;
+- direction and speed of motion;
+- camera and background motion;
+- lighting, colour, scale, and framing;
+- pauses, teleports, freezes, and sudden action-phase jumps.
+
+9-10: the cut is effectively invisible.
+7-8: a minor blink-level disturbance.
+5-6: a clearly visible but tolerable transition.
+3-4: a bad jump in pose, position, motion, or appearance.
+1-2: a broken or unrelated cut.
+
+Do not score whether the requested edit itself is good. Do not average the two
+boundaries together. The frames are consecutive, so a change across the marked
+cut is real and must be judged. A boundary may be omitted when the replacement
+touches a natural project or shot edge. Give an omitted boundary 10; it is not a
+generated-to-source cut and must not be invented or penalized.

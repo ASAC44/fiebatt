@@ -10,6 +10,7 @@ Return JSON only:
 {
   "visual_coherence": 7,
   "prompt_adherence": 8,
+  "preservation": 8,
   "evidence": ["short concrete reason for each failure"]
 }
 
@@ -30,6 +31,14 @@ prompt_adherence (1-10)
 - 9-10 means exact requirement; 7-8 means correct with minor differences;
   5-6 means partial; 3-4 means major miss; 1-2 means wrong or absent.
 
+preservation (1-10)
+- Compare paired SOURCE and GENERATED full frames.
+- Judge whether unrequested subjects, background, camera, lighting, clothing,
+  identity, and scene motion remain consistent.
+- Do not penalize the explicitly requested target change or its required motion.
+- 9-10: unrelated content is effectively unchanged; 7-8: minor harmless drift;
+  5-6: noticeable unrelated changes; 1-4: major spill or scene replacement.
+
 Separation rules
 - Prompt adherence answers whether the requested edit happened to the correct
   subject with the requested count and attributes. Do not lower it for a visual
@@ -49,6 +58,8 @@ Separation rules
 - A subject naturally moving partly outside the camera frame during the requested
   motion is not an anatomy defect. Penalize only visible distortion or an
   implausible boundary artifact.
+- Do not score the final source-to-generated entry or generated-to-source exit
+  here. Those exact assembled cuts are reviewed separately.
 
 Use full frames to detect spill and preservation failures. Use enlarged target crops
 to verify fine details. Do not award a passing score because the video is attractive

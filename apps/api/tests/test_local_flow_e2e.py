@@ -53,6 +53,11 @@ def test_planned_local_flow_preserves_handles_and_commits_only_core():
     quality = decide_generation_quality(
         score={"visual_coherence": 9, "prompt_adherence": 9},
         continuity=continuity,
+        transition={
+            "entry_continuity": 9,
+            "exit_continuity": 9,
+            "evidence": [],
+        },
         duration=window.context_duration,
         attempts=1,
         generated_seconds=window.context_duration,

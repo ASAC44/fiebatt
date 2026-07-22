@@ -259,6 +259,48 @@ async def score_variant(
     return json.loads(text)
 
 
+@tracked("gemini", "score_seams")
+async def score_seams(
+    *,
+    entry_before_paths: list[str],
+    entry_after_paths: list[str],
+    exit_before_paths: list[str],
+    exit_after_paths: list[str],
+) -> dict[str, int | list[str]]:
+    """Review consecutive frames from the actual final hard-cut sequence."""
+    content: list[dict] = [{
+        "type": "text",
+        "text": "Review ENTRY and EXIT independently. Frames are in playback order.",
+    }]
+
+    def add_boundary(
+        name: str,
+        before: list[str],
+        after: list[str],
+    ) -> None:
+        if not before or not after:
+            return
+        content.append({"type": "text", "text": f"{name} — BEFORE CUT:"})
+        for index, path in enumerate(before, start=1):
+            content.append({"type": "text", "text": f"{name} BEFORE {index}:"})
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": _image_data_url(path)},
+            })
+        content.append({"type": "text", "text": f"{name} — CUT IS HERE — AFTER CUT:"})
+        for index, path in enumerate(after, start=1):
+            content.append({"type": "text", "text": f"{name} AFTER {index}:"})
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": _image_data_url(path)},
+            })
+
+    add_boundary("ENTRY", entry_before_paths, entry_after_paths)
+    add_boundary("EXIT", exit_before_paths, exit_after_paths)
+    text = await _chat_json(_load_prompt("seam_score"), content)
+    return json.loads(text)
+
+
 @tracked("gemini", "narration_script")
 async def generate_narration_script(
     variant_description: str,

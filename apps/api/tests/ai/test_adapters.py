@@ -134,6 +134,39 @@ async def test_qwen_quality_request_labels_source_and_target_crops(monkeypatch, 
 
 
 @pytest.mark.asyncio
+async def test_qwen_reviews_actual_cut_frames_separately(tmp_path, monkeypatch):
+    from app.ai.services import qwen
+
+    before = tmp_path / "before.png"
+    after = tmp_path / "after.png"
+    before.write_bytes(b"before")
+    after.write_bytes(b"after")
+    captured: dict[str, list[dict]] = {}
+
+    async def fake_chat_json(system_prompt, user_content, model=qwen.DEFAULT_MODEL):
+        captured["content"] = user_content
+        return '{"entry_continuity": 4, "exit_continuity": 9, "evidence": ["entry pose jumps"]}'
+
+    monkeypatch.setattr(qwen, "_chat_json", fake_chat_json)
+    review = await qwen.score_seams(
+        entry_before_paths=[str(before)],
+        entry_after_paths=[str(after)],
+        exit_before_paths=[str(before)],
+        exit_after_paths=[str(after)],
+    )
+
+    labels = [
+        item["text"]
+        for item in captured["content"]
+        if item["type"] == "text"
+    ]
+    assert any("ENTRY — CUT IS HERE" in label for label in labels)
+    assert any("EXIT — CUT IS HERE" in label for label in labels)
+    assert review["entry_continuity"] == 4
+    assert review["exit_continuity"] == 9
+
+
+@pytest.mark.asyncio
 async def test_stub_identify_entity():
     """gemini.identify_entity returns {description, category, attributes}."""
     from app.ai.services._stubs import gemini

@@ -12,6 +12,7 @@ from app.services.generation_quality import (
     quality_payload_for_candidate,
     cancel_waiting_retry,
     semantic_quality_evidence,
+    transition_quality_evidence,
 )
 
 
@@ -23,10 +24,15 @@ def _failed_continuity() -> ContinuityReport:
     )
 
 
+def _clean_transition() -> dict:
+    return {"entry_continuity": 9, "exit_continuity": 9, "evidence": []}
+
+
 def test_clean_result_passes_without_extra_generation():
     decision = decide_generation_quality(
         score={"visual_coherence": 8, "prompt_adherence": 8},
         continuity=ContinuityReport(True, {}),
+        transition=_clean_transition(),
         duration=6.0,
         attempts=1,
         generated_seconds=6.0,
@@ -42,7 +48,7 @@ def test_unavailable_continuity_is_warning_not_generation_failure():
         attempts=1,
         generated_seconds=6.0,
     )
-    assert decision.action == GenerationQualityAction.PASS
+    assert decision.action == GenerationQualityAction.REVIEW_WARNING
 
 
 def test_old_validator_only_hard_fail_remains_applicable():
@@ -88,6 +94,67 @@ def test_first_source_edit_failure_gets_evidence_driven_retry():
     )
     assert decision.action == GenerationQualityAction.CORRECTIVE_RETRY
     assert "exit_subject_motion_jump" in corrective_prompt(decision.evidence)
+
+
+def test_bad_assembled_entry_gets_specific_lead_in_correction():
+    transition = {
+        "entry_continuity": 4,
+        "exit_continuity": 9,
+        "evidence": ["entry jumps from walking directly into a crouched pose"],
+    }
+    decision = decide_generation_quality(
+        score={
+            "visual_coherence": 8,
+            "prompt_adherence": 10,
+            "preservation": 9,
+        },
+        continuity=ContinuityReport(True, {}),
+        transition=transition,
+        duration=5.0,
+        attempts=1,
+        generated_seconds=5.0,
+    )
+
+    assert decision.action == GenerationQualityAction.CORRECTIVE_RETRY
+    assert transition_quality_evidence(transition)[0] == (
+        "entry continuity 4/10 is below 7/10"
+    )
+    correction = corrective_prompt(
+        decision.evidence,
+        pre_handle=0.75,
+        post_handle=0.75,
+    )
+    assert "first 0.750 seconds" in correction
+    assert "Do not begin the requested action during this lead-in" in correction
+
+
+def test_bad_transition_hard_fails_after_single_retry():
+    decision = decide_generation_quality(
+        score={
+            "visual_coherence": 8,
+            "prompt_adherence": 10,
+            "preservation": 9,
+        },
+        continuity=ContinuityReport(True, {}),
+        transition={"entry_continuity": 4, "exit_continuity": 9, "evidence": []},
+        duration=5.0,
+        attempts=2,
+        generated_seconds=10.0,
+    )
+
+    assert decision.action == GenerationQualityAction.HARD_FAIL
+
+
+def test_natural_project_edge_is_not_treated_as_a_failed_transition():
+    review = {
+        "entry_continuity": 1,
+        "exit_continuity": 9,
+        "entry_applicable": False,
+        "exit_applicable": True,
+        "evidence": [],
+    }
+
+    assert transition_quality_evidence(review) == ()
 
 
 def test_failed_source_edit_never_switches_provider_automatically():

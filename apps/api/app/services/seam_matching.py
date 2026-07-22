@@ -9,6 +9,8 @@ import numpy as np
 
 
 MAX_SEAM_SCORE = 0.22
+MAX_TARGET_FRAME_DELTA = 0.20
+MAX_TARGET_MOTION_DELTA = 0.20
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,12 +27,32 @@ class SeamChoice:
     timestamp: float
     score: float
     samples: int
+    target_frame_delta: float = 0.0
+    target_motion_delta: float = 0.0
+
+    @property
+    def safety_failures(self) -> tuple[str, ...]:
+        failures: list[str] = []
+        if self.score > MAX_SEAM_SCORE:
+            failures.append("frame_match_score")
+        if self.target_frame_delta > MAX_TARGET_FRAME_DELTA:
+            failures.append("target_frame_delta")
+        if self.target_motion_delta > MAX_TARGET_MOTION_DELTA:
+            failures.append("target_motion_delta")
+        return tuple(failures)
+
+    @property
+    def safe(self) -> bool:
+        return not self.safety_failures
 
     def metadata(self) -> dict[str, float | int]:
         return {
             "timestamp": self.timestamp,
             "score": self.score,
             "samples": self.samples,
+            "target_frame_delta": self.target_frame_delta,
+            "target_motion_delta": self.target_motion_delta,
+            "safe": self.safe,
         }
 
 
@@ -101,13 +123,24 @@ def seam_score(sample: SeamFrames, bbox: dict[str, float]) -> float:
     return 0.60 * appearance_score + 0.40 * target_motion_delta
 
 
+def seam_measurements(
+    sample: SeamFrames,
+    bbox: dict[str, float],
+) -> tuple[float, float, float]:
+    target = _bbox_mask(sample.left_at.shape, bbox, invert=False)
+    return (
+        seam_score(sample, bbox),
+        _mean_delta(sample.left_at, sample.right_at, target),
+        _motion_vector_delta(sample, target),
+    )
+
+
 def select_best_seam(
     samples: list[SeamFrames],
     *,
     bbox: dict[str, float],
     bbox_for_timestamp: Callable[[float], dict[str, float]] | None = None,
     prefer_late: bool = False,
-    max_score: float = MAX_SEAM_SCORE,
 ) -> SeamChoice:
     choice = rank_best_seam(
         samples,
@@ -115,9 +148,10 @@ def select_best_seam(
         bbox_for_timestamp=bbox_for_timestamp,
         prefer_late=prefer_late,
     )
-    if choice.score > max_score:
+    if not choice.safe:
         raise ValueError(
-            f"overlap failed seam validation ({choice.score:.3f} > {max_score:.3f})"
+            "overlap failed seam validation "
+            f"({', '.join(choice.safety_failures)})"
         )
     return choice
 
@@ -132,20 +166,31 @@ def rank_best_seam(
     """Return the strongest candidate even when it is too weak to accept."""
     if not samples:
         raise ValueError("overlap has no seam samples")
-    scored = [
-        (
-            seam_score(
-                sample,
-                bbox_for_timestamp(sample.timestamp)
-                if bbox_for_timestamp is not None
-                else bbox,
-            ),
-            sample.timestamp,
+    scored: list[SeamChoice] = []
+    for sample in samples:
+        sample_bbox = (
+            bbox_for_timestamp(sample.timestamp)
+            if bbox_for_timestamp is not None
+            else bbox
         )
-        for sample in samples
-    ]
-    score, timestamp = min(
+        score, target_frame_delta, target_motion_delta = seam_measurements(
+            sample,
+            sample_bbox,
+        )
+        scored.append(
+            SeamChoice(
+                timestamp=sample.timestamp,
+                score=score,
+                samples=len(samples),
+                target_frame_delta=target_frame_delta,
+                target_motion_delta=target_motion_delta,
+            )
+        )
+    return min(
         scored,
-        key=lambda item: (item[0], -item[1] if prefer_late else item[1]),
+        key=lambda choice: (
+            len(choice.safety_failures),
+            choice.score,
+            -choice.timestamp if prefer_late else choice.timestamp,
+        ),
     )
-    return SeamChoice(timestamp=timestamp, score=score, samples=len(samples))

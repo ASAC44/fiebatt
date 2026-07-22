@@ -51,6 +51,8 @@ def _job_out(job: Job) -> JobOut:
             payload.get("generation_quality_evidence"),
         ),
         generation_quality_evidence=payload.get("generation_quality_evidence") or [],
+        preservation_score=payload.get("preservation_score"),
+        transition_review=payload.get("transition_review"),
         generation_attempts=payload.get("generation_attempts"),
         generated_seconds=payload.get("generated_seconds"),
         provider_attempts=payload.get("provider_attempts") or [],
@@ -68,6 +70,12 @@ def _job_out(job: Job) -> JobOut:
                 description=v.description,
                 visual_coherence=v.visual_coherence,
                 prompt_adherence=v.prompt_adherence,
+                preservation_score=(candidate_reviews.get(v.id) or {}).get(
+                    "preservation_score"
+                ),
+                transition_review=(candidate_reviews.get(v.id) or {}).get(
+                    "transition_review"
+                ),
                 error=v.error,
                 attempt_label=(candidate_reviews.get(v.id) or {}).get("label"),
                 quality_state=normalized_quality_state(

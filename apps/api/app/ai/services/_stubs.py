@@ -89,7 +89,13 @@ async def _gemini_score_variant(
     return QualityScore(
         visual_coherence=min(10, base + 1),
         prompt_adherence=min(10, base),
+        preservation=min(10, base + 1),
     )
+
+
+async def _gemini_score_seams(**_kwargs) -> dict:
+    await asyncio.sleep(0.1)
+    return {"entry_continuity": 8, "exit_continuity": 8, "evidence": []}
 
 
 async def _gemini_identify_entity(crop_path: str) -> EntityIdentity:
@@ -125,6 +131,7 @@ gemini = types.SimpleNamespace(
     interpret_edit=_gemini_interpret_edit,
     plan_variants=_gemini_plan_variants,
     score_variant=_gemini_score_variant,
+    score_seams=_gemini_score_seams,
     identify_entity=_gemini_identify_entity,
     find_entity_in_keyframes=_gemini_find_entity_in_keyframes,
 )

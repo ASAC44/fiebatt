@@ -258,12 +258,21 @@ else:
         )
         provider = str(plan.get("_video_gen_provider") or _real_settings.normalized_video_gen_provider)
         motion_edit, _, prompt_text = _rewrite_motion_prompt(prompt_text)
-        effective_source_video_url = source_video_url
-        if motion_edit:
-            # Source-edit-capable providers need the original temporal context;
-            # image-conditioned providers intentionally fall back to the frame.
-            if provider not in {"wan", "happyhorse"}:
-                effective_source_video_url = None
+        change_type = str(plan.get("_change_type") or ("motion" if motion_edit else ""))
+        temporal_behavior = str(plan.get("_temporal_behavior") or "temporary")
+        edit_mode = select_source_edit_mode(
+            provider,
+            duration=duration,
+            source_video=source_video_url is not None,
+            mask_available=mask_image_url is not None,
+            change_type=change_type or None,
+            temporal_behavior=temporal_behavior or None,
+        )
+        effective_source_video_url = (
+            source_video_url
+            if edit_mode in {"source_video", "tracked_mask"}
+            else None
+        )
 
         # ``frame_path``/``last_frame_path`` remain compatibility aliases for
         # older callers. New callers must use semantic subject/boundary names.
@@ -285,13 +294,6 @@ else:
             source_video=effective_source_video_url is not None,
             duration=duration,
         )
-        edit_mode = select_source_edit_mode(
-            provider,
-            duration=duration,
-            source_video=effective_source_video_url is not None,
-            mask_available=mask_image_url is not None,
-        )
-
         if provider == "wan":
             if style_ref:
                 out_path = await _wan.generate_propagation_variant(
@@ -326,6 +328,11 @@ else:
                 out_path = await _wan.generate_variant(
                     prompt=prompt_text,
                     reference_frame_path=routed.first_frame_path,
+                    last_frame_path=(
+                        routed.last_frame_path
+                        if edit_mode == "first_last_frames"
+                        else None
+                    ),
                     on_tick=on_tick,
                     duration=duration,
                     resolution=resolution,

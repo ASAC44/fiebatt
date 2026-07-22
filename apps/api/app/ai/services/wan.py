@@ -2,6 +2,7 @@
 
 Uses Wan 2.7 models via the DashScope async API:
 - Text-to-video:     wan2.7-t2v-2026-04-25
+- Image-to-video:    wan2.7-i2v-2026-04-25 (first frame or first + last frames)
 - Video editing:     wan2.7-videoedit  (instruction-based editing & style transfer)
 
 HappyHorse and Wan share the same DashScope API infrastructure but use different model names.
@@ -35,6 +36,7 @@ POLL_INTERVAL = 2
 GENERATION_TIMEOUT = get_settings().video_generation_timeout
 
 DEFAULT_T2V_MODEL = "wan2.7-t2v-2026-04-25"
+DEFAULT_I2V_MODEL = "wan2.7-i2v-2026-04-25"
 DEFAULT_VIDEOEDIT_MODEL = "wan2.7-videoedit"
 DEFAULT_LOCAL_EDIT_MODEL = "wan2.1-vace-plus"
 
@@ -248,6 +250,39 @@ def _build_video_edit_payload(
     }
 
 
+def _build_image_to_video_payload(
+    prompt: str,
+    first_frame_path: str,
+    *,
+    last_frame_path: str | None = None,
+    duration: int = DEFAULT_DURATION,
+    resolution: str = "720P",
+) -> dict:
+    """Build Wan 2.7 I2V input from full-frame timeline anchors."""
+    media = [
+        {"type": "first_frame", "url": _image_to_base64(first_frame_path)},
+    ]
+    if last_frame_path:
+        media.append(
+            {"type": "last_frame", "url": _image_to_base64(last_frame_path)}
+        )
+    return {
+        "input": {
+            "prompt": prompt,
+            "negative_prompt": VIDEO_EDIT_NEGATIVE_PROMPT,
+            "media": media,
+        },
+        "parameters": {
+            "resolution": _resolve_resolution(resolution),
+            "duration": _resolve_duration(duration),
+            # Preserve the grounded Qwen instruction instead of allowing a
+            # second opaque rewrite to weaken or reinterpret the action.
+            "prompt_extend": False,
+            "watermark": False,
+        },
+    }
+
+
 def _build_local_edit_payload(
     prompt: str,
     source_video_url: str,
@@ -289,6 +324,7 @@ async def generate_variant(
     aspect_ratio: str = "16:9",
     resolution: str = "1080P",
     on_tick: TickCallback | None = None,
+    last_frame_path: str | None = None,
 ) -> str:
     settings = get_settings()
     api_key = settings.dashscope_api_key
@@ -298,20 +334,28 @@ async def generate_variant(
     duration_sec = _resolve_duration(duration)
     res = _resolve_resolution(resolution)
 
-    params = {
-        "resolution": res,
-        "ratio": aspect_ratio,
-        "duration": duration_sec,
-        "prompt_extend": True,
-        "watermark": False,
-    }
-
     async with httpx.AsyncClient(timeout=30.0) as client:
-        model = DEFAULT_T2V_MODEL
-        payload = {
-            "input": {"prompt": prompt},
-            "parameters": params,
-        }
+        if reference_frame_path:
+            model = DEFAULT_I2V_MODEL
+            payload = _build_image_to_video_payload(
+                prompt,
+                reference_frame_path,
+                last_frame_path=last_frame_path,
+                duration=duration_sec,
+                resolution=res,
+            )
+        else:
+            model = DEFAULT_T2V_MODEL
+            payload = {
+                "input": {"prompt": prompt},
+                "parameters": {
+                    "resolution": res,
+                    "ratio": aspect_ratio,
+                    "duration": duration_sec,
+                    "prompt_extend": True,
+                    "watermark": False,
+                },
+            }
 
         task_id = await _submit_task(client, api_key, model, payload)
 
@@ -322,7 +366,8 @@ async def generate_variant(
                 "prompt": prompt,
                 "duration": duration_sec,
                 "aspect_ratio": aspect_ratio,
-                "conditioned": False,
+                "conditioned": reference_frame_path is not None,
+                "last_frame": last_frame_path is not None,
                 "model": model,
             }))
 

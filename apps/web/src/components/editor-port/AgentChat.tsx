@@ -852,6 +852,8 @@ function VariantPreviewCard({
           const isApplied = appliedVariant === key;
           const reviewPending = !v.quality_state;
           const unsafe = v.quality_state === "hard_fail";
+          const scoreText = variantScoreText(v);
+          const evidenceText = primaryQualityEvidence(v.quality_evidence);
           return (
             <div key={v.id}>
               <span className="variant-preview__attempt">
@@ -874,10 +876,10 @@ function VariantPreviewCard({
                 {reviewPending
                   ? "Reviewing requested change and cut frames…"
                   : unsafe
-                    ? `Apply blocked: ${v.quality_evidence?.[0] ?? "no safe cut frames found"}`
+                    ? `Apply blocked: ${evidenceText ?? "no safe cut frames found"}${scoreText ? `. ${scoreText}` : ""}`
                     : v.quality_state === "review_warning"
-                      ? `Review warning: ${v.quality_evidence?.[0] ?? "please inspect this result"}`
-                      : "Requested change and cut frames passed review."}
+                      ? `Review warning: ${evidenceText ?? "please inspect this result"}${scoreText ? `. ${scoreText}` : ""}`
+                      : `Requested change and cut frames passed review${scoreText ? `. ${scoreText}` : "."}`}
               </p>
               {v.url && (
                 <button
@@ -905,6 +907,25 @@ function VariantPreviewCard({
       </div>
     </div>
   );
+}
+
+function variantScoreText(
+  variant: Pick<VariantPreview, "prompt_adherence" | "visual_coherence">,
+) {
+  const prompt = variant.prompt_adherence;
+  const visual = variant.visual_coherence;
+  if (prompt == null && visual == null) return "";
+  return [
+    prompt != null ? `Prompt match ${prompt}/10` : null,
+    visual != null ? `Visual quality ${visual}/10` : null,
+  ].filter(Boolean).join(" · ");
+}
+
+function primaryQualityEvidence(evidence: string[] | undefined) {
+  if (!evidence?.length) return null;
+  return evidence.find((item) =>
+    !/^(prompt adherence|visual coherence) \d+\/10 is below/i.test(item),
+  ) ?? evidence[0];
 }
 
 // ─── prompt plan card ────────────────────────────────────────────────

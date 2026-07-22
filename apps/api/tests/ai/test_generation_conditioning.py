@@ -43,6 +43,19 @@ def test_veo_receives_only_full_boundary_frames():
     assert routed.last_frame_path == "end-full-frame.jpg"
 
 
+def test_image_conditioned_wan_receives_full_boundary_frames():
+    routed = route_provider_conditioning(
+        "wan",
+        _conditioning(),
+        source_video=False,
+        duration=6.0,
+    )
+
+    assert routed.subject_reference_path is None
+    assert routed.first_frame_path == "start-full-frame.jpg"
+    assert routed.last_frame_path == "end-full-frame.jpg"
+
+
 def test_veo_omits_unsupported_last_frame_for_shorter_requests():
     routed = route_provider_conditioning(
         "veo",

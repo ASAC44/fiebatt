@@ -115,5 +115,6 @@ def test_complete_motion_prompt_stays_focused_and_action_first(tmp_path: Path):
     assert prompt.index("Make this man jump once") < prompt.index("MOTION:")
     assert prompt.index("MOTION:") < prompt.index("PRESERVE:")
     assert "0.750 through 4.250" not in prompt
-    assert "never delay or weaken the action" in prompt
+    assert "Continue the incoming source motion briefly" in prompt
+    assert "Resume the outgoing source motion" in prompt
     assert "do not begin the requested action" not in prompt.lower()

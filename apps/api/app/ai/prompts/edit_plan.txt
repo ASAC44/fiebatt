@@ -44,7 +44,10 @@ DECISIONS
   do not search separate appearances unless the user says every, throughout,
   everywhere, or whole video.
 - A self-contained action such as jump, wave, blink, or bounce uses
-  bounded_action + temporary. Include preparation, action, landing, and recovery.
+  bounded_action + temporary. Preserve the source motion around it: briefly
+  continue the incoming motion, transition through preparation into the action,
+  land or recover, then resume the outgoing source motion. Never infer a new
+  final state such as standing still from a single reference frame.
 - A lasting path change such as run, walk, fly, drive, leave, or chase uses
   trajectory_continuation + future_changing_motion. Do not force the target back
   to an old position.
@@ -58,10 +61,11 @@ DECISIONS
 
 EDIT INSTRUCTION
 - Produce exactly one variant. Keep prompt_for_video_edit between 25 and 70 words.
-- State the exact target and required result first. For motion, name the ordered
-  phases and count. For colors, repeat the exact color and surface. For anatomy,
-  state shape, structure, color, and boundaries. For removal, state what fills
-  the region naturally.
+- State the exact target and required result first. For bounded motion, name the
+  count and ordered phases from incoming source motion through preparation,
+  action, recovery, and return to outgoing source motion. For colors, repeat the
+  exact color and surface. For anatomy, state shape, structure, color, and
+  boundaries. For removal, state what fills the region naturally.
 - Mention only edit-specific preservation, such as keeping shirt fabric unchanged
   while replacing its text. Do not add generic timing, camera, background,
   continuity, transition, or "do not regenerate" boilerplate; the executor adds it.

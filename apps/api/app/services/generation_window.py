@@ -144,10 +144,12 @@ def protected_context_prompt(
         # safe entrance and exit from the generated clip.
         return (
             f"{prompt}\n\n"
-            "MOTION: Begin promptly with preparation from the incoming pose and direction; "
-            "never open on the peak pose. "
+            "MOTION: Continue the incoming source motion briefly, then transition "
+            "naturally through preparation into the requested action; never open on "
+            "the peak pose. "
             f"{ending_contract} {effect_contract} "
-            "Use clip ends only for continuity; never delay or weaken the action. "
+            "Resume the outgoing source motion after recovery unless the request changes "
+            "the future path. The brief lead-in must never delay or replace the action. "
             "Preserve unrelated content. No cut, fade, freeze, teleport, or reset."
         )
 

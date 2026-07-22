@@ -98,6 +98,8 @@ RETRY_GRACE_SECONDS = 10.0
 def _provider_model(provider: str, edit_mode: str | None = None) -> str:
     if provider == "wan" and edit_mode == "tracked_mask":
         return "wan2.1-vace-plus"
+    if provider == "wan" and edit_mode in {"first_frame", "first_last_frames"}:
+        return "wan2.7-i2v-2026-04-25"
     return {
         "wan": "wan2.7-videoedit",
         "happyhorse": "happyhorse-1.0-video-edit",
@@ -774,6 +776,9 @@ async def _run(job_id: str) -> None:
 
     plan = list(plans)[0]
     plan["_video_gen_provider"] = video_provider
+    if planned_intent is not None:
+        plan["_change_type"] = planned_intent.change_type
+        plan["_temporal_behavior"] = planned_intent.temporal_behavior
     generation_prompt = _planned_edit_prompt(prompt, plan)
 
     intent = str(plan.get("intent") or "").lower()
@@ -781,7 +786,23 @@ async def _run(job_id: str) -> None:
         subject_reference_path
         or (str(crop_path) if crop_path is not None else None)
     )
-    if video_provider in {"wan", "happyhorse"}:
+    planned_change_type = planned_intent.change_type if planned_intent else None
+    planned_temporal_behavior = (
+        planned_intent.temporal_behavior if planned_intent else None
+    )
+    edit_mode = select_source_edit_mode(
+        video_provider,
+        duration=generation_duration,
+        source_video=_public_url_or_none(clip_url) is not None,
+        mask_available=bool(mask_image_url),
+        change_type=planned_change_type,
+        temporal_behavior=planned_temporal_behavior,
+    )
+    if video_provider == "wan" and edit_mode == "first_last_frames":
+        strategy = "first_last_boundary_frames"
+    elif video_provider == "wan" and edit_mode == "first_frame":
+        strategy = "start_boundary_frame"
+    elif video_provider in {"wan", "happyhorse"}:
         strategy = "source_video_with_subject_reference"
     elif video_provider == "veo" and abs(generation_duration - 8.0) <= 0.05:
         strategy = "first_last_boundary_frames"
@@ -824,6 +845,8 @@ async def _run(job_id: str) -> None:
         duration=generation_duration,
         source_video=source_video_url is not None,
         mask_available=mask_public_url is not None,
+        change_type=planned_change_type,
+        temporal_behavior=planned_temporal_behavior,
     )
     selected_model = _provider_model(video_provider, edit_mode)
     mask_frame_id = min(
@@ -903,6 +926,8 @@ async def _run(job_id: str) -> None:
             duration=generation_duration,
             source_video=source_video_url is not None,
             mask_available=mask_public_url is not None,
+            change_type=planned_change_type,
+            temporal_behavior=planned_temporal_behavior,
         )
         attempt_conditioning = replace(
             generation_conditioning,
@@ -919,6 +944,8 @@ async def _run(job_id: str) -> None:
                 **plan,
                 "_video_gen_provider": provider,
                 "_edit_prompt": prompt_for_provider(provider, correction),
+                "_change_type": planned_change_type,
+                "_temporal_behavior": planned_temporal_behavior,
             },
             conditioning=attempt_conditioning,
             duration=generation_duration,
@@ -995,6 +1022,8 @@ async def _run(job_id: str) -> None:
             duration=generation_duration,
             source_video=source_video_url is not None,
             mask_available=mask_public_url is not None,
+            change_type=planned_change_type,
+            temporal_behavior=planned_temporal_behavior,
         )
         if attempt_mode == "tracked_mask":
             await _emit(
@@ -1411,6 +1440,8 @@ async def _run(job_id: str) -> None:
                 duration=generation_duration,
                 source_video=source_video_url is not None,
                 mask_available=mask_public_url is not None,
+                change_type=planned_change_type,
+                temporal_behavior=planned_temporal_behavior,
             )
             current_payload.update(
                 {

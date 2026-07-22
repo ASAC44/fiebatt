@@ -69,6 +69,11 @@ def route_provider_conditioning(
         return ProviderConditioning(
             subject_reference_path=conditioning.subject_reference_path,
         )
+    if provider == "wan":
+        return ProviderConditioning(
+            first_frame_path=conditioning.start_anchor_path,
+            last_frame_path=conditioning.end_anchor_path,
+        )
     if provider == "veo":
         return ProviderConditioning(
             first_frame_path=conditioning.start_anchor_path,

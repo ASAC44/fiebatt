@@ -96,11 +96,22 @@ def select_source_edit_mode(
     duration: float,
     source_video: bool,
     mask_available: bool,
+    change_type: str | None = None,
+    temporal_behavior: str | None = None,
 ) -> str:
     """Choose the least destructive edit path supported by the provider."""
     capabilities = VIDEO_PROVIDER_CAPABILITIES.get(provider)
     if capabilities is None or not source_video:
         return "image_conditioned"
+    # Wan's source-video editor is strong at changing appearance while retaining
+    # the supplied motion, but that same bias can turn a requested new action
+    # into an unchanged copy. Motion intents therefore use Wan's image-to-video
+    # model. A bounded action returns to the real final frame; continuing motion
+    # is anchored only at the start so it is not forced to reset.
+    if provider == "wan" and change_type == "motion":
+        if temporal_behavior == "temporary":
+            return "first_last_frames"
+        return "first_frame"
     # Wan 2.7 video-edit is the primary source-edit path. The older VACE 2.1
     # tracked-mask model produced materially worse instruction adherence in
     # production and is retained only as an explicit adapter capability, not

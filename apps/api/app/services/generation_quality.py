@@ -56,10 +56,10 @@ def semantic_quality_evidence(score: dict | None) -> tuple[str, ...]:
     evidence: list[str] = []
     coherence = int(score.get("visual_coherence") or 0)
     adherence = int(score.get("prompt_adherence") or 0)
-    if coherence < 5:
-        evidence.append(f"visual coherence {coherence}/10 is below 5/10")
     if adherence < 6:
         evidence.append(f"prompt adherence {adherence}/10 is below 6/10")
+    if coherence < 5:
+        evidence.append(f"visual coherence {coherence}/10 is below 5/10")
     if evidence:
         evidence.extend(
             str(item)[:240]

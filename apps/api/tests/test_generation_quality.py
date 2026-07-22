@@ -136,8 +136,8 @@ def test_production_bad_outputs_cannot_be_marked_clean():
     assert semantic_quality_evidence(
         {"visual_coherence": 4, "prompt_adherence": 2}
     ) == (
-        "visual coherence 4/10 is below 5/10",
         "prompt adherence 2/10 is below 6/10",
+        "visual coherence 4/10 is below 5/10",
     )
     assert semantic_quality_evidence(None) == ("semantic quality scoring unavailable",)
     assert final_semantic_quality(

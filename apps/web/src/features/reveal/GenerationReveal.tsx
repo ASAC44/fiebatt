@@ -325,8 +325,8 @@ export function GenerationReveal({
                 </Button>
               )}
               <div className="reveal__scores mono">
-                <ScoreBadge label="visual" value={activeVariant.visual_coherence} />
-                <ScoreBadge label="prompt" value={activeVariant.prompt_adherence} />
+                <ScoreBadge label="prompt match" value={activeVariant.prompt_adherence} />
+                <ScoreBadge label="visual quality" value={activeVariant.visual_coherence} />
               </div>
             </div>
           </div>
@@ -843,9 +843,13 @@ function variantLetter(index: number) {
 }
 
 function scoreSummary(variant: Pick<Variant, "visual_coherence" | "prompt_adherence">) {
-  const visual = variant.visual_coherence != null ? `v ${variant.visual_coherence}` : null;
-  const prompt = variant.prompt_adherence != null ? `p ${variant.prompt_adherence}` : null;
-  return [visual, prompt].filter(Boolean).join(" · ") || "no scores";
+  const prompt = variant.prompt_adherence != null
+    ? `prompt match ${variant.prompt_adherence}/10`
+    : null;
+  const visual = variant.visual_coherence != null
+    ? `visual quality ${variant.visual_coherence}/10`
+    : null;
+  return [prompt, visual].filter(Boolean).join(" · ") || "no scores";
 }
 
 function describeRegion(bbox: BBox | null) {

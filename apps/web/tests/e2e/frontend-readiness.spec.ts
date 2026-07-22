@@ -235,6 +235,20 @@ test("compare opens original and complete edited timeline side by side", async (
   await expect(page.getByLabel("Edited timeline preview")).toBeVisible();
   await expect(page.getByRole("button", { name: "Single view" })).toBeVisible();
 
+  await page.getByRole("button", { name: "Single view" }).click();
+  const originalPane = page.getByTestId("compare-pane-original");
+  const editedPane = page.getByTestId("compare-pane-edited");
+  await expect(originalPane).toHaveCSS("display", "block");
+  await expect(editedPane).toHaveCSS("display", "block");
+  await expect(originalPane).toHaveAttribute("data-active", "true");
+  await expect(editedPane).toHaveAttribute("data-active", "false");
+
+  await page.getByRole("button", { name: "Show edited" }).click();
+  await expect(originalPane).toHaveCSS("display", "block");
+  await expect(editedPane).toHaveCSS("display", "block");
+  await expect(originalPane).toHaveAttribute("data-active", "false");
+  await expect(editedPane).toHaveAttribute("data-active", "true");
+
   await page.getByLabel("Compare playhead").fill("3");
   await expect(page.getByLabel("Edited timeline preview")).toHaveAttribute(
     "src",

@@ -73,8 +73,8 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
   }, [generatedPreview, previewClip, state.clips]);
   const active = useMemo(() => editedHitAt(playhead), [editedHitAt, playhead]);
   const activeClip = active?.clip ?? null;
-  const showOriginal = sideBySide || singleView === "original";
-  const showEdited = sideBySide || singleView === "edited";
+  const originalActive = sideBySide || singleView === "original";
+  const editedActive = sideBySide || singleView === "edited";
 
   useEffect(() => {
     playingRef.current = playing;
@@ -318,8 +318,13 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
         </div>
       </header>
 
-      <main className={`grid min-h-0 flex-1 ${sideBySide ? "grid-cols-2 gap-px bg-border" : "grid-cols-1 bg-background"}`}>
-        <ComparePane label="Original" asset={original} hidden={!showOriginal}>
+      <main className={`relative grid min-h-0 flex-1 ${sideBySide ? "grid-cols-2 gap-px bg-border" : "grid-cols-1 bg-background"}`}>
+        <ComparePane
+          label="Original"
+          asset={original}
+          overlay={!sideBySide}
+          active={originalActive}
+        >
           <video
             ref={originalRef}
             src={original.url}
@@ -330,7 +335,12 @@ export function CompareOverlay({ onClose }: { onClose: () => void }) {
             className="h-full w-full bg-black object-contain"
           />
         </ComparePane>
-        <ComparePane label="Edited timeline" clip={activeClip} hidden={!showEdited}>
+        <ComparePane
+          label="Edited timeline"
+          clip={activeClip}
+          overlay={!sideBySide}
+          active={editedActive}
+        >
           <div className="relative h-full w-full bg-black">
             <video
               ref={editedRef}
@@ -387,16 +397,25 @@ function ComparePane({
   children,
   asset,
   clip,
-  hidden,
+  overlay,
+  active,
 }: {
   label: string;
   children: ReactNode;
   asset?: MediaAsset | null;
   clip?: Clip | null;
-  hidden?: boolean;
+  overlay: boolean;
+  active: boolean;
 }) {
   return (
-    <section className={`relative min-h-0 bg-background ${hidden ? "hidden" : ""}`}>
+    <section
+      aria-hidden={overlay && !active}
+      data-active={active ? "true" : "false"}
+      data-testid={`compare-pane-${label === "Original" ? "original" : "edited"}`}
+      className={`min-h-0 bg-background transition-opacity duration-75 ${
+        overlay ? "absolute inset-0" : "relative"
+      } ${overlay && !active ? "pointer-events-none z-0 opacity-0" : "z-10 opacity-100"}`}
+    >
       <div className="absolute top-3 left-3 z-10 rounded-md border border-border bg-background/85 px-3 py-1.5 backdrop-blur">
         <div className="text-xs font-medium">{label}</div>
         <div className="max-w-56 truncate text-xs text-muted-foreground">

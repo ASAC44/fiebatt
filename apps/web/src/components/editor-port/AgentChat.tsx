@@ -796,11 +796,15 @@ function SuggestionCard({
 
 function VariantVideo({ url }: { url: string }) {
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  // Keep the first working signature for this object. The component key below
+  // changes only when the underlying object path changes, not whenever status
+  // polling mints a fresh S3 query string.
+  const [activeUrl] = useState(url);
 
   return (
     <>
       <video
-        src={url}
+        src={activeUrl}
         muted
         loop
         playsInline
@@ -855,7 +859,10 @@ function VariantPreviewCard({
               </span>
               <div className="variant-preview__thumb">
                 {v.url ? (
-                  <VariantVideo key={v.url} url={v.url} />
+                  <VariantVideo
+                    key={`${v.id}:${v.url.replace(/[?#].*$/, "")}`}
+                    url={v.url}
+                  />
                 ) : (
                   <span className="variant-preview__placeholder">loading...</span>
                 )}

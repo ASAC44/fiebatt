@@ -95,6 +95,12 @@ function clearPendingTurn(projectId: string): void {
   localStorage.removeItem(pendingTurnKey(projectId));
 }
 
+function stableMediaIdentity(url: string | null | undefined): string {
+  if (!url) return "";
+  const boundary = url.search(/[?#]/);
+  return boundary === -1 ? url : url.slice(0, boundary);
+}
+
 function generationActivity(event: JobStreamEvent, retryRendering = false): string {
   if (retryRendering) {
     if (event.stage === "gen_poll" || event.stage === "gen_submit") {
@@ -312,7 +318,15 @@ export function useAgentStream(projectId?: string | null) {
           }
         }
         const nextPreviewSignature = ready
-          .map((variant) => `${variant.id}:${variant.url}`)
+          .map((variant) => JSON.stringify({
+            id: variant.id,
+            media: stableMediaIdentity(variant.url),
+            status: variant.status,
+            attempt: variant.attempt_label,
+            quality: variant.quality_state,
+            evidence: variant.quality_evidence,
+            seams: variant.selected_seams,
+          }))
           .join("|") +
           `|recommended:${job.recommended_variant_id ?? ""}` +
           `|seams:${JSON.stringify(job.selected_seams ?? null)}`;

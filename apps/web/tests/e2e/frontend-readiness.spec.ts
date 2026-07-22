@@ -487,7 +487,7 @@ test("retry keeps the first preview mounted and compare uses the chosen pass", a
           id: "first-pass",
           index: 0,
           status: "done",
-          url: "/first-pass.mp4",
+          url: `/first-pass.mp4?X-Amz-Signature=first-${reads}`,
           description: "first pass",
           quality_state: "review_warning",
           quality_evidence: ["action incomplete"],
@@ -497,7 +497,7 @@ test("retry keeps the first preview mounted and compare uses the chosen pass", a
           id: "corrected-pass",
           index: 1,
           status: "done",
-          url: "/corrected-pass.mp4",
+          url: `/corrected-pass.mp4?X-Amz-Signature=corrected-${reads}`,
           description: "corrected pass",
           quality_state: "pass",
           quality_evidence: [],
@@ -513,7 +513,7 @@ test("retry keeps the first preview mounted and compare uses the chosen pass", a
   });
   await page.goto(`/editor?projectId=${project.project_id}`);
 
-  const firstVideo = page.locator('video[src="/first-pass.mp4"]');
+  const firstVideo = page.locator('video[src^="/first-pass.mp4?X-Amz-Signature="]');
   await expect(firstVideo).toHaveCount(1);
   await firstVideo.evaluate((element) => element.setAttribute("data-stable-player", "yes"));
 
@@ -525,7 +525,7 @@ test("retry keeps the first preview mounted and compare uses the chosen pass", a
   await page.getByRole("button", { name: "Compare" }).click();
   await expect(page.getByLabel("Edited timeline preview")).toHaveAttribute(
     "src",
-    "/corrected-pass.mp4",
+    /^\/corrected-pass\.mp4\?X-Amz-Signature=/,
   );
 });
 

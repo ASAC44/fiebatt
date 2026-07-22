@@ -42,6 +42,13 @@ Separation rules
   identity from a crop where that feature is outside the crop.
 - A temporary motion only needs to appear during its action frames. Ordinary
   source motion before and after it is correct, not missing prompt adherence.
+- The supplied frames are sparse samples, not adjacent video frames. Never infer
+  an abrupt cut, teleport, missing landing, or missing transition merely because
+  an intermediate phase is absent between two samples. Report temporal defects
+  only when a defect is visible within a sample or persists across samples.
+- A subject naturally moving partly outside the camera frame during the requested
+  motion is not an anatomy defect. Penalize only visible distortion or an
+  implausible boundary artifact.
 
 Use full frames to detect spill and preservation failures. Use enlarged target crops
 to verify fine details. Do not award a passing score because the video is attractive

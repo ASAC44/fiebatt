@@ -114,8 +114,10 @@ async def test_qwen_quality_request_labels_source_and_target_crops(monkeypatch, 
     score = await qwen.score_variant(
         "Make the car green",
         [paths["full"]],
+        source_frame_paths=[paths["source"]],
         target_frame_paths=[paths["target"]],
         reference_target_path=paths["source"],
+        change_type="appearance",
     )
 
     labels = [
@@ -124,6 +126,7 @@ async def test_qwen_quality_request_labels_source_and_target_crops(monkeypatch, 
         if item["type"] == "text"
     ]
     assert any("SOURCE TARGET BEFORE EDIT" in label for label in labels)
+    assert any("SOURCE FULL FRAME" in label for label in labels)
     assert any("GENERATED FULL FRAME" in label for label in labels)
     assert any("GENERATED TARGET CROP" in label for label in labels)
     assert score["prompt_adherence"] == 1

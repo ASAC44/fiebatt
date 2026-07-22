@@ -30,6 +30,19 @@ prompt_adherence (1-10)
 - 9-10 means exact requirement; 7-8 means correct with minor differences;
   5-6 means partial; 3-4 means major miss; 1-2 means wrong or absent.
 
+Separation rules
+- Prompt adherence answers whether the requested edit happened to the correct
+  subject with the requested count and attributes. Do not lower it for a visual
+  defect when the requested change itself is clearly present.
+- Visual coherence contains anatomy, flicker, identity drift, glitches, and
+  transition quality. Do not count an intentional requested pose or movement as
+  identity drift.
+- Claim a preservation or identity failure only when the paired SOURCE and
+  GENERATED frames visibly prove it. Never infer hair, accessories, clothing, or
+  identity from a crop where that feature is outside the crop.
+- A temporary motion only needs to appear during its action frames. Ordinary
+  source motion before and after it is correct, not missing prompt adherence.
+
 Use full frames to detect spill and preservation failures. Use enlarged target crops
 to verify fine details. Do not award a passing score because the video is attractive
 when the requested edit is wrong. Evidence must name observed failures precisely.

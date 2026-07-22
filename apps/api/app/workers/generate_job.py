@@ -434,24 +434,27 @@ async def _score_variant_safe(
     frames: list[str],
     prompt: str,
     *,
+    source_frames: list[str] | None = None,
     target_frames: list[str] | None = None,
     reference_target_path: str | None = None,
+    change_type: str | None = None,
 ) -> dict | None:
     try:
         return await ai.gemini.score_variant(
             frames,
             prompt,
+            source_frame_paths=source_frames,
             target_frame_paths=target_frames,
             reference_target_path=reference_target_path,
+            change_type=change_type,
         )
     except Exception:
         log.exception("scoring failed")
         return None
 
 
-async def _sample_variant_frames(variant_url: str, count: int = 7) -> list[str]:
-    variant_path = await storage.path_from_url(variant_url)
-    metadata = await ffmpeg.probe(variant_path)
+async def _sample_video_frames(video_path: Path, count: int = 7) -> list[str]:
+    metadata = await ffmpeg.probe(video_path)
     duration = float(metadata["duration"])
     if duration <= 0:
         raise ValueError("generated clip has no measurable duration")
@@ -460,9 +463,14 @@ async def _sample_variant_frames(variant_url: str, count: int = 7) -> list[str]:
     for index in range(count):
         frame_path, _ = storage.new_path("keyframes", "jpg")
         timestamp = duration * (index + 0.5) / count
-        await ffmpeg.extract_frame(variant_path, timestamp, frame_path)
+        await ffmpeg.extract_frame(video_path, timestamp, frame_path)
         frames.append(str(frame_path))
     return frames
+
+
+async def _sample_variant_frames(variant_url: str, count: int = 7) -> list[str]:
+    variant_path = await storage.path_from_url(variant_url)
+    return await _sample_video_frames(variant_path, count=count)
 
 
 async def _run(job_id: str) -> None:
@@ -1103,12 +1111,20 @@ async def _run(job_id: str) -> None:
             return None
         try:
             sampled_frames = await _sample_variant_frames(variant.url)
+            source_frames = await _sample_video_frames(
+                clip_path,
+                count=len(sampled_frames),
+            )
         except Exception as exc:
             log.exception("generated frame sampling failed")
             await _emit(job_id, "score_skipped", f"couldn't sample generated video: {exc}")
             return None
         target_frames: list[str] = []
-        if not bbox_is_full_frame and sampled_frames:
+        moving_target = (
+            planned_intent is not None
+            and planned_intent.effect_extent in {"motion_path", "new_object_path"}
+        )
+        if not bbox_is_full_frame and sampled_frames and not moving_target:
             try:
                 # Full frames catch broad spill, but a brief wrong colour or
                 # shape inside the selected target can be too small to judge
@@ -1127,9 +1143,11 @@ async def _run(job_id: str) -> None:
                 target_frames = []
         return await _score_variant_safe(
             sampled_frames,
-            generation_prompt,
+            str(payload.get("user_prompt") or prompt),
+            source_frames=source_frames,
             target_frames=target_frames,
             reference_target_path=subject_reference_effective,
+            change_type=planned_change_type,
         )
 
     validation_by_url: dict[str, tuple[ContinuityReport, dict | None]] = {}

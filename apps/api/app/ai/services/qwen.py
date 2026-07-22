@@ -207,8 +207,10 @@ async def score_variant(
     original_prompt: str,
     variant_frame_paths: list[str],
     *,
+    source_frame_paths: list[str] | None = None,
     target_frame_paths: list[str] | None = None,
     reference_target_path: str | None = None,
+    change_type: str | None = None,
 ) -> dict[str, int | list[str]]:
     """Score a generated variant on visual coherence and prompt adherence.
 
@@ -221,9 +223,13 @@ async def score_variant(
         "text": (
             "NON-NEGOTIABLE EDIT REQUIREMENT:\n"
             f"{original_prompt}\n\n"
+            f"EDIT TYPE: {change_type or 'unspecified'}\n\n"
             "Judge exact attributes, not general similarity. Full frames show spill "
-            "and scene preservation. Enlarged target crops show whether the selected "
-            "change is correct."
+            "and scene preservation. Each SOURCE/GENERATED pair is sampled at the "
+            "same relative time. Enlarged target crops show whether a spatially "
+            "bounded change is correct. For a motion edit, the requested new pose "
+            "or trajectory is intentional; judge whether the action happened under "
+            "prompt adherence and judge artifacts separately under visual coherence."
         ),
     }]
     if reference_target_path:
@@ -232,6 +238,15 @@ async def score_variant(
             {"type": "image_url", "image_url": {"url": _image_data_url(reference_target_path)}},
         ])
     for index, path in enumerate(variant_frame_paths):
+        if source_frame_paths and index < len(source_frame_paths):
+            content.append({
+                "type": "text",
+                "text": f"SOURCE FULL FRAME {index + 1} (same relative time):",
+            })
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": _image_data_url(source_frame_paths[index])},
+            })
         content.append({"type": "text", "text": f"GENERATED FULL FRAME {index + 1}:"})
         content.append({"type": "image_url", "image_url": {"url": _image_data_url(path)}})
     for index, path in enumerate(target_frame_paths or []):

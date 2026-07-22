@@ -315,9 +315,9 @@ def test_wan_video_edit_payload_targets_isolated_reference_and_source(tmp_path):
     )
     assert normalized is not None
     assert min(normalized.shape[:2]) >= 240
-    assert "reference image identifies the target" in payload["input"]["prompt"].lower()
-    assert "pose, position, velocity, and timing to change" in payload["input"]["prompt"].lower()
-    assert "unchanged target motion fails" in payload["input"]["prompt"].lower()
+    assert "reference image identifies target only" in payload["input"]["prompt"].lower()
+    assert "target motion must visibly change" in payload["input"]["prompt"].lower()
+    assert "unchanged result fails" in payload["input"]["prompt"].lower()
     assert "other subjects" in payload["input"]["prompt"].lower()
     assert "ghosting" in payload["input"]["negative_prompt"]
     assert payload["parameters"]["resolution"] == "720P"
@@ -462,7 +462,5 @@ def test_motion_prompt_rewrite_preserves_sequence_language():
 
     assert motion is True
     assert sequenced is True
-    assert "Do not loop, extend, or repeat the action beyond the requested count." in rewritten
-    assert "blend smoothly back into the original gait and forward momentum" in rewritten
     assert "exactly three distinct repetitions" in rewritten
-    assert "perform the requested action clearly and repeatedly" not in rewritten
+    assert len(rewritten.split()) <= 35

@@ -69,10 +69,10 @@ def test_motion_video_edit_allows_target_motion_but_protects_scene():
     )
 
     prompt = payload["input"]["prompt"]
-    assert prompt.startswith("REQUIRED EDIT — HIGHEST PRIORITY")
-    assert "pose, position, velocity, and timing to change" in prompt
-    assert "unchanged target motion fails" in prompt
-    assert prompt.index("Make the selected car bounce once") < prompt.index("PRESERVE:")
+    assert prompt.startswith("Make the selected car bounce once")
+    assert "Target motion must visibly change" in prompt
+    assert "unchanged result fails" in prompt
+    assert prompt.index("Make the selected car bounce once") < prompt.index("Preserve camera")
     assert payload["parameters"]["prompt_extend"] is False
 
 
@@ -104,6 +104,9 @@ def test_complete_motion_prompt_stays_focused_and_action_first(tmp_path: Path):
         temporal_behavior="temporary",
         effect_extent="motion_path",
     )
+    from app.ai.services import _rewrite_motion_prompt
+
+    _, _, timed = _rewrite_motion_prompt(timed)
     prompt = _build_video_edit_payload(
         timed,
         "https://cdn.example.test/source.mp4",
@@ -111,10 +114,10 @@ def test_complete_motion_prompt_stays_focused_and_action_first(tmp_path: Path):
         motion_edit=True,
     )["input"]["prompt"]
 
-    assert len(prompt.split()) <= 180
-    assert prompt.index("Make this man jump once") < prompt.index("MOTION:")
-    assert prompt.index("MOTION:") < prompt.index("PRESERVE:")
+    assert len(prompt.split()) <= 100
+    assert prompt.index("Make this man jump once") < prompt.index("CONTINUITY:")
+    assert prompt.index("CONTINUITY:") < prompt.index("TARGET:")
     assert "0.750 through 4.250" not in prompt
-    assert "Briefly match the exact incoming source motion" in prompt
-    assert "Transition gradually from the completed action" in prompt
+    assert "Match incoming motion briefly" in prompt
+    assert "transition gradually into outgoing motion" in prompt
     assert "do not begin the requested action" not in prompt.lower()

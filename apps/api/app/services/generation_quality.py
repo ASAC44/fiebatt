@@ -214,28 +214,28 @@ def corrective_prompt(
     pre_handle: float | None = None,
     post_handle: float | None = None,
 ) -> str:
-    details = "\n".join(f"- {item}" for item in evidence)
+    # Scores and full reviewer prose remain in job metadata. Wan only needs the
+    # first concrete failures; replaying every metric made corrective prompts
+    # longer and more contradictory than the initial request.
+    details = "\n".join(f"- {item}" for item in evidence[:2])
     lowered = " ".join(evidence).lower()
     transition_contracts: list[str] = []
     if "entry" in lowered and pre_handle is not None:
         transition_contracts.append(
-            "Briefly match incoming source motion, then transition gradually into the "
-            "requested action. Never cut directly to its most changed or extreme pose. "
-            "The action must still occur after this brief bridge, without a long delay."
+            "Match incoming motion briefly, then transition gradually into the action; "
+            "do not cut directly to its most changed pose or delay the action."
         )
     if "exit" in lowered and post_handle is not None:
         transition_contracts.append(
-            "After the action, recover into outgoing pose and velocity without pausing "
-            "or resetting."
+            "Recover into outgoing motion without pausing or resetting."
         )
     transition_text = " ".join(transition_contracts)
     return (
-        "\n\nRETRY CORRECTION — fix these measured failures:\n"
+        "\n\nRETRY — fix these failures:\n"
         f"{details}\n"
         f"{transition_text}\n"
-        "Keep the required target, action, count, and attributes exact. Fix only the "
-        "named failure; preserve unrelated content. Do not return an unchanged target, "
-        "cut, fade, freeze, or spill outside the edit."
+        "Keep target, action, count, and attributes exact. Preserve unrelated content. "
+        "Do not leave the target unchanged or spill outside the edit."
     )
 
 

@@ -37,6 +37,7 @@ def test_jump_then_walk_prompt_routes_to_single_source_edit():
     assert sequenced is True
     assert prompt in rewritten
     assert "exactly three distinct repetitions" in rewritten
+    assert len(rewritten.split()) <= len(prompt.split()) + 8
     assert select_video_provider("auto", source_video=True) == "wan"
     assert select_video_provider("auto", source_video=True, duration=10.0) == "wan"
     assert select_video_provider("auto", source_video=True, duration=12.0) == "wan"

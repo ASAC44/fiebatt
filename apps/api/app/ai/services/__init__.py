@@ -80,33 +80,16 @@ def _rewrite_motion_prompt(prompt_text: str) -> tuple[bool, bool, str]:
         return False, False, prompt_text
     if sequenced_motion:
         count_instruction = (
-            "Interpret 'a few times' as exactly three distinct repetitions. "
+            "For 'a few times': exactly three distinct repetitions. "
             if re.search(r"\ba few times?\b", lowered)
             else ""
         )
-        return (
-            True,
-            True,
-            "MANDATORY MOTION EDIT: honor the requested action timing exactly. "
-            "Keep the movement phases in the order the user described. Do not "
-            "loop, extend, or repeat the action beyond the requested count. "
-            "When the prompt asks the subject to resume normal motion, blend "
-            "smoothly back into the original gait and forward momentum without "
-            "a stop, freeze, or hard reset. Keep the subject identity, scene, "
-            "camera, lighting, and background consistent. "
-            + count_instruction
-            + "\n\n"
-            + prompt_text,
-        )
-    return (
-        True,
-        False,
-        "MANDATORY MOTION EDIT: perform the requested action clearly. Do not "
-        "merely reproduce the original motion or leave the subject unchanged. "
-        "Keep the subject identity, scene, camera, lighting, and background "
-        "consistent.\n\n"
-        + prompt_text,
-    )
+        # Qwen already supplies the grounded phases and continuity wording.
+        # Repeating them here made source-video prompts long enough for Wan to
+        # prefer the many preservation clauses over the requested action.
+        rewritten = f"{count_instruction}\n\n{prompt_text}" if count_instruction else prompt_text
+        return True, True, rewritten
+    return True, False, prompt_text
 
 
 if _USE_AI_STUBS:

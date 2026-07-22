@@ -170,14 +170,11 @@ def test_motion_context_does_not_force_subject_back_to_old_path():
         effect_extent="motion_path",
     )
 
-    assert "Briefly match the exact incoming source motion" in rendered
-    assert "transition gradually into the requested action" in rendered
-    assert "Do not begin with the action's most changed or extreme pose" in rendered
+    assert "Match incoming motion briefly" in rendered
+    assert "transition gradually into the requested new motion" in rendered
     assert "0.500 through 4.000" not in rendered
-    assert "entrance and exit bridges must never delay or replace" in rendered
-    assert "Transition gradually from the completed action" in rendered
-    assert "do not snap the target back" in rendered
-    assert "may move through the space required" in rendered
+    assert "continue its new path" in rendered
+    assert "outgoing source motion" not in rendered
 
 
 def test_new_object_context_allows_emergence_beyond_selection():

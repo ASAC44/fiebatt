@@ -222,24 +222,31 @@ def _build_video_edit_payload(
             "url": _image_to_base64(reference_frame_path),
         })
 
-    target_instruction = (
-        "The reference image identifies the target, not a requested pose. Edit only it. "
-        if reference_frame_path
-        else "Edit only the named target. "
-    )
-    motion_instruction = (
-        "Allow its pose, position, velocity, and timing to change. The required action "
-        "must be clear; unchanged target motion fails."
-        if motion_edit
-        else "Change only the requested target attributes."
-    )
-    provider_prompt = (
-        f"REQUIRED EDIT — HIGHEST PRIORITY:\n{prompt}\n\n"
-        f"TARGET: {target_instruction}"
-        f"{motion_instruction}\n"
-        "PRESERVE: Duration, camera, framing, lighting, background, other subjects, "
-        "and unrelated motion. Do not regenerate the scene."
-    )
+    if motion_edit:
+        target_instruction = (
+            "Reference image identifies target only, not pose. "
+            if reference_frame_path
+            else "Edit named target only. "
+        )
+        provider_prompt = (
+            f"{prompt}\n\n"
+            f"TARGET: {target_instruction}"
+            "Target motion must visibly change; unchanged result fails. Preserve camera, "
+            "background, and other subjects."
+        )
+    else:
+        target_instruction = (
+            "The reference image identifies the target, not a requested pose. Edit only it. "
+            if reference_frame_path
+            else "Edit only the named target. "
+        )
+        provider_prompt = (
+            f"REQUIRED EDIT — HIGHEST PRIORITY:\n{prompt}\n\n"
+            f"TARGET: {target_instruction}"
+            "Change only the requested target attributes.\n"
+            "PRESERVE: Duration, camera, framing, lighting, background, other subjects, "
+            "and unrelated motion. Do not regenerate the scene."
+        )
     return {
         "input": {
             "prompt": provider_prompt,

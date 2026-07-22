@@ -139,19 +139,21 @@ def protected_context_prompt(
     )
 
     if effect_extent == "motion_path":
-        # Wan often turns a delayed-action instruction into a no-op. Let it perform
-        # the action promptly, then use deterministic seam matching to choose the
-        # safe entrance and exit from the generated clip.
+        if temporal_behavior == "future_changing_motion":
+            motion_flow = (
+                "Match incoming motion briefly, transition gradually into the requested "
+                "new motion, then continue its new path."
+            )
+        else:
+            motion_flow = (
+                "Match incoming motion briefly, transition gradually into the requested "
+                "action, perform it clearly, then recover and transition gradually into "
+                "outgoing motion."
+            )
         return (
             f"{prompt}\n\n"
-            "MOTION: Briefly match the exact incoming source motion, then transition "
-            "gradually into the requested action. Do not begin with the action's most "
-            "changed or extreme pose. Perform the requested action clearly and naturally. "
-            f"{ending_contract} {effect_contract} "
-            "Transition gradually from the completed action into outgoing source motion "
-            "unless the request changes the future path. These brief entrance and exit "
-            "bridges must never delay or replace the requested action. "
-            "Preserve unrelated content. No cut, fade, freeze, teleport, or reset."
+            f"CONTINUITY: {motion_flow} Preserve unrelated content. "
+            "No cut, freeze, or teleport."
         )
 
     return (

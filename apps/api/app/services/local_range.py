@@ -97,6 +97,41 @@ def _fit_interval(center: float, length: float, lower: float, upper: float) -> t
     return max(lower, start), min(upper, end)
 
 
+def _balance_bounded_action_handles(
+    *,
+    core_start: float,
+    core_end: float,
+    seed_ts: float,
+    occurrence_start: float,
+    occurrence_end: float,
+    context_lower: float,
+    context_upper: float,
+) -> tuple[float, float]:
+    """Shift a bounded action just enough to keep two complete handles.
+
+    Centering an action on a playhead near a shot boundary can leave almost no
+    incoming context. The provider may then begin at the peak of the action,
+    leaving no natural frame on which to enter the generated clip. Preserve the
+    requested duration and keep the playhead inside the core while recovering
+    symmetric handles whenever the tracked occurrence has room.
+    """
+    core_duration = core_end - core_start
+    earliest = max(
+        occurrence_start,
+        context_lower + HANDLE_SECONDS,
+        seed_ts - core_duration,
+    )
+    latest = min(
+        occurrence_end - core_duration,
+        context_upper - HANDLE_SECONDS - core_duration,
+        seed_ts,
+    )
+    if latest < earliest:
+        return core_start, core_end
+    shifted_start = min(max(core_start, earliest), latest)
+    return shifted_start, shifted_start + core_duration
+
+
 def resolve_window_from_evidence(
     *,
     intent: EditIntent,
@@ -144,6 +179,17 @@ def resolve_window_from_evidence(
             intent.estimated_action_seconds,
             occurrence_start,
             occurrence_end,
+        )
+        context_lower = max(source_start, shot_start)
+        context_upper = min(upper, shot_end)
+        core_start, core_end = _balance_bounded_action_handles(
+            core_start=core_start,
+            core_end=core_end,
+            seed_ts=seed_ts,
+            occurrence_start=occurrence_start,
+            occurrence_end=occurrence_end,
+            context_lower=context_lower,
+            context_upper=context_upper,
         )
 
     # Context belongs to the surrounding shot, not only frames where target

@@ -52,8 +52,36 @@ def _mean_delta(left: np.ndarray, right: np.ndarray, mask: np.ndarray) -> float:
     return float(selected.mean()) if selected.size else 0.0
 
 
+def _motion_vector(left: np.ndarray, right: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    if left.shape != right.shape:
+        right = cv2.resize(right, (left.shape[1], left.shape[0]))
+    flow = cv2.calcOpticalFlowFarneback(
+        cv2.cvtColor(left, cv2.COLOR_BGR2GRAY),
+        cv2.cvtColor(right, cv2.COLOR_BGR2GRAY),
+        None,
+        0.5,
+        3,
+        15,
+        3,
+        5,
+        1.2,
+        0,
+    )
+    selected = flow[mask]
+    if selected.size == 0:
+        return np.zeros(2, dtype=np.float32)
+    return np.median(selected, axis=0)
+
+
+def _motion_vector_delta(sample: SeamFrames, target: np.ndarray) -> float:
+    incoming = _motion_vector(sample.left_before, sample.left_at, target)
+    outgoing = _motion_vector(sample.right_at, sample.right_after, target)
+    denominator = float(np.linalg.norm(incoming) + np.linalg.norm(outgoing) + 0.5)
+    return float(np.linalg.norm(incoming - outgoing) / denominator)
+
+
 def seam_score(sample: SeamFrames, bbox: dict[str, float]) -> float:
-    """Weight protected background and cross-cut motion above target appearance."""
+    """Score both visual matching and the target's motion across a hard cut."""
     target = _bbox_mask(sample.left_at.shape, bbox, invert=False)
     background = _bbox_mask(sample.left_at.shape, bbox, invert=True)
     appearance_background = _mean_delta(sample.left_at, sample.right_at, background)
@@ -61,7 +89,16 @@ def seam_score(sample: SeamFrames, bbox: dict[str, float]) -> float:
     left_motion = cv2.absdiff(sample.left_before, sample.left_at)
     right_motion = cv2.absdiff(sample.right_at, sample.right_after)
     motion_delta = _mean_delta(left_motion, right_motion, np.ones_like(target))
-    return 0.50 * appearance_background + 0.20 * appearance_target + 0.30 * motion_delta
+    appearance_score = (
+        0.50 * appearance_background
+        + 0.20 * appearance_target
+        + 0.30 * motion_delta
+    )
+    # Pixel differences alone miss a walk→airborne cut when the moving subject
+    # occupies little of the full frame. Dense-flow direction makes that jump
+    # visible without penalizing an intentional action elsewhere in the clip.
+    target_motion_delta = _motion_vector_delta(sample, target)
+    return 0.60 * appearance_score + 0.40 * target_motion_delta
 
 
 def select_best_seam(

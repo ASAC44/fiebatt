@@ -171,6 +171,9 @@ def test_motion_context_does_not_force_subject_back_to_old_path():
         effect_extent="motion_path",
     )
 
+    assert "continue only the incoming source motion" in rendered
+    assert "first edited motion must be preparation" in rendered
+
     assert "Do not snap the subject back" in rendered
     assert "may move through the space required" in rendered
 

@@ -119,6 +119,32 @@ def test_range_uses_two_sided_handles_without_covering_whole_occurrence():
     assert result.generation_context.end_ts == pytest.approx(12.5)
 
 
+def test_bounded_action_near_start_shifts_to_recover_full_pre_handle():
+    intent = EditIntent(
+        raw_prompt="make this person jump once",
+        change_type="motion",
+        estimated_action_seconds=3.5,
+    )
+    result = resolve_window_from_evidence(
+        intent=intent,
+        seed_ts=2.12,
+        duration=11.9,
+        analysis_start=0.0,
+        analysis_end=5.62,
+        shot_start=0.0,
+        shot_end=5.62,
+        tracked_start=0.0,
+        tracked_end=5.5,
+        frames_inspected=23,
+    )
+
+    assert result.edit_core.start_ts == pytest.approx(0.75)
+    assert result.edit_core.end_ts == pytest.approx(4.25)
+    assert result.generation_context.start_ts == pytest.approx(0.0)
+    assert result.generation_context.end_ts == pytest.approx(5.0)
+    assert "limited pre-roll before edit core" not in result.warnings
+
+
 def test_trajectory_change_covers_occurrence_instead_of_old_local_position():
     intent = EditIntent(
         raw_prompt="make this person run",

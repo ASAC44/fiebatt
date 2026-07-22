@@ -146,6 +146,20 @@ def protected_context_prompt(
         "Allow the selected subject's required silhouette change while preserving unrelated content.",
     )
 
+    if effect_extent == "motion_path" and window.pre_handle >= 0.05:
+        entrance_contract = (
+            f"For the first {window.pre_handle:.3f} seconds, continue only the "
+            "incoming source motion and keep the subject in its incoming action "
+            "state. Do not begin the requested action inside that handle. At the "
+            "editable boundary, show its natural preparation and onset before its "
+            "peak. The first edited motion must be preparation, not the peak pose."
+        )
+    else:
+        entrance_contract = (
+            "Do not begin the requested change inside the incoming handle; begin "
+            "it continuously after that handle."
+        )
+
     return (
         "SOURCE-CONTINUITY EDIT: The requested change must be clearly completed "
         "inside seconds "
@@ -155,6 +169,7 @@ def protected_context_prompt(
         "handles. Preserve their subjects, colours, lighting, camera, background, "
         "and direction of motion as closely as possible. Start from the incoming "
         "pose and velocity, then perform the requested change clearly and completely. "
+        f"{entrance_contract} "
         f"{ending_contract} {effect_contract} "
         "The handles guide a continuous entrance and exit; they must not prevent or "
         "weaken the requested edit. Do not use a "

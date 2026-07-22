@@ -33,6 +33,19 @@ def _regional_sample(timestamp: float, *, changed_side: str) -> SeamFrames:
     return SeamFrames(timestamp, source, source, generated, generated)
 
 
+def _motion_sample(timestamp: float, *, outgoing: str) -> SeamFrames:
+    def square(x: int, y: int) -> np.ndarray:
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+        frame[y : y + 16, x : x + 16] = 255
+        return frame
+
+    left_before = square(16, 24)
+    left_at = square(20, 24)
+    right_at = square(20, 24)
+    right_after = square(24, 24) if outgoing == "walking" else square(20, 12)
+    return SeamFrames(timestamp, left_before, left_at, right_at, right_after)
+
+
 def test_local_seams_keep_full_context_until_matching_cut_frames():
     selection = select_local_seams(
         entry_samples=[_sample(0.25, 30, 31), _sample(0.75, 30, 30)],
@@ -130,6 +143,20 @@ def test_frame_matching_moves_unsafe_nominal_cut_to_safe_candidate():
     )
 
     assert selection.media_start == pytest.approx(0.75)
+    assert selection.entry_strategy == "matched"
+    assert selection.passed is True
+
+
+def test_frame_matching_rejects_walk_to_airborne_motion_cut():
+    selection = select_local_seams(
+        entry_samples=[_motion_sample(0.1, outgoing="walking")],
+        exit_samples=[],
+        nominal_entry_sample=_motion_sample(0.75, outgoing="jumping"),
+        bbox={"x": 0.2, "y": 0.1, "w": 0.6, "h": 0.8},
+        window=WINDOW,
+    )
+
+    assert selection.media_start == pytest.approx(0.1)
     assert selection.entry_strategy == "matched"
     assert selection.passed is True
 

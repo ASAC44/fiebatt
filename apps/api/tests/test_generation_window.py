@@ -177,6 +177,29 @@ def test_motion_context_does_not_force_subject_back_to_old_path():
     assert "outgoing source motion" not in rendered
 
 
+def test_bounded_motion_includes_observable_success_before_continuity():
+    window = resolve_generation_window(
+        0.5,
+        4.0,
+        payload={
+            "adaptive_context_enabled": True,
+            "planned_context": _planned_context(),
+        },
+        project_duration=10.0,
+    )
+
+    rendered = protected_context_prompt(
+        "Make the person perform one requested action.",
+        window,
+        temporal_behavior="temporary",
+        effect_extent="motion_path",
+        observable_success="the target reaches a visibly different airborne position",
+    )
+
+    assert rendered.index("ACTION PROOF:") < rendered.index("CONTINUITY:")
+    assert "visibly different airborne position" in rendered
+
+
 def test_new_object_context_allows_emergence_beyond_selection():
     window = resolve_generation_window(
         0.5,

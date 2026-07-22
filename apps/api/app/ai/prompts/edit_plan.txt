@@ -19,6 +19,7 @@ Return JSON only:
     "selection_match": "match" | "mismatch" | "uncertain",
     "selection_match_reason": "short visual reason",
     "action_phases": [],
+    "observable_success": "one visible fact proving the requested action happened",
     "estimated_action_seconds": 3.5,
     "requires_recovery_motion": true,
     "preservation_requirements": [],
@@ -44,11 +45,11 @@ DECISIONS
   do not search separate appearances unless the user says every, throughout,
   everywhere, or whole video.
 - A self-contained action such as jump, wave, blink, or bounce uses
-  bounded_action + temporary. Preserve the source motion around it: briefly
-  continue the exact incoming motion, transition gradually into the requested
-  action without a sudden state or pose change, complete it, then transition
-  gradually back into outgoing source motion. Never infer a new final state such
-  as standing still from a single reference frame.
+  bounded_action + temporary. The requested action is primary and must produce
+  an unmistakable visible pose, position, or trajectory change. Incoming and
+  outgoing source motion are brief boundary phases only; they must never weaken,
+  delay, or replace the action. Never infer a new final state such as standing
+  still from a single reference frame.
 - A lasting path change such as run, walk, fly, drive, leave, or chase uses
   trajectory_continuation + future_changing_motion. Do not force the target back
   to an old position.
@@ -62,15 +63,16 @@ DECISIONS
 
 EDIT INSTRUCTION
 - Produce exactly one variant. Keep prompt_for_video_edit between 25 and 70 words.
-- State the exact target and required result first. For bounded motion, name the
-  count and ordered phases from incoming source motion, through a gradual onset
-  and the requested action, to natural recovery and outgoing source motion.
-  Explicitly require a gradual visual transition at both entrance and exit. Add
-  preparation only when natural for that action. For human or animal motion,
-  request natural physics and stable anatomy; avoid exaggerated motion unless
-  the user asks for it. For colors, repeat the exact color and surface. For
-  anatomy, state shape, structure, color, and boundaries. For removal, state what
-  fills the region naturally.
+- State the exact target, action, and count first. For motion, set
+  observable_success to one concrete visual fact that cannot be true if the
+  source motion stayed unchanged. Use target-specific physical evidence, not a
+  vague claim that the action occurs. Name ordered preparation, action, and
+  recovery phases using direct physical verbs and visible displacement. Put
+  entrance and exit continuity in one short final clause. Natural physics and
+  stable anatomy constrain the action; they never replace or soften it. For
+  colors, repeat the exact color and surface. For anatomy, state shape,
+  structure, color, and boundaries. For removal, state what fills the region
+  naturally.
 - Mention only edit-specific preservation, such as keeping shirt fabric unchanged
   while replacing its text. Do not add generic timing, camera, background,
   continuity, transition, or "do not regenerate" boilerplate; the executor adds it.

@@ -69,10 +69,10 @@ def test_motion_video_edit_allows_target_motion_but_protects_scene():
     )
 
     prompt = payload["input"]["prompt"]
-    assert prompt.startswith("Make the selected car bounce once")
-    assert "Target motion must visibly change" in prompt
-    assert "unchanged result fails" in prompt
-    assert prompt.index("Make the selected car bounce once") < prompt.index("Preserve camera")
+    assert prompt.startswith("REQUIRED MOTION EDIT — HIGHEST PRIORITY")
+    assert "Perform the requested target action unmistakably" in prompt
+    assert "unchanged source motion fails" in prompt
+    assert prompt.index("Make the selected car bounce once") < prompt.index("TARGET:")
     assert payload["parameters"]["prompt_extend"] is False
 
 
@@ -103,6 +103,7 @@ def test_complete_motion_prompt_stays_focused_and_action_first(tmp_path: Path):
         GenerationWindow(0.75, 4.25, 0.0, 5.0, True),
         temporal_behavior="temporary",
         effect_extent="motion_path",
+        observable_success="both feet visibly leave the ground",
     )
     from app.ai.services import _rewrite_motion_prompt
 
@@ -114,10 +115,13 @@ def test_complete_motion_prompt_stays_focused_and_action_first(tmp_path: Path):
         motion_edit=True,
     )["input"]["prompt"]
 
-    assert len(prompt.split()) <= 100
-    assert prompt.index("Make this man jump once") < prompt.index("CONTINUITY:")
+    assert len(prompt.split()) <= 145
+    assert prompt.index("HIGHEST PRIORITY") < prompt.index("Make this man jump once")
+    assert prompt.index("Make this man jump once") < prompt.index("ACTION PROOF:")
+    assert prompt.index("ACTION PROOF:") < prompt.index("CONTINUITY:")
     assert prompt.index("CONTINUITY:") < prompt.index("TARGET:")
     assert "0.750 through 4.250" not in prompt
     assert "Match incoming motion briefly" in prompt
     assert "transition gradually into outgoing motion" in prompt
+    assert "both feet visibly leave the ground" in prompt
     assert "do not begin the requested action" not in prompt.lower()

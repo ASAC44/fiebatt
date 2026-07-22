@@ -1062,6 +1062,11 @@ async def _run(job_id: str) -> None:
                     if planned_intent is not None
                     else "subject"
                 ),
+                observable_success=(
+                    planned_intent.observable_success
+                    if planned_intent is not None
+                    else None
+                ),
             )
             if provider in {"wan", "happyhorse"} and source_video_url is not None
             else generation_prompt

@@ -56,6 +56,7 @@ class SemanticEditDecision(BaseModel):
     selection_match: Literal["match", "mismatch", "uncertain"] = "match"
     selection_match_reason: str | None = None
     action_phases: list[str] = Field(default_factory=list)
+    observable_success: str | None = Field(default=None, max_length=300)
     estimated_action_seconds: float = Field(default=3.0, ge=0.5, le=15.0)
     requires_recovery_motion: bool = False
     preservation_requirements: list[str] = Field(default_factory=list)
@@ -103,6 +104,7 @@ class SemanticEditPlan(BaseModel):
             expected_new_objects=decision.expected_new_objects,
             target_description=decision.target_description,
             action_phases=decision.action_phases,
+            observable_success=decision.observable_success,
             estimated_action_seconds=decision.estimated_action_seconds,
             requires_recovery_motion=decision.requires_recovery_motion,
             preservation_requirements=decision.preservation_requirements,
@@ -121,6 +123,7 @@ class EditIntent(BaseModel):
     expected_new_objects: list[str] = Field(default_factory=list)
     target_description: str | None = None
     action_phases: list[str] = Field(default_factory=list)
+    observable_success: str | None = Field(default=None, max_length=300)
     estimated_action_seconds: float = Field(default=3.0, gt=0.0)
     requires_recovery_motion: bool = False
     preservation_requirements: list[str] = Field(default_factory=list)

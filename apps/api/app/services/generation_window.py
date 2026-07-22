@@ -105,6 +105,7 @@ def protected_context_prompt(
     *,
     temporal_behavior: str = "temporary",
     effect_extent: str = "subject",
+    observable_success: str | None = None,
 ) -> str:
     """Add concise timing guidance without burying the requested edit."""
     if not window.adaptive or (window.pre_handle < 0.05 and window.post_handle < 0.05):
@@ -139,6 +140,12 @@ def protected_context_prompt(
     )
 
     if effect_extent == "motion_path":
+        success = (observable_success or "").strip().rstrip(".")
+        action_proof = (
+            f"ACTION PROOF: {success}. "
+            if success
+            else "ACTION PROOF: Requested target motion must visibly differ from the source. "
+        )
         if temporal_behavior == "future_changing_motion":
             motion_flow = (
                 "Match incoming motion briefly, transition gradually into the requested "
@@ -152,7 +159,7 @@ def protected_context_prompt(
             )
         return (
             f"{prompt}\n\n"
-            f"CONTINUITY: {motion_flow} Preserve unrelated content. "
+            f"{action_proof}CONTINUITY: {motion_flow} Preserve unrelated content. "
             "No cut, freeze, or teleport."
         )
 

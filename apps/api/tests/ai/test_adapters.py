@@ -316,8 +316,12 @@ def test_wan_video_edit_payload_targets_isolated_reference_and_source(tmp_path):
     assert normalized is not None
     assert min(normalized.shape[:2]) >= 240
     assert "reference image identifies target only" in payload["input"]["prompt"].lower()
-    assert "target motion must visibly change" in payload["input"]["prompt"].lower()
-    assert "unchanged result fails" in payload["input"]["prompt"].lower()
+    assert payload["input"]["prompt"].startswith(
+        "REQUIRED MOTION EDIT — HIGHEST PRIORITY"
+    )
+    assert "perform the requested target action unmistakably" in payload["input"]["prompt"].lower()
+    assert "pose, position, velocity, and timing may change" in payload["input"]["prompt"].lower()
+    assert "unchanged source motion fails" in payload["input"]["prompt"].lower()
     assert "other subjects" in payload["input"]["prompt"].lower()
     assert "ghosting" in payload["input"]["negative_prompt"]
     assert payload["parameters"]["resolution"] == "720P"

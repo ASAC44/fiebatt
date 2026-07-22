@@ -229,10 +229,12 @@ def _build_video_edit_payload(
             else "Edit named target only. "
         )
         provider_prompt = (
+            "REQUIRED MOTION EDIT — HIGHEST PRIORITY:\n"
+            "Perform the requested target action unmistakably. The target's pose, "
+            "position, velocity, and timing may change; unchanged source motion fails.\n\n"
             f"{prompt}\n\n"
             f"TARGET: {target_instruction}"
-            "Target motion must visibly change; unchanged result fails. Preserve camera, "
-            "background, and other subjects."
+            "Preserve camera, background, and other subjects."
         )
     else:
         target_instruction = (

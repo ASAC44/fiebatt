@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
+from sqlalchemy import select
 
 # force stub mode before importing the app
 os.environ["USE_AI_STUBS"] = "true"
@@ -35,6 +36,7 @@ from app.services.agent_tools import execute_tool  # noqa: E402
 from app.db.session import get_db  # noqa: E402
 from app.config.settings import get_settings  # noqa: E402
 from app.models.project import Project  # noqa: E402
+from app.models.conversation import ChatMessage  # noqa: E402
 from app.models.selection import SelectionArtifact  # noqa: E402
 from app.schemas.timeline import PersistedClip, PersistedEDL  # noqa: E402
 
@@ -843,6 +845,7 @@ async def test_agent_chat_with_function_call(client: AsyncClient, live_agent_set
 @pytest.mark.asyncio
 async def test_selected_edit_uses_direct_plan_without_general_agent_call(
     client: AsyncClient,
+    db_session,
     live_agent_settings,
 ):
     """A clear selected edit goes through exactly one semantic planning path."""
@@ -860,6 +863,20 @@ async def test_selected_edit_uses_direct_plan_without_general_agent_call(
             return {
                 "plan_id": "plan-1",
                 "edit_core": {"start_ts": 1.0, "end_ts": 4.0},
+                "provider": "wan",
+                "intent": {
+                    "grounded_edit": {
+                        "description": "The selected man jumps once.",
+                        "intent": "transform",
+                        "conditioning_strategy": "first_frame",
+                        "tone": "original",
+                        "color_grading": "original",
+                        "region_emphasis": "selected man",
+                        "prompt_for_video_edit": (
+                            "Continue his walk, jump once, land, and resume walking."
+                        ),
+                    }
+                },
             }
         assert tool_name == "generate_edit"
         assert args["plan_id"] == "plan-1"
@@ -892,6 +909,19 @@ async def test_selected_edit_uses_direct_plan_without_general_agent_call(
     assert mock_client.chat.completions.create.await_count == 0
     suggestion = next(event for event in events if event["event"] == "suggestion")
     assert suggestion["data"]["edit"]["job_id"] == "job-1"
+
+    saved_rows = (
+        await db_session.execute(
+            select(ChatMessage).where(
+                ChatMessage.conversation_id == "conv-enforced-edit",
+                ChatMessage.role == "agent",
+            )
+        )
+    ).scalars().all()
+    saved = next(row for row in saved_rows if "prompt_plan" in row.content)
+    assert [call["status"] for call in saved.content["tool_calls"]] == ["done", "done"]
+    assert saved.content["prompt_plan"]["job_id"] == "job-1"
+    assert "resume walking" in saved.content["prompt_plan"]["plan"]["prompt"].lower()
 
 
 @pytest.mark.asyncio

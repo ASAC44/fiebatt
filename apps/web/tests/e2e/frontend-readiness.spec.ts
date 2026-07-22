@@ -29,6 +29,10 @@ async function installApi(
     current: () => unknown | null;
     onAgentChat?: (body: unknown) => void;
   },
+  history?: {
+    conversations: Array<Record<string, unknown>>;
+    messages: Array<Record<string, unknown>>;
+  },
 ) {
   await page.addInitScript(() => {
     window.localStorage.setItem("fiebatt.editor.guide.seen", "1");
@@ -95,10 +99,70 @@ async function installApi(
         edl: null,
       });
     }
-    if (path.endsWith("/conversations")) return json(route, []);
+    if (path === "/api/conversations/conversation-history/messages") {
+      return json(route, history?.messages ?? []);
+    }
+    if (path.endsWith("/conversations")) return json(route, history?.conversations ?? []);
     return json(route, {});
   });
 }
+
+test("saved edit conversation is restored after reopening", async ({ page }) => {
+  const createdAt = "2026-07-22T21:36:59Z";
+  await installApi(page, [project], undefined, undefined, {
+    conversations: [{
+      id: "conversation-history",
+      project_id: project.project_id,
+      title: null,
+      created_at: createdAt,
+      updated_at: createdAt,
+      message_count: 2,
+    }],
+    messages: [
+      {
+        id: "history-user",
+        conversation_id: "conversation-history",
+        role: "user",
+        content: { text: "make this man jump once" },
+        created_at: createdAt,
+      },
+      {
+        id: "history-agent",
+        conversation_id: "conversation-history",
+        role: "agent",
+        content: {
+          tool_calls: [
+            { id: "plan-1", tool: "create_edit_plan", args: {}, status: "done" },
+            { id: "generate-1", tool: "generate_edit", args: {}, status: "done" },
+          ],
+          prompt_plan: {
+            job_id: "job-history",
+            user_prompt: "make this man jump once",
+            vendor: "wan",
+            plan: {
+              description: "The selected man jumps once.",
+              intent: "transform",
+              conditioning_strategy: "source_video",
+              tone: "original",
+              color_grading: "original",
+              region_emphasis: "selected man",
+              prompt: "Continue walking, jump once, land, and resume walking.",
+              prompt_for_veo: null,
+            },
+          },
+        },
+        created_at: createdAt,
+      },
+    ],
+  });
+
+  await page.goto(`/editor?projectId=${project.project_id}`);
+
+  await expect(page.getByText("make this man jump once", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("planning edit window", { exact: true })).toBeVisible();
+  await expect(page.getByText("starting video render", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Continue walking, jump once/)).toBeVisible();
+});
 
 test("project library shows only saved projects", async ({ page }) => {
   await installApi(page);

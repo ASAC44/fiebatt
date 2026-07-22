@@ -461,14 +461,11 @@ export function useAgentStream(projectId?: string | null) {
 
           if (latest.message_count > 0) {
             const msgs = await getConversationMessages(latest.id);
-            const hydrated = msgs
-              .map(dbMessageToAgentMessage)
-              .filter(Boolean) as AgentMessage[];
+            const hydrated = msgs.flatMap(dbMessageToAgentMessages);
             const persistable = hydrated.filter((m) => {
               if (m.type === "error") return false;
               if (m.type === "tool_call" && m.status === "error") return false;
               if (m.type === "suggestion") return false;
-              if (m.type === "prompt_plan") return false;
               return true;
             });
             dispatch({ type: "hydrate_messages", messages: persistable });
@@ -816,22 +813,58 @@ export function useAgentStream(projectId?: string | null) {
 
 // ─── DB message → AgentMessage converter ─────────────────────────────
 
-function dbMessageToAgentMessage(msg: ChatMessageResp): AgentMessage | null {
+function dbMessageToAgentMessages(msg: ChatMessageResp): AgentMessage[] {
   const content = msg.content as Record<string, unknown>;
   const ts = new Date(msg.created_at).getTime();
 
   switch (msg.role) {
     case "user":
-      return { type: "user", text: (content.text as string) ?? "", ts };
-    case "agent":
-      return {
-        type: "agent",
-        text: cleanAgentText((content.text as string) ?? ""),
-        ts,
-        streaming: false,
-      };
+      return [{ type: "user", text: (content.text as string) ?? "", ts }];
+    case "agent": {
+      const restored: AgentMessage[] = [];
+      const text = cleanAgentText((content.text as string) ?? "");
+      if (text) {
+        restored.push({ type: "agent", text, ts, streaming: false });
+      }
+      const toolCalls = Array.isArray(content.tool_calls) ? content.tool_calls : [];
+      for (const [index, value] of toolCalls.entries()) {
+        if (!value || typeof value !== "object") continue;
+        const call = value as Record<string, unknown>;
+        const rawStatus = call.status;
+        const status =
+          rawStatus === "error" || rawStatus === "running" || rawStatus === "pending"
+            ? rawStatus
+            : "done";
+        restored.push({
+          type: "tool_call",
+          id: String(call.id ?? `restored-tool-${index}`),
+          tool: String(call.tool ?? "edit_step"),
+          args: call.args,
+          status,
+          result: call.result,
+          ts: ts + index,
+        });
+      }
+      const savedPlan = content.prompt_plan;
+      if (savedPlan && typeof savedPlan === "object") {
+        const record = savedPlan as Record<string, unknown>;
+        const jobId = String(record.job_id ?? "");
+        const plan = record.plan;
+        if (jobId && plan && typeof plan === "object") {
+          restored.push({
+            type: "prompt_plan",
+            jobId,
+            userPrompt: String(record.user_prompt ?? ""),
+            plan: plan as PromptPlan,
+            vendor: typeof record.vendor === "string" ? record.vendor : null,
+            ts: ts + toolCalls.length + 1,
+          });
+        }
+      }
+      return restored;
+    }
     case "tool_call":
-      return {
+      return [{
         type: "tool_call",
         id: (content.id as string) ?? "",
         tool: (content.tool as string) ?? "",
@@ -839,21 +872,21 @@ function dbMessageToAgentMessage(msg: ChatMessageResp): AgentMessage | null {
         status: (content.status as "done" | "error") ?? "done",
         result: content.result,
         ts,
-      };
+      }];
     case "suggestion":
-      return {
+      return [{
         type: "suggestion",
         edit: content.edit as SuggestedEdit,
         ts,
-      };
+      }];
     case "error":
-      return {
+      return [{
         type: "error",
         message: (content.message as string) ?? "",
         ts,
-      };
+      }];
     default:
-      return null;
+      return [];
   }
 }
 

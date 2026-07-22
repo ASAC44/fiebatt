@@ -36,6 +36,7 @@ from app.models.session import Session as SessionModel
 from app.services.agent_tools import execute_tool
 from app.services.agent_failure import agent_failure_payload
 from app.services.conversation_store import get_or_create_conversation
+from app.services.edit_prompt import planned_edit_prompt
 from app.services.generation_failure import classify_generation_failure
 from app.services import job_events
 
@@ -1150,6 +1151,7 @@ async def _persist_agent_message(
     *,
     text_parts: list[str],
     tool_calls: list[dict[str, Any]],
+    prompt_plan: dict[str, Any] | None = None,
 ) -> None:
     content: dict[str, Any] = {}
     combined_text = "".join(text_parts)
@@ -1157,6 +1159,8 @@ async def _persist_agent_message(
         content["text"] = combined_text
     if tool_calls:
         content["tool_calls"] = tool_calls
+    if prompt_plan:
+        content["prompt_plan"] = prompt_plan
     if not content:
         return
     async with AsyncSessionLocal() as db:
@@ -1168,6 +1172,45 @@ async def _persist_agent_message(
             )
         )
         await db.commit()
+
+
+def _finish_tool_call(
+    tool_calls: list[dict[str, Any]],
+    tool_call_id: str,
+    *,
+    status: str,
+    result: dict[str, Any],
+) -> None:
+    for call in reversed(tool_calls):
+        if call.get("id") == tool_call_id:
+            call["status"] = status
+            call["result"] = result
+            return
+
+
+def _selected_edit_prompt_plan(
+    *,
+    plan_result: dict[str, Any],
+    job_id: str,
+    user_prompt: str,
+) -> dict[str, Any]:
+    intent = plan_result.get("intent") or {}
+    grounded = intent.get("grounded_edit") or {}
+    return {
+        "job_id": job_id,
+        "user_prompt": user_prompt,
+        "vendor": plan_result.get("provider"),
+        "plan": {
+            "description": grounded.get("description"),
+            "intent": grounded.get("intent"),
+            "conditioning_strategy": grounded.get("conditioning_strategy"),
+            "tone": grounded.get("tone"),
+            "color_grading": grounded.get("color_grading"),
+            "region_emphasis": grounded.get("region_emphasis"),
+            "prompt": planned_edit_prompt(user_prompt, grounded),
+            "prompt_for_veo": None,
+        },
+    }
 
 
 async def _stream_selected_edit(
@@ -1232,6 +1275,7 @@ async def _stream_selected_edit(
     except Exception as exc:
         log.exception("[agent.chat] req=%s selected edit planning failed", request_id)
         result = {"error": str(exc)}
+        _finish_tool_call(tool_calls, plan_call_id, status="error", result=result)
         yield sse_event(
             "tool_call_end",
             {
@@ -1266,6 +1310,7 @@ async def _stream_selected_edit(
             "status": "done",
         },
     )
+    _finish_tool_call(tool_calls, plan_call_id, status="done", result=plan_result)
 
     generate_call_id = f"generate-{uuid.uuid4().hex[:12]}"
     generate_args: dict[str, Any] = {
@@ -1295,6 +1340,7 @@ async def _stream_selected_edit(
     except Exception as exc:
         log.exception("[agent.chat] req=%s selected edit queueing failed", request_id)
         result = {"error": str(exc)}
+        _finish_tool_call(tool_calls, generate_call_id, status="error", result=result)
         yield sse_event(
             "tool_call_end",
             {
@@ -1329,6 +1375,12 @@ async def _stream_selected_edit(
             "status": "done",
         },
     )
+    _finish_tool_call(
+        tool_calls,
+        generate_call_id,
+        status="done",
+        result=generation_result,
+    )
     job_id = str(generation_result["job_id"])
     core = plan_result.get("edit_core") or {}
     yield sse_event(
@@ -1349,6 +1401,11 @@ async def _stream_selected_edit(
         conversation_id,
         text_parts=[],
         tool_calls=tool_calls,
+        prompt_plan=_selected_edit_prompt_plan(
+            plan_result=plan_result,
+            job_id=job_id,
+            user_prompt=body.message,
+        ),
     )
     yield sse_event("done", {})
 

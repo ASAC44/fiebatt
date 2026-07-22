@@ -219,8 +219,9 @@ def corrective_prompt(
     transition_contracts: list[str] = []
     if "entry" in lowered and pre_handle is not None:
         transition_contracts.append(
-            "Begin from the incoming pose and direction with brief preparation, never "
-            "the peak pose. Perform the action promptly; do not wait through the handle."
+            "Briefly match incoming source motion, then transition gradually into the "
+            "requested action. Never cut directly to its most changed or extreme pose. "
+            "The action must still occur after this brief bridge, without a long delay."
         )
     if "exit" in lowered and post_handle is not None:
         transition_contracts.append(

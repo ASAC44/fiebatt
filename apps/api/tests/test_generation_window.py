@@ -170,11 +170,12 @@ def test_motion_context_does_not_force_subject_back_to_old_path():
         effect_extent="motion_path",
     )
 
-    assert "Continue the incoming source motion briefly" in rendered
-    assert "never open on the peak pose" in rendered
+    assert "Briefly match the exact incoming source motion" in rendered
+    assert "transition gradually into the requested action" in rendered
+    assert "Do not begin with the action's most changed or extreme pose" in rendered
     assert "0.500 through 4.000" not in rendered
-    assert "brief lead-in must never delay or replace the action" in rendered
-    assert "Resume the outgoing source motion" in rendered
+    assert "entrance and exit bridges must never delay or replace" in rendered
+    assert "Transition gradually from the completed action" in rendered
     assert "do not snap the target back" in rendered
     assert "may move through the space required" in rendered
 

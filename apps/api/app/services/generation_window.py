@@ -119,7 +119,7 @@ def protected_context_prompt(
         )
     else:
         ending_contract = (
-            "Complete the action, land or recover, then rejoin the outgoing motion naturally."
+            "Complete the action, recover naturally, then rejoin the outgoing motion."
         )
 
     effect_contract = {
@@ -144,12 +144,13 @@ def protected_context_prompt(
         # safe entrance and exit from the generated clip.
         return (
             f"{prompt}\n\n"
-            "MOTION: Continue the incoming source motion briefly, then transition "
-            "naturally through preparation into the requested action; never open on "
-            "the peak pose. "
+            "MOTION: Briefly match the exact incoming source motion, then transition "
+            "gradually into the requested action. Do not begin with the action's most "
+            "changed or extreme pose. Perform the requested action clearly and naturally. "
             f"{ending_contract} {effect_contract} "
-            "Resume the outgoing source motion after recovery unless the request changes "
-            "the future path. The brief lead-in must never delay or replace the action. "
+            "Transition gradually from the completed action into outgoing source motion "
+            "unless the request changes the future path. These brief entrance and exit "
+            "bridges must never delay or replace the requested action. "
             "Preserve unrelated content. No cut, fade, freeze, teleport, or reset."
         )
 

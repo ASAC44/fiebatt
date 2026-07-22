@@ -124,8 +124,9 @@ def test_bad_assembled_entry_gets_specific_lead_in_correction():
         pre_handle=0.75,
         post_handle=0.75,
     )
-    assert "brief preparation, never the peak pose" in correction
-    assert "do not wait through the handle" in correction
+    assert "transition gradually into the requested action" in correction
+    assert "Never cut directly to its most changed or extreme pose" in correction
+    assert "without a long delay" in correction
     assert "0.750" not in correction
 
 

@@ -64,6 +64,10 @@ class MaskResult:
     candidate_count: int | None = None
 
 
+class UnusableMaskError(ValueError):
+    """SAM returned pixels, but they do not plausibly match the prompt box."""
+
+
 @dataclass(frozen=True, slots=True)
 class TrackResult:
     tracker: str
@@ -89,7 +93,118 @@ async def bbox_to_mask(
     Returns:
         Path to the generated mask image (PNG, white = foreground)
     """
-    return (await bbox_to_mask_result(frame_path, bbox)).path
+    return (await bbox_to_validated_mask_result(frame_path, bbox)).path
+
+
+def _clean_mask_for_bbox(
+    frame_path: str,
+    mask_path: str,
+    bbox: dict[str, float],
+    *,
+    confidence: float | None = None,
+) -> dict[str, float | int | bool]:
+    """Keep the prompted component and reject obviously unrelated SAM output.
+
+    SAM's predicted IoU score measures mask shape quality, not whether the mask
+    represents the object the user meant. A successful worker response can
+    therefore contain a tiny prop, background patch, or disconnected debris.
+    This conservative geometry gate never invents a semantic choice: it keeps
+    the component with the strongest support inside the user's box, or makes
+    the caller fall back to the honest rectangle/crop.
+    """
+    import cv2  # type: ignore[import-untyped]
+    import numpy as np  # type: ignore[import-untyped]
+
+    frame = cv2.imread(frame_path, cv2.IMREAD_COLOR)
+    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+    if frame is None:
+        raise UnusableMaskError("selection frame could not be read")
+    if mask is None:
+        raise UnusableMaskError("SAM mask could not be read")
+
+    height, width = frame.shape[:2]
+    if mask.shape != (height, width):
+        mask = cv2.resize(mask, (width, height), interpolation=cv2.INTER_NEAREST)
+    binary = (mask > 127).astype(np.uint8)
+
+    left = max(0, min(width - 1, round(float(bbox["x"]) * width)))
+    top = max(0, min(height - 1, round(float(bbox["y"]) * height)))
+    right = max(
+        left + 1,
+        min(width, round((float(bbox["x"]) + float(bbox["w"])) * width)),
+    )
+    bottom = max(
+        top + 1,
+        min(height, round((float(bbox["y"]) + float(bbox["h"])) * height)),
+    )
+    bbox_area = max(1, (right - left) * (bottom - top))
+
+    component_count, labels, stats, _ = cv2.connectedComponentsWithStats(
+        binary,
+        connectivity=8,
+    )
+    candidates: list[tuple[int, float, int, int]] = []
+    for label in range(1, component_count):
+        area = int(stats[label, cv2.CC_STAT_AREA])
+        if area <= 0:
+            continue
+        intersection = int(np.count_nonzero(labels[top:bottom, left:right] == label))
+        if intersection <= 0:
+            continue
+        inside_fraction = intersection / area
+        candidates.append((intersection, inside_fraction, area, label))
+
+    if not candidates:
+        raise UnusableMaskError("SAM mask does not overlap the selected box")
+    intersection, inside_fraction, area, selected_label = max(candidates)
+    bbox_coverage = intersection / bbox_area
+    area_ratio = area / bbox_area
+    if confidence is not None and confidence < 0.35:
+        raise UnusableMaskError(f"SAM confidence too low ({confidence:.3f})")
+    if bbox_coverage < 0.02:
+        raise UnusableMaskError(
+            f"SAM mask covers too little of selection ({bbox_coverage:.3f})"
+        )
+    if inside_fraction < 0.08:
+        raise UnusableMaskError(
+            f"SAM mask mostly escapes selection ({inside_fraction:.3f} inside)"
+        )
+    if area_ratio > 8.0:
+        raise UnusableMaskError(
+            f"SAM mask is implausibly larger than selection ({area_ratio:.2f}x)"
+        )
+
+    cleaned = np.where(labels == selected_label, 255, 0).astype(np.uint8)
+    if not cv2.imwrite(mask_path, cleaned):
+        raise UnusableMaskError("cleaned SAM mask could not be written")
+
+    center_x = min(width - 1, max(0, (left + right) // 2))
+    center_y = min(height - 1, max(0, (top + bottom) // 2))
+    metrics: dict[str, float | int | bool] = {
+        "components_returned": max(0, component_count - 1),
+        "components_removed": max(0, component_count - 2),
+        "bbox_coverage": round(bbox_coverage, 4),
+        "inside_fraction": round(inside_fraction, 4),
+        "mask_to_bbox_area": round(area_ratio, 4),
+        "contains_box_center": bool(labels[center_y, center_x] == selected_label),
+    }
+    log.info("SAM mask accepted after geometry gate: %s", metrics)
+    return metrics
+
+
+async def bbox_to_validated_mask_result(
+    frame_path: str,
+    bbox: dict[str, float],
+) -> MaskResult:
+    """Return a cleaned, plausible SAM mask or raise for caller fallback."""
+    result = await bbox_to_mask_result(frame_path, bbox)
+    _clean_mask_for_bbox(
+        frame_path,
+        result.path,
+        bbox,
+        confidence=result.score,
+    )
+    return result
 
 
 async def bbox_to_mask_result(

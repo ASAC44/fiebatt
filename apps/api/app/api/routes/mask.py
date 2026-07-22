@@ -53,7 +53,7 @@ async def mask(
     mask_path: Path
     mask_score: float | None
     try:
-        mask_result = await ai.sam.bbox_to_mask_result(
+        mask_result = await ai.sam.bbox_to_validated_mask_result(
             frame_path=str(frame_path),
             bbox=body.bbox.model_dump(),
         )
@@ -62,7 +62,9 @@ async def mask(
     except Exception as e:
         # Planning can safely use a bbox mask. Never deadlock editing because
         # an optional segmentation worker is unavailable.
-        if isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout, OSError, httpx.HTTPStatusError)):
+        if isinstance(e, ai.sam.UnusableMaskError):
+            log.warning("SAM mask rejected; using bbox selection: %s", e)
+        elif isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout, OSError, httpx.HTTPStatusError)):
             log.warning("SAM unavailable; using bbox selection: %s", e)
         else:
             log.exception("SAM failed; using bbox selection")

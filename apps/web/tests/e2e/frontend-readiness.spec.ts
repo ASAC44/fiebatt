@@ -313,9 +313,10 @@ test("agent receives active clip media time after a trim", async ({ page }) => {
   await page.getByRole("button", { name: "send message" }).click();
 
   await expect.poll(() => requestBody).not.toBeNull();
-  expect(requestBody?.playhead_ts).toBe(0);
-  expect(requestBody?.source_frame_ts).toBe(8);
-  expect(requestBody?.target_clip_id).toBe("trimmed-source");
+  const capturedBody = requestBody as Record<string, unknown> | null;
+  expect(capturedBody?.playhead_ts).toBe(0);
+  expect(capturedBody?.source_frame_ts).toBe(8);
+  expect(capturedBody?.target_clip_id).toBe("trimmed-source");
 });
 
 test("generation preview returns after leaving and reopening editor", async ({ page }) => {

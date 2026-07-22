@@ -223,31 +223,23 @@ def _build_video_edit_payload(
         })
 
     target_instruction = (
-        "The reference image identifies the exact target subject only; it is not "
-        "a requested pose, framing, or replacement appearance. Apply the requested "
-        "change only to that target in the source video. "
+        "The reference image identifies the target, not a requested pose. Edit only it. "
         if reference_frame_path
-        else "Apply the requested change only to the subject named in the request. "
-    )
-    preserve_instruction = (
-        "Edit the supplied source video directly. "
-        + target_instruction
-        + "Preserve the camera, framing, perspective, background, lighting, shadows, "
-        "every other person and object, and all unrelated motion exactly as in "
-        "the source. Keep the same video duration and continuous source-video look. "
-        "Do not regenerate the scene."
+        else "Edit only the named target. "
     )
     motion_instruction = (
-        "MOTION PRIORITY: The target's original motion is not protected. Change its "
-        "pose, position, velocity, trajectory, and timing wherever needed to perform "
-        "the requested action clearly. The requested action takes priority over "
-        "matching the target's original movement. Do not return an unchanged target. "
-        "Blend into and out of the new action naturally while unrelated scene motion "
-        "continues exactly from the source."
+        "Allow its pose, position, velocity, and timing to change. The required action "
+        "must be clear; unchanged target motion fails."
         if motion_edit
-        else "Change only the requested target attributes; preserve every unrequested attribute."
+        else "Change only the requested target attributes."
     )
-    provider_prompt = f"{preserve_instruction}\n\n{prompt}\n\n{motion_instruction}"
+    provider_prompt = (
+        f"REQUIRED EDIT — HIGHEST PRIORITY:\n{prompt}\n\n"
+        f"TARGET: {target_instruction}"
+        f"{motion_instruction}\n"
+        "PRESERVE: Duration, camera, framing, lighting, background, other subjects, "
+        "and unrelated motion. Do not regenerate the scene."
+    )
     return {
         "input": {
             "prompt": provider_prompt,

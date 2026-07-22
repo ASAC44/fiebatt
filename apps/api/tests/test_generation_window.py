@@ -95,12 +95,11 @@ def test_protected_context_prompt_names_edit_offsets_and_handles():
     )
     rendered = protected_context_prompt("Make the person jump.", window)
     assert "0.500 through 4.000" in rendered
-    assert "first 0.500 seconds" in rendered
-    assert "final 2.000 seconds" in rendered
-    assert "continuity reference handles" in rendered
-    assert "must not prevent or weaken the requested edit" in rendered
-    assert "Do not use a cut, fade, dissolve" in rendered
-    assert rendered.endswith("Make the person jump.")
+    assert "first 0.500s" in rendered
+    assert "final 2.000s" in rendered
+    assert "as continuity references, not restrictions" in rendered
+    assert "No cut, fade, freeze" in rendered
+    assert rendered.startswith("Make the person jump.")
 
 
 def test_full_clip_edit_is_not_suppressed_by_zero_length_handles():
@@ -149,7 +148,7 @@ def test_persistent_context_forbids_early_reversion():
         effect_extent="surface",
     )
 
-    assert "Do not revert it to the old state" in rendered
+    assert "do not revert early" in rendered
     assert "requested surface" in rendered
 
 
@@ -171,10 +170,11 @@ def test_motion_context_does_not_force_subject_back_to_old_path():
         effect_extent="motion_path",
     )
 
-    assert "continue only the incoming source motion" in rendered
-    assert "first edited motion must be preparation" in rendered
-
-    assert "Do not snap the subject back" in rendered
+    assert "Begin promptly with preparation" in rendered
+    assert "never open on the peak pose" in rendered
+    assert "0.500 through 4.000" not in rendered
+    assert "never delay or weaken the action" in rendered
+    assert "do not snap the target back" in rendered
     assert "may move through the space required" in rendered
 
 

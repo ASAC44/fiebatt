@@ -23,7 +23,7 @@ def test_explicit_range_has_priority_over_global_words():
     assert result.intent.scope == "explicit_range"
 
 
-def test_structured_intent_is_reused_without_reclassification():
+def test_structured_jump_repairs_motion_extent_without_changing_scope():
     intent = EditIntent(
         raw_prompt="make this person jump everywhere",
         scope="local",
@@ -32,8 +32,9 @@ def test_structured_intent_is_reused_without_reclassification():
     )
     result = plan_prompt_intent(intent.raw_prompt, structured_intent=intent)
 
-    assert result.intent is intent
-    assert result.reason == "reused structured intent"
+    assert result.intent.scope == "local"
+    assert result.intent.effect_extent == "motion_path"
+    assert result.reason == "motion extent safety fallback"
     assert result.estimate.analysis_mode == "lazy_local"
 
 
@@ -43,6 +44,7 @@ def test_structured_jump_duration_reserves_preparation_and_recovery():
         scope="local",
         change_type="motion",
         duration_policy="bounded_action",
+        effect_extent="motion_path",
         estimated_action_seconds=2.0,
     )
 
@@ -58,6 +60,7 @@ def test_repeated_jump_reserves_time_for_each_repetition():
         scope="local",
         change_type="motion",
         duration_policy="bounded_action",
+        effect_extent="motion_path",
         estimated_action_seconds=2.5,
     )
 

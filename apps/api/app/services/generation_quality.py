@@ -219,26 +219,22 @@ def corrective_prompt(
     transition_contracts: list[str] = []
     if "entry" in lowered and pre_handle is not None:
         transition_contracts.append(
-            f"For the first {pre_handle:.3f} seconds, reproduce the supplied "
-            "source motion continuously: same pose, position, velocity, camera, "
-            "and background. Do not begin the requested action during this lead-in. "
-            "After it, show preparation before the action's peak."
+            "Begin from the incoming pose and direction with brief preparation, never "
+            "the peak pose. Perform the action promptly; do not wait through the handle."
         )
     if "exit" in lowered and post_handle is not None:
         transition_contracts.append(
-            f"For the final {post_handle:.3f} seconds, recover continuously into "
-            "the supplied outgoing pose and velocity without a pause or reset."
+            "After the action, recover into outgoing pose and velocity without pausing "
+            "or resetting."
         )
     transition_text = " ".join(transition_contracts)
     return (
-        "\n\nQUALITY CORRECTION REQUIRED. The previous result failed these exact checks:\n"
+        "\n\nRETRY CORRECTION — fix these measured failures:\n"
         f"{details}\n"
         f"{transition_text}\n"
-        "Satisfy the non-negotiable user requirement exactly, including every named color, "
-        "shape, anatomical feature, count, and selected boundary. Correct only the requested "
-        "target. Preserve protected handles, background, camera motion, lighting, and all "
-        "unselected pixels. Do not freeze, fade, cut, bleed outside the target, or regenerate "
-        "the scene."
+        "Keep the required target, action, count, and attributes exact. Fix only the "
+        "named failure; preserve unrelated content. Do not return an unchanged target, "
+        "cut, fade, freeze, or spill outside the edit."
     )
 
 

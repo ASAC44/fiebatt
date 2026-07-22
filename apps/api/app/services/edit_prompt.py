@@ -14,9 +14,4 @@ def planned_edit_prompt(user_prompt: str, plan: dict[str, Any]) -> str:
     requirement = user_prompt.strip()
     if not planned or planned.casefold() == requirement.casefold():
         return requirement
-    return (
-        "NON-NEGOTIABLE USER REQUIREMENT:\n"
-        f"{requirement}\n\n"
-        "GROUNDED VIDEO-EDIT INSTRUCTION:\n"
-        f"{planned}"
-    )
+    return f"Required result: {requirement}\nDetails: {planned}"

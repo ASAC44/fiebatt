@@ -8,6 +8,8 @@ from app.ai.services.wan import (
     _build_image_to_video_payload,
     _build_video_edit_payload,
 )
+from app.services.edit_prompt import planned_edit_prompt
+from app.services.generation_window import GenerationWindow, protected_context_prompt
 
 
 def _write_frame(path: Path, color: tuple[int, int, int]) -> None:
@@ -67,10 +69,10 @@ def test_motion_video_edit_allows_target_motion_but_protects_scene():
     )
 
     prompt = payload["input"]["prompt"]
-    assert "target's original motion is not protected" in prompt
-    assert "Change its pose, position, velocity, trajectory, and timing" in prompt
-    assert "unrelated scene motion continues exactly from the source" in prompt
-    assert "original timing" not in prompt
+    assert prompt.startswith("REQUIRED EDIT — HIGHEST PRIORITY")
+    assert "pose, position, velocity, and timing to change" in prompt
+    assert "unchanged target motion fails" in prompt
+    assert prompt.index("Make the selected car bounce once") < prompt.index("PRESERVE:")
     assert payload["parameters"]["prompt_extend"] is False
 
 
@@ -82,3 +84,36 @@ def test_appearance_video_edit_keeps_provider_prompt_extension():
 
     assert "Change only the requested target attributes" in payload["input"]["prompt"]
     assert payload["parameters"]["prompt_extend"] is True
+
+
+def test_complete_motion_prompt_stays_focused_and_action_first(tmp_path: Path):
+    reference = tmp_path / "person.png"
+    _write_frame(reference, (10, 20, 30))
+    instruction = planned_edit_prompt(
+        "Make this man jump once",
+        {
+            "prompt_for_video_edit": (
+                "Make the selected man perform exactly one natural jump: bend his "
+                "knees, take off, become airborne, land, and continue walking."
+            )
+        },
+    )
+    timed = protected_context_prompt(
+        instruction,
+        GenerationWindow(0.75, 4.25, 0.0, 5.0, True),
+        temporal_behavior="temporary",
+        effect_extent="motion_path",
+    )
+    prompt = _build_video_edit_payload(
+        timed,
+        "https://cdn.example.test/source.mp4",
+        reference_frame_path=str(reference),
+        motion_edit=True,
+    )["input"]["prompt"]
+
+    assert len(prompt.split()) <= 180
+    assert prompt.index("Make this man jump once") < prompt.index("MOTION:")
+    assert prompt.index("MOTION:") < prompt.index("PRESERVE:")
+    assert "0.750 through 4.250" not in prompt
+    assert "never delay or weaken the action" in prompt
+    assert "do not begin the requested action" not in prompt.lower()

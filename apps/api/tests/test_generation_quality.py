@@ -124,8 +124,9 @@ def test_bad_assembled_entry_gets_specific_lead_in_correction():
         pre_handle=0.75,
         post_handle=0.75,
     )
-    assert "first 0.750 seconds" in correction
-    assert "Do not begin the requested action during this lead-in" in correction
+    assert "brief preparation, never the peak pose" in correction
+    assert "do not wait through the handle" in correction
+    assert "0.750" not in correction
 
 
 def test_bad_transition_hard_fails_after_single_retry():
@@ -303,5 +304,5 @@ def test_retry_replaces_previous_result_only_when_quality_improves():
 
     correction = corrective_prompt(semantic_quality_evidence(car_failure))
     assert "prompt adherence 1/10" in correction
-    assert "named color" in correction
-    assert "bleed outside the target" in correction
+    assert "attributes exact" in correction
+    assert "spill outside the edit" in correction

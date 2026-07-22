@@ -106,73 +106,58 @@ def protected_context_prompt(
     temporal_behavior: str = "temporary",
     effect_extent: str = "subject",
 ) -> str:
-    """Describe editable time and continuity handles without suppressing the edit."""
+    """Add concise timing guidance without burying the requested edit."""
     if not window.adaptive or (window.pre_handle < 0.05 and window.post_handle < 0.05):
         return prompt
     if temporal_behavior == "persistent_state":
         ending_contract = (
-            "Keep the requested state continuous through every frame where the "
-            "selected target remains visible. Do not revert it to the old state "
-            "before the target leaves the occurrence."
+            "Keep the new state while the target is visible; do not revert early."
         )
     elif temporal_behavior == "future_changing_motion":
         ending_contract = (
-            "Continue the new motion naturally. Do not snap the subject back to "
-            "its old pose, position, or trajectory merely to match the source. "
-            "Use the outgoing handle to preserve camera and surrounding motion."
+            "Continue the new path naturally; do not snap the target back to its old path."
         )
     else:
         ending_contract = (
-            "After completing the temporary action, recover pose and velocity "
-            "naturally toward the outgoing source motion."
+            "Complete the action, land or recover, then rejoin the outgoing motion naturally."
         )
 
     effect_contract = {
         "surface": (
-            "Keep the visible change on the requested surface and preserve nearby "
-            "parts of the subject."
+            "Confine the change to the requested surface."
         ),
         "motion_path": (
-            "The selected subject may move through the space required by the "
-            "action; preserve unrelated subjects and the scene around that path."
+            "The target may move through the space required by the action."
         ),
         "new_object_path": (
-            "Allow the requested new object to emerge from the selected anchor "
-            "and move through the necessary nearby space; preserve unrelated scene content."
+            "Let the new object emerge from the selected anchor and use the needed nearby space."
         ),
-        "scene": "Change the scene only as explicitly requested.",
+        "scene": "Change only the requested scene properties.",
     }.get(
         effect_extent,
-        "Allow the selected subject's required silhouette change while preserving unrelated content.",
+        "Allow the target's required silhouette change.",
     )
 
-    if effect_extent == "motion_path" and window.pre_handle >= 0.05:
-        entrance_contract = (
-            f"For the first {window.pre_handle:.3f} seconds, continue only the "
-            "incoming source motion and keep the subject in its incoming action "
-            "state. Do not begin the requested action inside that handle. At the "
-            "editable boundary, show its natural preparation and onset before its "
-            "peak. The first edited motion must be preparation, not the peak pose."
-        )
-    else:
-        entrance_contract = (
-            "Do not begin the requested change inside the incoming handle; begin "
-            "it continuously after that handle."
+    if effect_extent == "motion_path":
+        # Wan often turns a delayed-action instruction into a no-op. Let it perform
+        # the action promptly, then use deterministic seam matching to choose the
+        # safe entrance and exit from the generated clip.
+        return (
+            f"{prompt}\n\n"
+            "MOTION: Begin promptly with preparation from the incoming pose and direction; "
+            "never open on the peak pose. "
+            f"{ending_contract} {effect_contract} "
+            "Use clip ends only for continuity; never delay or weaken the action. "
+            "Preserve unrelated content. No cut, fade, freeze, teleport, or reset."
         )
 
     return (
-        "SOURCE-CONTINUITY EDIT: The requested change must be clearly completed "
-        "inside seconds "
+        f"{prompt}\n\n"
+        "TIMING: Perform the edit clearly from "
         f"{window.edit_start_offset:.3f} through {window.edit_end_offset:.3f} "
-        f"relative to the supplied clip. Use the first {window.pre_handle:.3f} "
-        f"seconds and final {window.post_handle:.3f} seconds as continuity reference "
-        "handles. Preserve their subjects, colours, lighting, camera, background, "
-        "and direction of motion as closely as possible. Start from the incoming "
-        "pose and velocity, then perform the requested change clearly and completely. "
-        f"{entrance_contract} "
+        f"seconds. Use the first {window.pre_handle:.3f}s and final "
+        f"{window.post_handle:.3f}s as continuity references, not restrictions. "
+        "Match the incoming handle for a continuous start. "
         f"{ending_contract} {effect_contract} "
-        "The handles guide a continuous entrance and exit; they must not prevent or "
-        "weaken the requested edit. Do not use a "
-        "cut, fade, dissolve, freeze, or sudden appearance or disappearance.\n\n"
-        + prompt
+        "Preserve unrelated content. No cut, fade, freeze, teleport, or sudden reset."
     )

@@ -187,6 +187,18 @@ def _repair_bounded_motion_duration(prompt: str, intent: EditIntent) -> EditInte
     return intent.model_copy(update={"estimated_action_seconds": safe_duration})
 
 
+def _repair_motion_extent(prompt: str, intent: EditIntent) -> EditIntent:
+    """Keep a recognized physical action on the motion-aware execution path."""
+    if (
+        intent.scope == "local"
+        and intent.change_type == "motion"
+        and _MOTION_RE.search(prompt)
+        and intent.effect_extent != "motion_path"
+    ):
+        return intent.model_copy(update={"effect_extent": "motion_path"})
+    return intent
+
+
 def plan_prompt_intent(
     prompt: str,
     *,
@@ -198,13 +210,16 @@ def plan_prompt_intent(
     """Cheap scope gate; a supplied structured interpretation is never recomputed."""
     if structured_intent is not None:
         created_repaired = _repair_created_event_intent(prompt, structured_intent)
-        intent = _repair_bounded_motion_duration(prompt, created_repaired)
+        extent_repaired = _repair_motion_extent(prompt, created_repaired)
+        intent = _repair_bounded_motion_duration(prompt, extent_repaired)
         if created_repaired is not structured_intent:
             reason = "bounded created-event safety fallback"
+        elif extent_repaired is not created_repaired:
+            reason = "motion extent safety fallback"
         else:
             reason = (
                 "bounded motion duration safety fallback"
-                if intent is not created_repaired
+                if intent is not extent_repaired
                 else "reused structured intent"
             )
     else:

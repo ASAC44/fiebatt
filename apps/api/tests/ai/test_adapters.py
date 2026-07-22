@@ -315,9 +315,10 @@ def test_wan_video_edit_payload_targets_isolated_reference_and_source(tmp_path):
     )
     assert normalized is not None
     assert min(normalized.shape[:2]) >= 240
-    assert "identifies the exact target subject only" in payload["input"]["prompt"].lower()
-    assert "target's original motion is not protected" in payload["input"]["prompt"].lower()
-    assert "every other person and object" in payload["input"]["prompt"].lower()
+    assert "reference image identifies the target" in payload["input"]["prompt"].lower()
+    assert "pose, position, velocity, and timing to change" in payload["input"]["prompt"].lower()
+    assert "unchanged target motion fails" in payload["input"]["prompt"].lower()
+    assert "other subjects" in payload["input"]["prompt"].lower()
     assert "ghosting" in payload["input"]["negative_prompt"]
     assert payload["parameters"]["resolution"] == "720P"
 

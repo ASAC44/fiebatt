@@ -68,7 +68,7 @@ def test_wan_prefers_current_video_edit_model_for_local_edits():
     assert _provider_model("wan", "tracked_mask") == "wan2.1-vace-plus"
 
 
-def test_wan_routes_bounded_motion_through_first_and_last_frames():
+def test_wan_routes_bounded_motion_through_source_video_editor():
     mode = select_source_edit_mode(
         "wan",
         duration=6.0,
@@ -78,11 +78,11 @@ def test_wan_routes_bounded_motion_through_first_and_last_frames():
         temporal_behavior="temporary",
     )
 
-    assert mode == "first_last_frames"
-    assert _provider_model("wan", mode) == "wan2.7-i2v-2026-04-25"
+    assert mode == "source_video"
+    assert _provider_model("wan", mode) == "wan2.7-videoedit"
 
 
-def test_wan_routes_continuing_motion_through_first_frame_only():
+def test_wan_routes_continuing_motion_through_source_video_editor():
     mode = select_source_edit_mode(
         "wan",
         duration=6.0,
@@ -92,8 +92,8 @@ def test_wan_routes_continuing_motion_through_first_frame_only():
         temporal_behavior="future_changing_motion",
     )
 
-    assert mode == "first_frame"
-    assert _provider_model("wan", mode) == "wan2.7-i2v-2026-04-25"
+    assert mode == "source_video"
+    assert _provider_model("wan", mode) == "wan2.7-videoedit"
 
 
 def test_source_edit_mode_falls_back_by_provider_capability():

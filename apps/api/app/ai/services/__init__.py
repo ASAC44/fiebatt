@@ -321,6 +321,7 @@ else:
                     prompt=prompt_text,
                     source_video_url=effective_source_video_url,
                     reference_frame_path=routed.subject_reference_path,
+                    motion_edit=motion_edit,
                     on_tick=on_tick,
                     resolution=resolution,
                 )

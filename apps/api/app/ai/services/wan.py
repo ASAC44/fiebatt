@@ -212,6 +212,7 @@ def _build_video_edit_payload(
     source_video_url: str,
     reference_frame_path: str | None = None,
     resolution: str = "720P",
+    motion_edit: bool = False,
 ) -> dict:
     """Build a Wan video-edit request without performing network I/O."""
     media = [{"type": "video", "url": source_video_url}]
@@ -222,29 +223,42 @@ def _build_video_edit_payload(
         })
 
     target_instruction = (
-        "The reference image contains the exact isolated target subject. Apply the "
-        "requested change only to that subject. "
+        "The reference image identifies the exact target subject only; it is not "
+        "a requested pose, framing, or replacement appearance. Apply the requested "
+        "change only to that target in the source video. "
         if reference_frame_path
         else "Apply the requested change only to the subject named in the request. "
     )
-    preserve_prompt = (
+    preserve_instruction = (
         "Edit the supplied source video directly. "
         + target_instruction
-        + "Preserve every other person and object, the exact background, camera "
-        "framing, perspective, lighting, shadows, clothing, and original timing. "
-        "Keep the result natural and temporally continuous with the source video. "
-        "Do not regenerate the scene.\n\n"
-        + prompt
+        + "Preserve the camera, framing, perspective, background, lighting, shadows, "
+        "every other person and object, and all unrelated motion exactly as in "
+        "the source. Keep the same video duration and continuous source-video look. "
+        "Do not regenerate the scene."
     )
+    motion_instruction = (
+        "MOTION PRIORITY: The target's original motion is not protected. Change its "
+        "pose, position, velocity, trajectory, and timing wherever needed to perform "
+        "the requested action clearly. The requested action takes priority over "
+        "matching the target's original movement. Do not return an unchanged target. "
+        "Blend into and out of the new action naturally while unrelated scene motion "
+        "continues exactly from the source."
+        if motion_edit
+        else "Change only the requested target attributes; preserve every unrequested attribute."
+    )
+    provider_prompt = f"{preserve_instruction}\n\n{prompt}\n\n{motion_instruction}"
     return {
         "input": {
-            "prompt": preserve_prompt,
+            "prompt": provider_prompt,
             "negative_prompt": VIDEO_EDIT_NEGATIVE_PROMPT,
             "media": media,
         },
         "parameters": {
             "resolution": _resolve_resolution(resolution),
-            "prompt_extend": True,
+            # Qwen already supplied a grounded action plan. A second provider
+            # rewrite can dilute its mandatory motion and reintroduce a no-op.
+            "prompt_extend": not motion_edit,
             "watermark": False,
         },
     }
@@ -385,6 +399,7 @@ async def generate_edit_variant(
     source_video_url: str,
     reference_frame_path: str | None = None,
     resolution: str = "720P",
+    motion_edit: bool = False,
     on_tick: TickCallback | None = None,
 ) -> str:
     """Edit an existing public video while retaining its temporal context."""
@@ -400,6 +415,7 @@ async def generate_edit_variant(
         source_video_url=source_video_url,
         reference_frame_path=reference_frame_path,
         resolution=resolution,
+        motion_edit=motion_edit,
     )
 
     async with httpx.AsyncClient(timeout=30.0) as client:

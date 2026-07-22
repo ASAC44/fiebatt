@@ -264,6 +264,7 @@ def test_wan_video_edit_payload_targets_isolated_reference_and_source(tmp_path):
         "https://cdn.example.test/source.mp4",
         reference_frame_path=str(frame),
         resolution="720P",
+        motion_edit=True,
     )
 
     assert payload["input"]["media"][0] == {
@@ -278,7 +279,8 @@ def test_wan_video_edit_payload_targets_isolated_reference_and_source(tmp_path):
     )
     assert normalized is not None
     assert min(normalized.shape[:2]) >= 240
-    assert "exact isolated target subject" in payload["input"]["prompt"].lower()
+    assert "identifies the exact target subject only" in payload["input"]["prompt"].lower()
+    assert "target's original motion is not protected" in payload["input"]["prompt"].lower()
     assert "every other person and object" in payload["input"]["prompt"].lower()
     assert "ghosting" in payload["input"]["negative_prompt"]
     assert payload["parameters"]["resolution"] == "720P"

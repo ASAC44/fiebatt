@@ -6,6 +6,7 @@ import numpy as np
 from app.ai.services.wan import (
     DEFAULT_I2V_MODEL,
     _build_image_to_video_payload,
+    _build_video_edit_payload,
 )
 
 
@@ -56,3 +57,28 @@ def test_i2v_payload_can_leave_future_motion_open(tmp_path: Path):
     )
 
     assert [item["type"] for item in payload["input"]["media"]] == ["first_frame"]
+
+
+def test_motion_video_edit_allows_target_motion_but_protects_scene():
+    payload = _build_video_edit_payload(
+        "Make the selected car bounce once.",
+        "https://cdn.example.test/source.mp4",
+        motion_edit=True,
+    )
+
+    prompt = payload["input"]["prompt"]
+    assert "target's original motion is not protected" in prompt
+    assert "Change its pose, position, velocity, trajectory, and timing" in prompt
+    assert "unrelated scene motion continues exactly from the source" in prompt
+    assert "original timing" not in prompt
+    assert payload["parameters"]["prompt_extend"] is False
+
+
+def test_appearance_video_edit_keeps_provider_prompt_extension():
+    payload = _build_video_edit_payload(
+        "Make the selected car green.",
+        "https://cdn.example.test/source.mp4",
+    )
+
+    assert "Change only the requested target attributes" in payload["input"]["prompt"]
+    assert payload["parameters"]["prompt_extend"] is True

@@ -120,14 +120,17 @@ def test_complete_motion_prompt_stays_focused_and_action_first(tmp_path: Path):
         motion_edit=True,
     )["input"]["prompt"]
 
-    assert len(prompt.split()) <= 165
+    assert len(prompt.split()) <= 195
     assert prompt.index("HIGHEST PRIORITY") < prompt.index("REQUIRED ACTION SEQUENCE:")
     assert prompt.index("REQUIRED ACTION SEQUENCE:") < prompt.index("VISIBLE PROOF")
     assert prompt.index("VISIBLE PROOF") < prompt.index("Make this man jump once")
     assert prompt.index("Make this man jump once") < prompt.index("CONTINUITY:")
     assert prompt.index("CONTINUITY:") < prompt.index("TARGET:")
     assert "0.750 through 4.250" not in prompt
-    assert "Match incoming motion briefly" in prompt
-    assert "transition gradually into outgoing motion" in prompt
+    assert "For the opening 0.750s" in prompt
+    assert "without beginning phase 1" in prompt
+    assert "recover by 4.250s" in prompt
+    assert "final 0.750s" in prompt
+    assert "do not cut directly to a changed pose" in prompt
     assert "both feet visibly leave the ground" in prompt
     assert "do not begin the requested action" not in prompt.lower()

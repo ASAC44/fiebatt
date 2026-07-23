@@ -163,14 +163,18 @@ def protected_context_prompt(
         )
         if temporal_behavior == "future_changing_motion":
             motion_flow = (
-                "Match incoming motion briefly, transition gradually into the requested "
-                "new motion, then continue its new path."
+                f"For the opening {window.pre_handle:.3f}s, continue the source pose and "
+                "motion without beginning the requested change. After that protected "
+                "handle, transition gradually into the requested new motion, then "
+                "continue its new path."
             )
         else:
             motion_flow = (
-                "Match incoming motion briefly, transition gradually into the requested "
-                "action, perform it clearly, then recover and transition gradually into "
-                "outgoing motion."
+                f"For the opening {window.pre_handle:.3f}s, continue the source pose and "
+                "motion without beginning phase 1. After that protected handle, transition "
+                "gradually into phase 1; do not cut directly to a changed pose. Perform the "
+                f"action clearly and recover by {window.edit_end_offset:.3f}s, then use the "
+                f"final {window.post_handle:.3f}s to rejoin the outgoing source motion."
             )
         return (
             f"{action_sequence}{action_proof}\n"

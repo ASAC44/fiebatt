@@ -170,9 +170,10 @@ def test_motion_context_does_not_force_subject_back_to_old_path():
         effect_extent="motion_path",
     )
 
-    assert "Match incoming motion briefly" in rendered
+    assert "For the opening 0.500s" in rendered
+    assert "without beginning the requested change" in rendered
+    assert "After that protected handle" in rendered
     assert "transition gradually into the requested new motion" in rendered
-    assert "0.500 through 4.000" not in rendered
     assert "continue its new path" in rendered
     assert "outgoing source motion" not in rendered
 
@@ -207,6 +208,10 @@ def test_bounded_motion_includes_observable_success_before_continuity():
     assert "3) land on both feet" in rendered
     assert rendered.index("VISIBLE PROOF — MUST APPEAR:") < rendered.index("CONTINUITY:")
     assert "visibly different airborne position" in rendered
+    assert "For the opening 0.500s" in rendered
+    assert "without beginning phase 1" in rendered
+    assert "recover by 4.000s" in rendered
+    assert "final 2.000s" in rendered
 
 
 def test_new_object_context_allows_emergence_beyond_selection():

@@ -104,6 +104,11 @@ def test_complete_motion_prompt_stays_focused_and_action_first(tmp_path: Path):
         temporal_behavior="temporary",
         effect_extent="motion_path",
         observable_success="both feet visibly leave the ground",
+        action_phases=[
+            "bend both knees",
+            "launch upward until both feet are airborne",
+            "land and recover",
+        ],
     )
     from app.ai.services import _rewrite_motion_prompt
 
@@ -115,10 +120,11 @@ def test_complete_motion_prompt_stays_focused_and_action_first(tmp_path: Path):
         motion_edit=True,
     )["input"]["prompt"]
 
-    assert len(prompt.split()) <= 145
-    assert prompt.index("HIGHEST PRIORITY") < prompt.index("Make this man jump once")
-    assert prompt.index("Make this man jump once") < prompt.index("ACTION PROOF:")
-    assert prompt.index("ACTION PROOF:") < prompt.index("CONTINUITY:")
+    assert len(prompt.split()) <= 165
+    assert prompt.index("HIGHEST PRIORITY") < prompt.index("REQUIRED ACTION SEQUENCE:")
+    assert prompt.index("REQUIRED ACTION SEQUENCE:") < prompt.index("VISIBLE PROOF")
+    assert prompt.index("VISIBLE PROOF") < prompt.index("Make this man jump once")
+    assert prompt.index("Make this man jump once") < prompt.index("CONTINUITY:")
     assert prompt.index("CONTINUITY:") < prompt.index("TARGET:")
     assert "0.750 through 4.250" not in prompt
     assert "Match incoming motion briefly" in prompt

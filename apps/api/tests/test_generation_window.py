@@ -194,9 +194,18 @@ def test_bounded_motion_includes_observable_success_before_continuity():
         temporal_behavior="temporary",
         effect_extent="motion_path",
         observable_success="the target reaches a visibly different airborne position",
+        action_phases=[
+            "bend both knees to prepare",
+            "launch upward with both feet clear of the ground",
+            "land on both feet",
+        ],
     )
 
-    assert rendered.index("ACTION PROOF:") < rendered.index("CONTINUITY:")
+    assert rendered.index("REQUIRED ACTION SEQUENCE:") < rendered.index("REQUEST:")
+    assert "1) bend both knees to prepare" in rendered
+    assert "2) launch upward with both feet clear of the ground" in rendered
+    assert "3) land on both feet" in rendered
+    assert rendered.index("VISIBLE PROOF — MUST APPEAR:") < rendered.index("CONTINUITY:")
     assert "visibly different airborne position" in rendered
 
 

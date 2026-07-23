@@ -1067,6 +1067,11 @@ async def _run(job_id: str) -> None:
                     if planned_intent is not None
                     else None
                 ),
+                action_phases=(
+                    planned_intent.action_phases
+                    if planned_intent is not None
+                    else None
+                ),
             )
             if provider in {"wan", "happyhorse"} and source_video_url is not None
             else generation_prompt
